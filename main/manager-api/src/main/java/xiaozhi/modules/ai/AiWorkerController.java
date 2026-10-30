@@ -15,6 +15,7 @@ import xiaozhi.modules.conversation.ConversationService;
 public class AiWorkerController {
     private final AiExecutionService service;
     private final ConversationService requests;
+    private final com.fasterxml.jackson.databind.ObjectMapper json;
     @PostMapping("/claim") public Result<Task> claim(@RequestBody JsonNode body) {
         return new Result<Task>().ok(service.claim(requests.request(body,Claim.class)));
     }
@@ -34,8 +35,21 @@ public class AiWorkerController {
     @PostMapping("/runs/{id}/heartbeat") public Result<?> heartbeat(@PathVariable String id,@RequestBody JsonNode body) {
         return new Result<>().ok(service.heartbeat(id,requests.request(body,Lease.class)));
     }
-    @PostMapping("/runs/{id}/delta") public Result<?> delta(@PathVariable String id,@RequestBody JsonNode body) {
-        return new Result<>().ok(service.delta(id,requests.request(body,Delta.class)));
+    @PostMapping(value="/runs/{id}/delta", consumes="application/json") public Result<?> delta(@PathVariable String id,jakarta.servlet.http.HttpServletRequest request) throws java.io.IOException {
+        final int maximum=1<<20;
+        if(request.getContentLengthLong()>maximum)throw new xiaozhi.modules.conversation.ConversationProblem(413,"AI_BODY_LIMIT");
+        byte[] raw=request.getInputStream().readNBytes(maximum+1);
+        if(raw.length>maximum)throw new xiaozhi.modules.conversation.ConversationProblem(413,"AI_BODY_LIMIT");
+        try {
+            JsonNode body=json.readTree(raw);
+            if (body != null && body.isObject() &&
+                    ((body.hasNonNull("lease_token") && !body.get("lease_token").isTextual()) ||
+                     (body.hasNonNull("sequence") && !body.get("sequence").isIntegralNumber()) ||
+                     (body.hasNonNull("text") && !body.get("text").isTextual())))
+                throw new xiaozhi.modules.conversation.ConversationProblem(400,"INVALID_REQUEST");
+            return new Result<>().ok(service.delta(id,requests.request(body,Delta.class)));
+        }
+        catch(com.fasterxml.jackson.core.JsonProcessingException ex) { throw new xiaozhi.modules.conversation.ConversationProblem(400,"INVALID_REQUEST"); }
     }
     @PostMapping("/runs/{id}/complete") public Result<Run> complete(@PathVariable String id,@RequestBody JsonNode body) {
         return new Result<Run>().ok(service.complete(id,requests.request(body,Complete.class)));

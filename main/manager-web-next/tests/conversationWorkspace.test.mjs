@@ -303,4 +303,11 @@ describe('B4 annotation reply integration', () => {
     vm.selected={id:'c',state:'AI_ACTIVE'};vm.stageAnnotation({scopeKey:'previous-conversation',row:generated});expect(vm.attachmentRows).toEqual([]);
     vm.selected={id:'c',state:'RESOLVED'};vm.stageAnnotation({scopeKey:vm.attachmentScope,row:generated});expect(vm.attachmentRows).toEqual([]);
   });
+  it('treats sending as a temporary annotation pause while a successful send keeps write permission', async () => {
+    vm.selected={id:'one',state:'AI_ACTIVE'};vm.draft='附上标注';vm.attachmentRows=[{clientUploadId:'render',kind:'image',status:'ready',attachment:{id:'13',status:'ready'}}];await vm.$nextTick();const editor=wrapper.findComponent({name:'AnnotationEditor'});
+    let finish;api.send.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));const sending=vm.sendMessage();await vm.$nextTick();expect(editor.props('writable')).toBe(true);expect(editor.props('disabled')).toBe(true);expect(editor.vm.error).toBe('');
+    finish({id:'saved',parts:[{type:'text',text:'附上标注'},{type:'image',attachment_id:'13'}]});await sending;await vm.$nextTick();expect(vm.draft).toBe('');expect(vm.attachmentRows).toEqual([]);expect(editor.props('writable')).toBe(true);expect(editor.props('disabled')).toBe(false);expect(editor.vm.error).toBe('');
+    vm.selected.state='RESOLVED';await vm.$nextTick();expect(editor.props('writable')).toBe(false);expect(editor.vm.error).toBe('annotations.denied');
+  });
+
 });

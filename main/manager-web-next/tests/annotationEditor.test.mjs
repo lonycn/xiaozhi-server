@@ -102,4 +102,26 @@ describe('annotation editor snapshots and private canvas', () => {
     vm.textKeydown({key:'Enter',isComposing:false,preventDefault});expect(vm.scene.elements[0]).toMatchObject({type:'text',text:'检查冷库'});expect(vm.scene.elements[0].stroke_width).toBeUndefined();
     vm.textPosition={x:.1,y:.1};vm.textDraft='🙂'.repeat(1001);vm.commitText();expect(vm.textDraft).toBe('🙂'.repeat(1001));expect(vm.error).toBe('annotations.invalidScene');
   });
+  it('opens an authorized B5 live frame directly without recapturing it as a static attachment', async () => {
+    const vm=desk();await vm.openFrame('10');expect(api.frame).toHaveBeenCalledWith('10',expect.any(AbortSignal));expect(api.createFrame).not.toHaveBeenCalled();expect(vm.scene).toEqual(scene);expect(vm.source).toBeNull();
+  });
+  it('rejects a live frame from a different conversation before downloading private pixels', async () => {
+    api.frame.mockResolvedValue({...frame,conversation_id:'another'});const vm=desk();await vm.openFrame('10');expect(vm.scene).toBeNull();expect(images.blob).not.toHaveBeenCalled();expect(vm.error).toBe('annotations.failed');
+  });
+  it.each([[1000,500,2400,1060],[500,1000,2400,1060],[1000,500,390,844],[500,1000,390,844]])('keeps a %i x %i frame within the 55dvh canvas bound at a %i x %i viewport', async (width,height,viewportWidth,viewportHeight) => {
+    const vm=desk();vm.scene={...scene,width,height};vm.background={};vm.visible=true;await vm.$nextTick();const wrap=wrapper.find('.annotation-canvas-wrap');expect(wrap.exists()).toBe(true);expect(vm.canvasLayout.width).toBe(`min(100%, ${55*width/height}dvh)`);expect(wrapper.find('canvas').attributes('style')).toContain(`aspect-ratio: ${width} / ${height}`);
+    // CSS min() uses the dialog's available width and the dynamic viewport height.
+    const availableWidth=Math.min(1080,viewportWidth-(viewportWidth<=600?8:24))-(viewportWidth<=600?24:36),renderWidth=Math.min(availableWidth,.55*viewportHeight*width/height),renderHeight=renderWidth*height/width;
+    expect(renderWidth).toBeLessThanOrEqual(availableWidth);expect(renderHeight).toBeLessThanOrEqual(.55*viewportHeight+.001);expect(renderWidth/renderHeight).toBeCloseTo(width/height);
+  });
+
+  it('pauses temporary send work without reporting permission loss and fences late editor responses', async () => {
+    const response=deferred();api.createFrame.mockReturnValueOnce(response.promise);const vm=desk(),opening=vm.openSource({attachmentId:'9'});await flushPromises();const signal=api.createFrame.mock.calls[0][1];
+    await wrapper.setProps({disabled:true});expect(vm.writable).toBe(true);expect(signal.aborted).toBe(true);expect(vm.visible).toBe(false);expect(vm.error).toBe('');
+    response.resolve(frame);await opening;expect(vm.scene).toBeNull();expect(images.blob).not.toHaveBeenCalled();
+    await vm.openSource({attachmentId:'9'});await vm.openSnapshot('12');await vm.loadSnapshots();await vm.saveSnapshot();await vm.retryCurrent();await vm.addToReply();expect(api.createFrame).toHaveBeenCalledTimes(1);expect(api.get).not.toHaveBeenCalled();expect(api.list).not.toHaveBeenCalled();expect(api.save).not.toHaveBeenCalled();expect(wrapper.emitted('ready')).toBeUndefined();
+    await wrapper.setProps({disabled:false});expect(vm.error).toBe('');await vm.openSource({attachmentId:'9'});expect(vm.visible).toBe(true);expect(vm.scene).toEqual(scene);
+    const resumedSignal=api.createFrame.mock.calls.at(-1)[1];await wrapper.setProps({writable:false});expect(resumedSignal.aborted).toBe(true);expect(vm.visible).toBe(false);expect(vm.error).toBe('annotations.denied');expect(images.release).toHaveBeenCalled();
+  });
+
 });

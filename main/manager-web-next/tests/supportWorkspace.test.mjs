@@ -121,4 +121,12 @@ describe('B4 support annotations', () => {
     mountDesk();await flushPromises();await wrapper.vm.selectRequest({request_id:'r',conversation_id:'c',status:'active'});wrapper.vm.historyLoading=true;await wrapper.vm.$nextTick();expect(wrapper.findComponent({name:'AnnotationEditor'}).props('writable')).toBe(true);
     wrapper.vm.selected.status='resolved';await wrapper.vm.$nextTick();expect(wrapper.findComponent({name:'AnnotationEditor'}).props('writable')).toBe(false);
   });
+  it('keeps annotation permission through reply sending and temporary staff actions but revokes a released assignment', async () => {
+    mountDesk();await flushPromises();wrapper.vm.selected={request_id:'r',conversation_id:'c',status:'active'};wrapper.vm.draft='附上现场标注';await wrapper.vm.$nextTick();const editor=wrapper.findComponent({name:'AnnotationEditor'});
+    let finish;api.send.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));const sending=wrapper.vm.send();await wrapper.vm.$nextTick();expect(editor.props('writable')).toBe(true);expect(editor.props('disabled')).toBe(true);expect(editor.vm.error).toBe('');
+    finish({id:'saved',parts:[{type:'text',text:'附上现场标注'}]});await sending;await wrapper.vm.$nextTick();expect(wrapper.vm.draft).toBe('');expect(editor.props('disabled')).toBe(false);expect(editor.vm.error).toBe('');
+    wrapper.vm.actionBusy=true;await wrapper.vm.$nextTick();expect(editor.props('writable')).toBe(true);expect(editor.props('disabled')).toBe(true);expect(editor.vm.error).toBe('');wrapper.vm.actionBusy=false;await wrapper.vm.$nextTick();expect(editor.vm.error).toBe('');
+    wrapper.vm.selected.status='resolved';await wrapper.vm.$nextTick();expect(editor.props('writable')).toBe(false);expect(editor.vm.error).toBe('annotations.denied');
+  });
+
 });

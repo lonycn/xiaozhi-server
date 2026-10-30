@@ -2,6 +2,8 @@
 
 日期：2026-10-30。本批只交付统一对话账本基础，未部署到本机正在运行的服务。
 
+> 本文件保留第一批账本的历史验证记录，不作为 B2 当前部署或真实模型验收结论。B1 记录见 [SUPPORT_B1_VALIDATION.md](./SUPPORT_B1_VALIDATION.md)；B2 协议见 [B2_IMPLEMENTATION_CONTRACT.md](./B2_IMPLEMENTATION_CONTRACT.md)，定向验证方法见 [TEST_PLAN.md](./TEST_PLAN.md#b2-定向验证方法结果另行记录)。B2 实测证据及计划状态由本轮最终验收单独记录。
+
 | 检查 | 结果 | 范围 |
 | --- | --- | --- |
 | Java 全套测试 | 221 通过，0 失败，0 跳过 | 使用独立 MySQL/Redis，包含 15 项新增测试 |

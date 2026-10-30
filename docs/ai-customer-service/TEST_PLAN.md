@@ -26,3 +26,35 @@ mvn -B -DskipTests=false -Dtest='Conversation*Test' test
 - 旧 ESP32 实机：部署新版本前再验证 OTA、鉴权 WebSocket、Opus、MCP、语音及历史。当前代码测试不代表完成实体麦克风/喇叭或新平台现场验收。
 
 本轮实际执行结果见 `VALIDATION.md`。
+
+## B2 定向验证方法（结果另行记录）
+
+协议定义见 [OpenAPI](./OPENAPI.yaml)、[消息请求与响应子结构](./MESSAGE_SCHEMA.json)、
+[B2 实施协作契约](./B2_IMPLEMENTATION_CONTRACT.md)；独立 worker 的私有配置和运行命令见
+[ai_worker/README.md](../../main/xiaozhi-server/ai_worker/README.md)。这些入口和方法的存在不代表已部署或通过真实服务验收。
+
+- 默认关闭：验证 `features.ai-text-enabled=false` 时原账本/人工能力仍按各自开关工作；公开 AI run/SSE 和私有 worker 路由须同时启用 conversation/AI-text。Dev 使用显式 opt-in，不把默认值改为开启。
+- 权威状态：用户消息落库与排队同事务；重复 `client_message_id` 不重复排队；每会话最多一个活动 run。新用户输入、人工接管及 epoch 变化取消旧 run；部分输出保留且旧回调返回 409。
+- 资源边界：owner/当前 assignee 读 run；历史已释放人员不能读可变 run 元数据。SSE 每批重验账号、权限及释放 cutoff；初始错误是实际 HTTP 状态，发出 headers 后撤权应关闭连接。
+- 租约与恢复：45 秒默认 lease、10–15 秒心跳；进程崩溃后至多三次领取。旧 lease 永久失效，下一 attempt 在输出前 reset；手动 retry 仅限最新输入、失败/取消态且无其他活动任务。验证 queued 保留旧 attempt/部分输出，claim 后递增并清空。
+- 流式持久化：同一 output_message_id 更新 parts/status，不按 token 建消息；delta ACK 丢失时同 sequence/body 重试幂等，乱序和同 sequence 不同正文 409。complete 必须匹配 last_sequence；真实 usage 可 null，禁止估算。
+- SSE 与轮询：用超过 `2^53` 的十进制字符串游标验证 `after`、`Last-Event-ID`（header 优先）、事件去重与有限连接重连；初始历史回放不重复拼接已有 snapshot。覆盖 snapshot 晚于/早于流、轮询 events 补漏、attempt reset、迟到旧 chunk、首包早于消息占位、消息序号排序。
+- 界面清理：停止/重试连续点击只有一个请求；人工模式不提供 AI 操作；切换会话和卸载中止 reader/请求/重连等待，迟到 send/stream/snapshot 不写入新会话或清除新草稿。
+- 只读旧历史：两个 `/api/v1/ai/legacy/agents/{agentId}/sessions...` GET 仅 exact agent owner 可读；分页保留 source/session ID、read_only=true、has_audio 标志，跨账号/agent 拒绝。读取前后源表行数/内容不变，且不自动产生 ai_conversation、ai_message、ai_run 或模型请求。
+
+Python worker 离线测试使用独立依赖，直接运行 unittest，避免设备 tests/conftest.py 的全局 SDK shim：
+
+```sh
+cd main/xiaozhi-server
+/path/to/isolated-worker-venv/bin/python -m unittest discover -s tests -p 'test_ai_worker*.py' -v
+```
+
+Vue 3 定向单 worker 验证（在 `main/manager-web-next` 下）：
+
+```sh
+npx vitest run tests/aiStream.test.mjs tests/conversationClient.test.mjs tests/conversationWorkspace.test.mjs --maxWorkers=1 --no-isolate
+```
+
+真实百炼小请求、模拟 provider/控制面、隔离数据库并发测试、Dev 部署和 ESP32 实机验收分别记录；
+不要用 mock 成功代替真实云请求，也不要用新代码测试替代设备麦克风、喇叭、唤醒和打断验收。
+不连接现有业务库执行初始化、重建或清理；隔离数据库验证遵循 B2 数据保护契约。

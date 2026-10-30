@@ -14,7 +14,7 @@ python3 dev/manage.py status
 python3 dev/manage.py stop
 ```
 
-前端为 Vue3 Vite 开发服务，修改源码自动更新；Java 后端改动后用 `up --build` 重建并重启 Dev API。需要 Docker、JDK 21、Maven 和 Node/npm；缺少前端依赖时构建命令会按现有锁文件安装。
+前端为 Vue3 Vite 开发服务，修改源码自动更新；Java 后端改动后用 `up --build` 重建并重启 Dev API。启动前脚本将构建产物原子复制到 `dev/.runtime/manager-api.jar`，容器挂载该副本，使正在运行的容器不受下次构建覆盖影响。需要 Docker、JDK 21、Maven 和 Node/npm；缺少前端依赖时构建命令会按现有锁文件安装。
 
 首次开发环境已经通过只读快照复制本机智控台数据，登录账号/密码沿用原智控台。Dev 的登录 Token 单独签发。后续测试写入只落在独立的 Dev 数据库，不同步回原服务。
 
@@ -43,7 +43,7 @@ python3 dev/manage.py up --build --seed-local-console
 
 新建/选择/分页读取自己的会话，发送文字，刷新读取持久历史，展示原有位置消息。不同会话分别保留未发送草稿；网络失败时保留内容，重试沿用同一个幂等编号。中文输入法确认候选词不会触发发送。
 
-统一对话页已接入转人工、排队取消、客服回复轮询与结束后恢复 AI 状态。AI 实际执行、附件上传和实时音视频仍在后续阶段，页面会说明当前范围。
+统一对话页已接入转人工、排队取消、客服回复和结束后恢复 AI。B2 增加实际 AI 文字执行、流式回复、停止、失败重试与持久用量；在 Dev 中按下节显式启用，发布配置默认关闭。附件上传和实时音视频仍在后续阶段。
 
 后端 B1 人工文字服务已提供独立 API，详见 [接口契约](../docs/ai-customer-service/SUPPORT_B1_API.md)；Vue 3 工作台位于 `/#/support`，启用的客服及管理员会在智控台看到入口。管理员须先给已有账号配置客服/专家档案，客服随后刷新在线租约才能接单。现有管理员身份不会自动赋予任意会话的读取权。
 
@@ -81,3 +81,11 @@ docker run --rm --name xiaozhi-vue3-preview --network xiaozhi-server-dev_default
 访问 <http://127.0.0.1:18895/#/conversations>。镜像通过 `/xiaozhi/` 代理到 `API_PROXY_TARGET`；默认目标是 Dev 网络中的 `http://api:8002`。退出容器不影响 Dev 数据及其他服务。
 
 `up` 默认启动 Vue3；`candidate-up/status/stop` 保留为 Vue3 单独管理的兼容命令。需要回退时可执行 `legacy-up`、`legacy-status`、`legacy-stop`，旧前端使用 18892。`stop` 停止两套受管理前端及 Dev 容器，不删除数据卷。端口被其他进程占用时不会终止它。
+
+### Dev AI 文字回复
+
+AI 默认关闭。先执行 `python3 dev/manage.py up --build` 确保已有 Dev 使用当前 Java 包，再使用 `python3 dev/manage.py ai-enable` 从 Dev 数据库只读获取唯一启用的默认 LLM 配置；该配置必须使用百炼 HTTPS 地址。命令将私有配置写入 `dev/.runtime`，重新创建 Dev API 容器，启动独立 AI worker 和 Vue 3。已有 worker 服务密钥会被复用；业务空间 URL 保留原样。配置、日志及运行时文件可能含敏感信息，勿提交或分享。后台修改默认 LLM 后需再次执行 `ai-enable` 同步 worker 配置。
+
+使用 `python3 dev/manage.py ai-status` 查看开关、worker 进程与模型；使用 `python3 dev/manage.py ai-disable` 停止 worker 并关闭 API 的 AI 功能。关闭不会删除历史数据或任务。普通 `up` 会在 AI 已启用时启动 worker，普通 `stop` 会停止它。
+
+worker 默认使用仓库父目录的 `.venv/bin/python`，该环境须已安装 `openai` 和 `httpx`。可通过 `XIAOZHI_AI_WORKER_PYTHON` 指定其他已准备好的 Python；脚本不会自动安装依赖。若 worker 无法启动，检查 `dev/.runtime/ai-worker.log`；API 和 worker 修改配置后必须使用上述命令重新启动。

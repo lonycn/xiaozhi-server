@@ -63,6 +63,16 @@ export default {
   'support.resolved': "Đã kết thúc",
   'support.canceled': "Đã hủy",
   'support.RELEASED': "Phiên đã được giải phóng",
+  "ai.queued": "Đang chờ",
+  "ai.running": "Đang tạo",
+  "ai.streaming": "Đang tạo",
+  "ai.completed": "Hoàn tất",
+  "ai.failed": "Trả lời thất bại; hãy thử lại",
+  "ai.canceled": "Đã dừng",
+  "ai.stop": "Dừng",
+  "ai.retry": "Thử lại",
+  "ai.capability": "Hỗ trợ phản hồi AI và hỗ trợ trực tiếp bằng văn bản.",
+  "ai.unavailable": "Phản hồi AI không khả dụng; vẫn có thể lưu tin nhắn và dùng hỗ trợ trực tiếp.",
   'support.capability': "Hỗ trợ lưu văn bản, hiển thị vị trí và hỗ trợ trực tiếp bằng văn bản. Tiếp tục với AI chỉ thay đổi trạng thái; xử lý AI và tệp đính kèm chưa được kết nối.",
 
   // Login page related prompt text

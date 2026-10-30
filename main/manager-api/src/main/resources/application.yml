@@ -69,3 +69,12 @@ mybatis-plus:
 features:
   conversation-enabled: false
   support-handoff-enabled: false
+  ai-text-enabled: false
+
+# Worker credential is dedicated to this execution protocol and never a user/server token.
+ai:
+  worker:
+    key: ${AI_WORKER_KEY:}
+  execution:
+    model: ${AI_EXECUTION_MODEL:qwen-flash}
+    lease-seconds: 45

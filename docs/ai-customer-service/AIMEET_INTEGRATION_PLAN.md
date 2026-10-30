@@ -2,11 +2,11 @@
 
 日期：2026-10-30。适用分支：`Dev`。
 
-实施进度：B1 人工文字服务、权限/账本基础及 Vue 3 客服工作台已落地，日常 Dev 默认使用 Vue 3，实际接口以 [B1 契约](SUPPORT_B1_API.md) 和 [验证记录](SUPPORT_B1_VALIDATION.md) 为准。下文保留完整规划，涉及媒体、AI 执行等后续阶段的描述不代表已经开放。
+实施进度：B1 人工文字服务、权限/账本基础及 Vue 3 客服工作台已落地；B2 已实现独立百炼文字 worker、运行 lease、认证 SSE、停止/重试、转人工停答与真实用量。日常 Dev 默认使用 Vue 3。实际接口以 [B1 契约](SUPPORT_B1_API.md)、[B2 契约](B2_IMPLEMENTATION_CONTRACT.md) 和 [B2 验证记录](B2_VALIDATION.md) 为准。下文保留完整规划和最初分析基线；附件、标注、实时音视频与外部 App 接入仍待后续批次。
 
 `aimeet` 的人工咨询、媒体授权、截图标注、专家转接与 App 接入可以复用到小智后端。整合以小智的统一 Conversation、现有账号和 MySQL 为主体，分批迁移业务规则与测试，复用 LiveKit 和私有对象存储基础设施。原 `aimeet` 保留现有用途，不整体搬入它的 FastAPI、PostgreSQL 用户库和 React 前端。
 
-下一批优先形成同一段对话里的人工文字服务闭环，再接附件、标注和真人音视频。AI 文本执行、转人工时的停答控制与事件推送共用同一控制机制。Vue 3 迁移由独立聊天 `server-vue3` 负责，后端接口不依赖其全部管理页面迁移完成。
+接下来优先推进 B3 私有附件与媒体处理，再接标注和真人音视频。B1/B2 已形成同一段对话里的 AI 与人工文字服务闭环；AI 文本执行、转人工时的停答控制与事件推送共用同一控制机制。Vue 3 迁移已整合，后续前端在 `main/manager-web-next` 开发。
 
 ## 1 源码基线与当前能力
 
@@ -16,7 +16,7 @@
 | 远程专家 | `/Users/lengwang/code/aimeet`，`1a30b93` | FastAPI、SQLAlchemy、PostgreSQL、Redis、LiveKit、SeaweedFS S3、Next.js/React |
 | 前端迁移 | `main/manager-web-next`，另一聊天正在开发 | Vue 3 候选应用；现有 Vue 2 预览继续保留 |
 
-小智当前的 `ConversationService` 只保存用户消息，没有实际 AI 执行、客服成员权限、附件服务或人工状态变更入口。数据库已有 `ai_conversation`、`ai_message`、`ai_conversation_event`。不能将这些基础表视为人工客服模块已经实现。
+制定本计划时的 `ConversationService` 只保存用户消息，没有实际 AI 执行、客服成员权限、附件服务或人工状态变更入口。当时数据库已有 `ai_conversation`、`ai_message`、`ai_conversation_event`；B1/B2 在其上增量实现了人工文字与 AI 执行。附件服务仍待 B3。
 
 `aimeet` 已有以下源码：
 
@@ -231,7 +231,7 @@ SSE 由认证请求客户端读取，继续发送 Authorization；不把长效 B
 
 保留根目录完整 V1 规划原文，本计划作为基于现有代码的实施补充。
 
-- 原 P1 的 AI 执行与流式部分尚未完成，对应 B2；原 P4 的人工文字能力前移到 B1，优先复用 aimeet 的规则。
+- 原 P1 的 AI 执行与流式部分已在 B2 实现；原 P4 的人工文字能力前移到 B1，优先复用 aimeet 的规则。
 - 原 P2、P5、P6 分别对应 B3、B4、B5，保留可独立验收和回退的边界。
 - 原 P3 的 Omni 实时能力在 B2 后做独立技术验证。评估直接实时连接与 aimeet LiveKit AI Worker 两条路径后再固定方案，不同时建设两套生产人机媒体通道。
 - 原 P7 业务集成对应 B6；原 P8 真实终端、网络与安全试点仍是正式交付门槛。

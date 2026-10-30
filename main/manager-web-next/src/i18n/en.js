@@ -63,6 +63,16 @@ export default {
   'support.resolved': "Ended",
   'support.canceled': "Canceled",
   'support.RELEASED': "Session released",
+  "ai.queued": "Waiting",
+  "ai.running": "Generating",
+  "ai.streaming": "Generating",
+  "ai.completed": "Completed",
+  "ai.failed": "Reply failed; try again",
+  "ai.canceled": "Stopped",
+  "ai.stop": "Stop",
+  "ai.retry": "Retry",
+  "ai.capability": "AI text replies and human text support are available.",
+  "ai.unavailable": "AI replies are unavailable; messages and human support remain available.",
   'support.capability': "Supports text records, location display and human text support. Resuming AI only changes the status; AI execution and attachments are not yet connected.",
 
   // Login page related prompt text

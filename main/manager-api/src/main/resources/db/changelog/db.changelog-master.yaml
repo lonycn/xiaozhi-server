@@ -760,3 +760,6 @@ databaseChangeLog:
   - include:
       file: support.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: ai-execution.changelog.yaml
+      relativeToChangelogFile: true

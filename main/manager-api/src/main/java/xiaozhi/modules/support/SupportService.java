@@ -30,6 +30,10 @@ public class SupportService {
     private final ObjectMapper json;
     private final TransactionTemplate transactions;
     private final ConversationService conversations;
+    private xiaozhi.modules.ai.AiExecutionService aiExecution;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAiExecution(xiaozhi.modules.ai.AiExecutionService service) { this.aiExecution = service; }
 
     public SupportService(JdbcTemplate jdbc, ObjectMapper json, PlatformTransactionManager manager,
                           ConversationService conversations) {
@@ -369,6 +373,7 @@ public class SupportService {
         return rows.getFirst();
     }
     private void state(String conversationId, String state, boolean incrementEpoch) {
+        if (aiExecution != null) aiExecution.cancelActive(conversationId);
         jdbc.update("UPDATE ai_conversation SET state=?,control_epoch=control_epoch+?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",
                 state, incrementEpoch ? 1 : 0, conversationId);
     }

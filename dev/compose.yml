@@ -41,7 +41,7 @@ services:
     ports:
       - "127.0.0.1:18893:8002"
     volumes:
-      - ../main/manager-api/target/xiaozhi-esp32-api.jar:/app/manager.jar:ro
+      - ./.runtime/manager-api.jar:/app/manager.jar:ro
       - ./.runtime/application-dev.properties:/app/application-dev.properties:ro
       - ./.runtime/uploadfile:/uploadfile
       - ./.runtime/logs:/app/logs

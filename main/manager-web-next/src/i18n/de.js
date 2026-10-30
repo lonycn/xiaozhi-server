@@ -63,6 +63,16 @@ export default {
   'support.resolved': "Beendet",
   'support.canceled': "Abgebrochen",
   'support.RELEASED': "Betreuung freigegeben",
+  "ai.queued": "Wartet",
+  "ai.running": "Wird erstellt",
+  "ai.streaming": "Wird erstellt",
+  "ai.completed": "Abgeschlossen",
+  "ai.failed": "Antwort fehlgeschlagen; erneut versuchen",
+  "ai.canceled": "Gestoppt",
+  "ai.stop": "Stoppen",
+  "ai.retry": "Erneut versuchen",
+  "ai.capability": "KI-Textantworten und persönlicher Textsupport werden unterstützt.",
+  "ai.unavailable": "KI-Antworten sind nicht verfügbar; Nachrichten und persönlicher Support bleiben verfügbar.",
   'support.capability': "Unterstützt Textverläufe, Standortanzeige und persönlichen Textsupport. Das Fortsetzen der KI ändert nur den Status; KI-Ausführung und Anhänge sind noch nicht angebunden.",
 
   // Login page related prompt text

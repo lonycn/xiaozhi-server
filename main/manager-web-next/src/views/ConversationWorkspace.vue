@@ -21,7 +21,7 @@
           <div v-if="!selected" class="welcome-state"><span class="welcome-icon"><LegacyIcon class="el-icon-chat-dot-round" /></span><h2>从一个问题开始</h2><p>记录故障现象，保留每一次沟通。<br />选择左侧会话，或新建一段对话。</p><button class="primary-button" @click="openCreate">新建对话 <LegacyIcon class="el-icon-right" /></button></div>
           <div v-else-if="loadingMessages && !messages.length" class="welcome-state" role="status"><LegacyIcon class="el-icon-loading" /><p>正在读取聊天记录…</p></div>
           <div v-else-if="!messages.length" class="welcome-state"><span class="welcome-icon"><LegacyIcon class="el-icon-edit-outline" /></span><h2>这段对话还没有消息</h2><p>可以描述设备、故障表现和已尝试的操作。</p></div>
-          <article v-for="message in messages" :key="message.id" class="message-row" :class="{ incoming: message.sender_type && message.sender_type !== 'user' }"><div class="message-content"><div class="message-meta">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }} <span>{{ formatDate(message.created_at, true) }}</span></div><div class="message-bubble"><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><div v-else-if="part.type === 'location'" class="location-card"><LegacyIcon class="el-icon-location-outline" /> 共享位置：{{ part.latitude }}, {{ part.longitude }}<small>{{ part.coordinate_system }} · 精度 {{ part.accuracy_m }} 米</small></div></template></div><div class="message-saved"><LegacyIcon class="el-icon-check" /> 已保存</div></div><span class="sender-avatar">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }}</span></article>
+          <article v-for="message in messages" :key="message.id" class="message-row" :class="{ incoming: message.sender_type && message.sender_type !== 'user' }"><div class="message-content"><div class="message-meta">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }} <span>{{ formatDate(message.created_at, true) }}</span></div><div class="message-bubble"><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><div v-else-if="part.type === 'location'" class="location-card"><LegacyIcon class="el-icon-location-outline" /> 共享位置：{{ part.latitude }}, {{ part.longitude }}<small>{{ part.coordinate_system }} · 精度 {{ part.accuracy_m }} 米</small></div></template></div><div v-if="message.sender_type === 'assistant'" class="message-saved">{{ $t('ai.' + (message.status || 'completed')) }} <template v-if="!humanActive && selected?.state === 'AI_ACTIVE' && runFor(message)"><button v-if="['queued', 'running', 'streaming'].includes(runFor(message).status)" :disabled="runBusy[`${selected.id}:${runFor(message).run_id}`]" @click="runAction(runFor(message), 'cancel')">{{ $t('ai.stop') }}</button><button v-if="['failed', 'canceled'].includes(runFor(message).status)" :disabled="runBusy[`${selected.id}:${runFor(message).run_id}`]" @click="runAction(runFor(message), 'retry')">{{ $t('ai.retry') }}</button></template></div><div v-else class="message-saved"><LegacyIcon class="el-icon-check" /> 已保存</div></div><span class="sender-avatar">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }}</span></article>
         </div>
         <footer class="composer-area">
           <div v-if="selected" class="support-controls" aria-live="polite">
@@ -31,7 +31,7 @@
             <el-button v-if="supportRequest?.status === 'queued'" :loading="supportBusy" @click="cancelHandoff">{{ $t('support.cancel') }}</el-button>
             <el-button v-if="selected.state === 'RESOLVED'" :loading="supportBusy" @click="resumeAi">{{ $t('support.resume') }}</el-button>
           </div>
-          <div class="capability-note"><LegacyIcon class="el-icon-info" /><span>{{ $t('support.capability') }}</span></div>
+          <div class="capability-note"><LegacyIcon class="el-icon-info" /><span>{{ $t(aiAvailable === false ? 'ai.unavailable' : 'ai.capability') }}</span></div>
           <form class="message-composer" @submit.prevent="sendMessage"><textarea v-model="draft" aria-label="消息内容" :disabled="!selected || sending || selected.state === 'RESOLVED'" maxlength="8000" rows="3" :placeholder="selected ? '描述你的问题…' : '新建或选择会话后，即可开始记录'" @keydown="composerKeydown" /><div class="composer-bottom"><span>{{ draft.length }}/8000 <span class="keyboard-hint">· Enter 发送，Shift + Enter 换行</span></span><button type="submit" class="primary-button send-button" :disabled="!selected || !draft.trim() || sending || loadingMessages || selected.state === 'RESOLVED'"><LegacyIcon :class="sending ? 'el-icon-loading' : 'el-icon-position'" /> {{ sending ? '保存中' : '发送消息' }}</button></div></form>
         </footer>
       </section>
@@ -47,6 +47,7 @@
 <script>
 import conversationApi from '../apis/module/conversation';
 import supportApi from '../apis/module/support';
+import { readSse, mergeMessages, projectAiEvent, abortableDelay } from '../utils/aiStream.mjs';
 import { senderKey } from '../utils/support.mjs';
 
 function cursorInteger(value) {
@@ -59,7 +60,7 @@ function cursorInteger(value) {
 export default {
   name: 'ConversationWorkspace',
   data() {
-    return { environmentLabel: import.meta.env.VITE_ENV_LABEL || '开发预览', conversations: [], selected: null, messages: [], drafts: {}, pending: null, error: '', createError: '', loadingList: false, loadingMessages: false, sending: false, createVisible: false, creating: false, newTitle: '', listCursor: 0, listHasMore: false, selectionVersion: 0, supportRequest: null, supportBusy: false, handoffPending: {}, pollTimer: null, messageCursor: '0', eventCursor: '0', pollBusy: false, disposed: false };
+    return { environmentLabel: import.meta.env.VITE_ENV_LABEL || '开发预览', conversations: [], selected: null, messages: [], drafts: {}, pending: null, error: '', createError: '', loadingList: false, loadingMessages: false, sending: false, createVisible: false, creating: false, newTitle: '', listCursor: 0, listHasMore: false, selectionVersion: 0, supportRequest: null, supportBusy: false, handoffPending: {}, pollTimer: null, messageCursor: '0', eventCursor: '0', pollBusy: false, disposed: false, runs: [], aiAvailable: null, streamController: null, streamCursor: '0', streamProjections: {}, selectionController: null, runBusy: {} };
   },
   computed: {
     humanActive() { return ['HUMAN_QUEUED', 'HUMAN_ACTIVE'].includes(this.selected?.state); },
@@ -69,18 +70,85 @@ export default {
     },
   },
   mounted() { this.loadConversations(); this.pollTimer = setInterval(() => this.pollConversation(), 4000); },
-  beforeUnmount() { this.disposed = true; this.selectionVersion++; clearInterval(this.pollTimer); },
+  beforeUnmount() { this.disposed = true; this.streamController?.abort(); this.selectionController?.abort(); this.selectionVersion++; clearInterval(this.pollTimer); },
   methods: {
     senderKey,
+    runFor(message) { return this.runs.find(run => run.output_message_id === message.id); },
+    async refreshRuns(id, version) {
+      if (this.disposed || version !== this.selectionVersion) return;
+      try {
+        const page = await conversationApi.runs(id, this.selectionController?.signal);
+        if (!this.disposed && version === this.selectionVersion) { this.runs = page.items.map(run => { const projection = this.streamProjections[run.output_message_id]; return projection ? { ...run, status: projection.status, attempt: projection.attempt, last_chunk_sequence: projection.chunkSequence } : run; }); this.aiAvailable = true; }
+      } catch (error) {
+        if (this.disposed || version !== this.selectionVersion || error.name === 'AbortError') return;
+        if (error.status === 404) this.aiAvailable = false; else throw error;
+      }
+    },
+    async runAction(run, action) {
+      if (this.disposed || this.humanActive || this.selected?.state !== 'AI_ACTIVE' || !['cancel', 'retry'].includes(action)) return;
+      const id = this.selected.id, version = this.selectionVersion, key = `${id}:${run.run_id}`;
+      if (this.runBusy[key]) return;
+      this.runBusy[key] = true;
+      try {
+        const updated = await conversationApi.runAction(id, run.run_id, action, this.selectionController?.signal);
+        if (version !== this.selectionVersion || this.disposed) return;
+        if (updated) this.runs = this.runs.map(item => item.run_id === updated.run_id ? updated : item);
+        await this.pollConversation();
+      } catch (error) { if (version === this.selectionVersion && !this.disposed && error.name !== 'AbortError') this.error = error.message; }
+      finally { delete this.runBusy[key]; }
+    },
+    mergeSnapshot(incoming) {
+      this.messages = mergeMessages(this.messages, incoming).map(message => {
+        const projection = this.streamProjections[message.id];
+        return projection ? { ...message, parts: projection.parts, status: projection.status } : message;
+      });
+    },
+    applyStream(frame) {
+      if (this.disposed || !/^\d+$/.test(frame.id || '') || BigInt(frame.id) <= BigInt(this.streamCursor)) return;
+      let envelope; try { envelope = JSON.parse(frame.data); } catch { return; }
+      if (!envelope || typeof envelope !== 'object') return;
+      this.streamCursor = frame.id;
+      const data = envelope.data || {}, id = data.message_id;
+      if (!id) return;
+      const previous = this.streamProjections[id];
+      const next = projectAiEvent(previous, frame.type, data);
+      if (!next || next === previous) return;
+      this.streamProjections[id] = next;
+      const existing = this.messages.find(message => message.id === id);
+      this.mergeSnapshot([{ ...(existing || { id, sender_type: 'assistant', seq: data.seq, created_at: envelope.created_at }), seq: data.seq ?? existing?.seq, parts: next.parts, status: next.status }]);
+      if (data.run_id) {
+        const run = this.runs.find(item => item.run_id === data.run_id) || { run_id: data.run_id, output_message_id: id };
+        this.runs = [...this.runs.filter(item => item.run_id !== data.run_id), { ...run, status: next.status, attempt: next.attempt, last_chunk_sequence: next.chunkSequence }];
+      }
+    },
+    async startStream(id, version) {
+      if (this.disposed || version !== this.selectionVersion) return;
+      this.streamController?.abort();
+      const controller = new AbortController(); this.streamController = controller;
+      while (!controller.signal.aborted && !this.disposed && version === this.selectionVersion) {
+        try {
+          const response = await conversationApi.stream(id, this.streamCursor, controller.signal);
+          if (controller.signal.aborted || this.disposed || version !== this.selectionVersion) { await response.body?.cancel().catch(() => {}); return; }
+          if ([401, 403, 404].includes(response.status)) { if (response.status === 404) this.aiAvailable = false; await response.body?.cancel().catch(() => {}); return; }
+          if (!response.ok || !response.body) { await response.body?.cancel().catch(() => {}); throw new Error('stream unavailable'); }
+          await readSse(response.body, frame => { if (version === this.selectionVersion && !controller.signal.aborted) this.applyStream(frame); }, controller.signal);
+        } catch (error) { if (controller.signal.aborted || this.disposed || version !== this.selectionVersion) return; }
+        await abortableDelay(1500, controller.signal);
+      }
+    },
     async refreshSupport(id, version) {
-      const detail = await conversationApi.detail(id);
+      if (this.disposed || version !== this.selectionVersion) return;
+      const detail = await conversationApi.detail(id, this.selectionController?.signal);
       if (version !== this.selectionVersion) return;
       this.selected = { ...this.selected, ...detail };
       let more = true;
       while (more) {
-        const page = await conversationApi.events(id, this.eventCursor);
+        const page = await conversationApi.events(id, this.eventCursor, this.selectionController?.signal);
         if (version !== this.selectionVersion) return;
-        for (const event of page.items) if (event.data?.request_id) this.supportRequest = { request_id: event.data.request_id };
+        for (const event of page.items) {
+          if (event.data?.request_id) this.supportRequest = { request_id: event.data.request_id };
+          this.applyStream({ id: String(event.sequence), type: event.type, data: JSON.stringify(event) });
+        }
         if (page.has_more && cursorInteger(page.next_cursor) <= cursorInteger(this.eventCursor)) throw new Error('历史记录游标异常，请刷新后重试');
         this.eventCursor = page.next_cursor; more = page.has_more;
       }
@@ -93,17 +161,19 @@ export default {
       if (!this.selected || this.pollBusy || this.loadingMessages || this.sending || this.supportBusy || this.disposed) return;
       this.pollBusy = true; const version = this.selectionVersion, id = this.selected.id;
       try {
-        let more = true;
+        let more = true, after = '0'; const refreshed = [];
         while (more) {
-          const page = await conversationApi.messages(id, this.messageCursor);
+          const page = await conversationApi.messages(id, after, this.selectionController?.signal);
           if (version !== this.selectionVersion) return;
-          for (const message of page.items) if (!this.messages.some(item => item.id === message.id)) this.messages.push(message);
-          if (page.has_more && cursorInteger(page.next_cursor) <= cursorInteger(this.messageCursor)) throw new Error('历史记录游标异常，请刷新后重试');
-          this.messageCursor = page.next_cursor; more = page.has_more;
+          refreshed.push(...page.items);
+          if (page.has_more && cursorInteger(page.next_cursor) <= cursorInteger(after)) throw new Error('历史记录游标异常，请刷新后重试');
+          after = page.next_cursor; this.messageCursor = after; more = page.has_more;
         }
+        this.mergeSnapshot(refreshed);
         await this.refreshSupport(id, version);
+        await this.refreshRuns(id, version);
       } catch (error) { if (version === this.selectionVersion) this.error = error.message; }
-      finally { this.pollBusy = false; }
+      finally { if (version === this.selectionVersion) this.pollBusy = false; }
     },
     async supportAction(action) {
       if (!this.selected || this.supportBusy) return;
@@ -112,7 +182,7 @@ export default {
         await action(id);
         if (version === this.selectionVersion) await this.refreshSupport(id, version);
       } catch (error) { if (version === this.selectionVersion) this.error = error.message; }
-      finally { this.supportBusy = false; }
+      finally { if (version === this.selectionVersion) this.supportBusy = false; }
     },
     handoff() {
       return this.supportAction(async id => {
@@ -124,7 +194,7 @@ export default {
     },
     cancelHandoff() { const id = this.supportRequest?.request_id; return id && this.supportAction(() => supportApi.action(id, 'cancel')); },
     resumeAi() { return this.supportAction(id => conversationApi.resume(id)); },
-    formatDate(value, time = false) { return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', ...(time ? { hour: '2-digit', minute: '2-digit' } : {}) }); },
+    formatDate(value, time = false) { if (!value) return ''; return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', ...(time ? { hour: '2-digit', minute: '2-digit' } : {}) }); },
     openCreate() { this.newTitle = ''; this.createError = ''; this.createVisible = true; },
     focusTitle() { this.$refs.titleInput?.focus(); },
     async loadConversations(more = false) {
@@ -150,18 +220,23 @@ export default {
       finally { this.creating = false; }
     },
     async selectConversation(item) {
+      this.streamController?.abort(); this.selectionController?.abort();
+      this.selectionController = new AbortController();
       const version = ++this.selectionVersion;
+      this.runs = []; this.aiAvailable = null; this.streamCursor = '0'; this.streamProjections = {}; this.pollBusy = false; this.sending = false; this.supportBusy = false;
       this.selected = item; this.messages = []; this.supportRequest = null; this.messageCursor = '0'; this.eventCursor = '0'; this.loadingMessages = true; this.error = '';
       try {
         let after = 0; let more = true;
         while (more) {
-          const page = await conversationApi.messages(item.id, after);
+          const page = await conversationApi.messages(item.id, after, this.selectionController.signal);
           if (version !== this.selectionVersion) return;
-          this.messages.push(...page.items);
+          this.mergeSnapshot(page.items);
           if (page.has_more && cursorInteger(page.next_cursor) <= cursorInteger(after)) throw new Error('历史记录游标异常，请刷新后重试');
           after = page.next_cursor; this.messageCursor = after; more = page.has_more;
         }
         await this.refreshSupport(item.id, version);
+        await this.refreshRuns(item.id, version);
+        if (this.aiAvailable && version === this.selectionVersion) this.startStream(item.id, version);
         this.scrollToLatest();
       } catch (error) { if (version === this.selectionVersion) this.error = error.message; }
       finally { if (version === this.selectionVersion) this.loadingMessages = false; }
@@ -170,17 +245,18 @@ export default {
     composerKeydown(event) { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); this.sendMessage(); } },
     async sendMessage() {
       if (!this.selected || this.selected.state === 'RESOLVED' || !this.draft.trim() || this.sending || this.loadingMessages) return;
-      const id = this.selected.id; const text = this.draft;
+      const id = this.selected.id, version = this.selectionVersion; const text = this.draft;
       const sameRetry = this.pending && this.pending.id === id && this.pending.text === text;
       const clientId = sameRetry ? this.pending.clientId : crypto.randomUUID();
       this.pending = { id, text, clientId }; this.sending = true; this.error = '';
       try {
-        const message = await conversationApi.send(id, { client_message_id: clientId, parts: [{ type: 'text', text }] });
-        if (!this.messages.some(item => item.id === message.id)) this.messages.push(message);
+        const message = await conversationApi.send(id, { client_message_id: clientId, parts: [{ type: 'text', text }] }, this.selectionController?.signal);
+        if (version !== this.selectionVersion || this.disposed) return;
+        this.mergeSnapshot([message]);
         if (this.draft === text) this.draft = '';
         this.pending = null; this.scrollToLatest();
-      } catch (error) { this.error = `${error.message}。未确认的内容已保留，重试不会重复保存。`; }
-      finally { this.sending = false; }
+      } catch (error) { if (version === this.selectionVersion && !this.disposed && error.name !== 'AbortError') this.error = `${error.message}。未确认的内容已保留，重试不会重复保存。`; }
+      finally { if (version === this.selectionVersion) this.sending = false; }
     },
   },
 };

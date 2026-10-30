@@ -63,6 +63,16 @@ export default {
   'support.resolved': "Encerrado",
   'support.canceled': "Cancelado",
   'support.RELEASED': "Atendimento liberado",
+  "ai.queued": "Aguardando",
+  "ai.running": "Gerando",
+  "ai.streaming": "Gerando",
+  "ai.completed": "Concluído",
+  "ai.failed": "Resposta falhou; tente novamente",
+  "ai.canceled": "Parado",
+  "ai.stop": "Parar",
+  "ai.retry": "Tentar novamente",
+  "ai.capability": "Respostas de IA e atendimento humano por texto são suportados.",
+  "ai.unavailable": "Respostas de IA indisponíveis; mensagens e atendimento humano continuam disponíveis.",
   'support.capability': "Oferece registros de texto, exibição de localização e atendimento humano por texto. Retomar a IA apenas altera o status; a execução da IA e os anexos ainda não estão integrados.",
 
   // Texto da página de login

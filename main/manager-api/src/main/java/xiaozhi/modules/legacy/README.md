@@ -1,0 +1,7 @@
+# Legacy history read-only projection
+
+These endpoints project existing ESP32 history under the owning active account. Each request checks the agent owner and each message query checks the `(agent_id, session_id)` pair. Source IDs are original history IDs; no conversation is created or inferred. Sessions use descending minimum source ID cursors; messages use ascending source ID cursors. Historical text is returned as stored and audio is represented only by `has_audio`.
+
+This bridge does not copy, alter or delete history, expose audio, create users, attach a session to a unified conversation, or feed historical messages to the model. An explicit trusted mapping and separate authorization would be required for such integration.
+
+`LegacyPersistenceTest` runs only when `LEGACY_TEST_JDBC_URL` names `127.0.0.1` or `localhost` and a dedicated `xiaozhi_legacy_test_*` schema. The schema must be newly created and empty. After checking the schema and loopback address, the test runs the complete Liquibase master changelog twice and checks that its recorded changeset count is stable, including the history `content` TEXT migration. The master changelog contains historical destructive changes and must only run against this disposable empty schema. Optional `LEGACY_TEST_DB_USER` (defaults to root) and `LEGACY_TEST_DB_PASSWORD` supply credentials. The test verifies the selected database and migration prerequisites before inserting isolated synthetic fixtures; it does not remove fixtures. Never point it at Dev, the original service, or aimeet.

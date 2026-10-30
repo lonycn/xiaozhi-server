@@ -42,7 +42,7 @@ class CommandTests(unittest.TestCase):
              patch.object(manage, 'candidate_process', return_value={'pid': 11}), \
              patch.object(manage, 'web_process', return_value={'pid': 12}), \
              patch.object(manage.os, 'killpg') as kill, patch.object(manage, 'API', Path('/nonexistent')), \
-             patch.object(manage, 'build'):
+             patch.object(manage, 'build'), patch.object(manage, 'stage_api_jar'):
             manage.main()
             return compose, candidate, legacy, wait, kill
 

@@ -1,0 +1,3 @@
+# Dedicated worker environment; intentionally excludes device/audio dependencies.
+openai==2.8.1
+httpx==0.28.1

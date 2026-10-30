@@ -1,11 +1,18 @@
 openapi: 3.1.0
 info:
   title: Xiaozhi persistent conversation ledger
-  version: 0.2.0
+  version: 0.3.0
   description: |
     P1 conversation ledger and B1 human text support are implemented. Conversation requires
     features.conversation-enabled=true; support additionally requires features.support-handoff-enabled=true.
-    Both flags default to false. AI execution, media and realtime streaming remain planned.
+    All feature flags default to false. B2 AI text execution and authenticated SSE additionally require
+    features.ai-text-enabled=true together with conversation-enabled=true. Dev explicitly opts in;
+    opt-in does not enable the feature in other environments. Media/Omni/LiveKit remain planned.
+    User-message persistence is independent of model completion; only AI_ACTIVE schedules AI execution.
+    The internal worker protocol is documented in [B2_IMPLEMENTATION_CONTRACT.md](./B2_IMPLEMENTATION_CONTRACT.md)
+    and [the independent Python worker README](../../main/xiaozhi-server/ai_worker/README.md).
+    Worker-key authentication grants no public API access. Private keys and lease tokens never appear in public Run responses.
+    The legacy history bridge is read-only and does not import records into conversations or model context.
     All success bodies use {code: 0, msg: success, data: ...}. Errors use actual HTTP status and a Result body.
     Unknown request fields are rejected; identities are supplied by the authenticated server session.
     Response long IDs, sequences and cursors are decimal strings (for example last_seq: "3");
@@ -82,6 +89,7 @@ paths:
       - {$ref: '#/components/parameters/ConversationId'}
     post:
       operationId: appendUserMessage
+      description: Saving an AI_ACTIVE user message may queue an assistant run in the same transaction when AI-text is enabled; human states only save the user message. A successful save is not model completion. Idempotent retries do not queue duplicate runs.
       requestBody:
         required: true
         content:
@@ -133,7 +141,7 @@ paths:
       - {$ref: '#/components/parameters/ConversationId'}
     get:
       operationId: replayEvents
-      description: Durable JSON event replay. This release does not offer a live SSE stream.
+      description: Durable JSON event replay, also used as the polling fallback for B2 authenticated SSE. Message and event sequence spaces are independent.
       parameters:
         - {$ref: '#/components/parameters/After'}
         - {$ref: '#/components/parameters/Limit'}
@@ -489,10 +497,201 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/ai/conversations/{id}/runs:
+    parameters:
+      - {$ref: '#/components/parameters/ConversationId'}
+    get:
+      operationId: listAiRuns
+      description: Requires both conversation and AI-text flags. Owner or current authorized assignee; released staff cannot read mutable Run metadata. Ordered by list_sequence descending.
+      parameters:
+        - {name: before, in: query, description: Exclusive list_sequence; 0 starts at newest., schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Persisted runs; all long sequences/cursors are decimal strings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/AiRun'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/ai/conversations/{id}/runs/{runId}:
+    parameters:
+      - {$ref: '#/components/parameters/ConversationId'}
+      - {$ref: '#/components/parameters/RunId'}
+    get:
+      operationId: getAiRun
+      description: Same mutable-resource access boundary as listAiRuns. IDs must belong to the requested conversation.
+      responses:
+        '200': {$ref: '#/components/responses/AiRunResult'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/ai/conversations/{id}/runs/{runId}/cancel:
+    parameters:
+      - {$ref: '#/components/parameters/ConversationId'}
+      - {$ref: '#/components/parameters/RunId'}
+    post:
+      operationId: cancelAiRun
+      description: Owner operation. Active runs become canceled; partial text remains. Canceling an already terminal run returns its current state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmptyRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AiRunResult'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/ai/conversations/{id}/runs/{runId}/retry:
+    parameters:
+      - {$ref: '#/components/parameters/ConversationId'}
+      - {$ref: '#/components/parameters/RunId'}
+    post:
+      operationId: retryAiRun
+      description: Owner operation in AI_ACTIVE only. Only failed/canceled runs for the latest user input with no other active run and attempt below 3 are eligible. Queuing preserves the previous partial output and attempt; the next successful claim increments attempt and emits reset before new output.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmptyRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AiRunResult'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/ai/conversations/{id}/stream:
+    parameters:
+      - {$ref: '#/components/parameters/ConversationId'}
+    get:
+      operationId: streamConversationEvents
+      description: |
+        Authenticated fetch SSE; Authorization must be a Bearer header, never a URL token.
+        The nonblank Last-Event-ID header overrides after. Both are nonnegative int64 decimal cursors.
+        Replays persisted ConversationEvent envelopes, then tails them. id is the event sequence,
+        event is its type, and data is the complete JSON envelope. Heartbeat comments are not events.
+        Each connection lasts at most approximately 25 seconds, with batch authorization rechecks
+        and a maximum of 16 concurrent streams per controller instance. Reconnect with the last
+        successfully applied sequence as both after and Last-Event-ID. Keep decimal strings and use
+        BigInt comparisons; deduplicate events by sequence. JSON /events polling remains available.
+        Recheck permissions on every batch, including account disablement and released-assignment cutoffs;
+        revocation or a database read failure after headers closes the connection at the last flushed
+        event cursor. Initial transient database failures use JSON 503 STREAM_UNAVAILABLE;
+        other initial errors use the normal Result HTTP body.
+        Reconstruct assistant text from ordered events rather than appending historical deltas to a
+        message snapshot with no event watermark. Reset replaces text for that attempt; reject older
+        attempts and repeated chunk_sequence values. Snapshot refreshes must not overwrite a newer event projection.
+      parameters:
+        - {$ref: '#/components/parameters/After'}
+        - {name: Last-Event-ID, in: header, schema: {type: string, pattern: '^[0-9]+$'}, description: Last successfully applied event sequence; takes precedence over after.}
+      responses:
+        '200':
+          description: Bounded authenticated SSE connection with heartbeat comments
+          content:
+            text/event-stream:
+              schema: {type: string}
+              example: |
+                id: 12
+                event: assistant.text.delta
+                data: {"event_id":"event-example","conversation_id":"conversation-example","sequence":"12","type":"assistant.text.delta","data":{"run_id":"run-example","message_id":"message-example","attempt":1,"chunk_sequence":"1","text":"你好"},"timestamp":"2026-10-30T00:00:00Z"}
+
+                : heartbeat
+
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429':
+          description: STREAM_CAPACITY; bounded connection capacity reached, back off and retain polling fallback
+          content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
+        '503':
+          description: STREAM_UNAVAILABLE; storage temporarily unavailable before SSE headers, retain the cursor and retry
+          content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
+  /api/v1/ai/legacy/agents/{agentId}/sessions:
+    parameters:
+      - {$ref: '#/components/parameters/LegacyAgentId'}
+    get:
+      operationId: listReadonlyLegacySessions
+      description: |
+        Requires conversation-enabled only, independently of AI-text opt-in. Enabled owner of the exact
+        agent only; this is not a support-assignment API. Reads existing ai_agent_chat_history grouped
+        by nonempty session_id, ordered by MIN(source id) descending. Does not write or automatically
+        import history into the unified conversation ledger, AI task queue, or model context.
+      parameters:
+        - {name: before, in: query, description: Exclusive first_message_id cursor; 0 starts newest., schema: {type: string, pattern: '^[0-9]{1,19}$', default: '0'}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Read-only source sessions, preserving session/source IDs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/LegacySession'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/ai/legacy/agents/{agentId}/sessions/{sessionId}/messages:
+    parameters:
+      - {$ref: '#/components/parameters/LegacyAgentId'}
+      - {name: sessionId, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 50}, description: Source session_id; slash and control characters rejected.}
+    get:
+      operationId: listReadonlyLegacyMessages
+      description: |
+        Same exact agent-owner boundary as legacy session listing. Reads source records in ascending
+        source_id order. chat_type 1 maps to user, 2 to assistant, others to unknown. read_only is always
+        true. has_audio is only an existence flag; no audio bytes, provider credentials, or storage URL
+        are exposed. There is no legacy import, update, delete, send, or model-execution endpoint.
+      parameters:
+        - {name: after, in: query, schema: {type: string, pattern: '^[0-9]{1,19}$', default: '0'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: Read-only source messages; cursor is last returned source_id even on the final page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/LegacyMessage'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer}
   parameters:
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[a-f0-9]{32}$'}
+    LegacyAgentId:
+      name: agentId
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[a-zA-Z0-9_-]{1,32}$'}
     ConversationId:
       name: id
       in: path
@@ -513,6 +712,15 @@ components:
       in: query
       schema: {type: integer, minimum: 1, maximum: 100, default: 50}
   responses:
+    AiRunResult:
+      description: Persisted public run state; no worker key, lease capability, provider request headers, or credentials
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: '#/components/schemas/Result'}
+              - properties:
+                  data: {$ref: '#/components/schemas/AiRun'}
     Invalid:
       description: Invalid input, unknown fields, or unavailable project context
       content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
@@ -568,7 +776,7 @@ components:
         updated_at: {type: string, format: date-time}
     MessagePart:
       oneOf:
-        - {$ref: './MESSAGE_SCHEMA.json#/$defs/TextPart'}
+        - {$ref: './MESSAGE_SCHEMA.json#/$defs/AssistantTextPart'}
         - {$ref: './MESSAGE_SCHEMA.json#/$defs/LocationPart'}
     Message:
       type: object
@@ -578,10 +786,10 @@ components:
         conversation_id: {type: string}
         seq: {type: string, pattern: '^[0-9]+$'}
         client_message_id: {type: string}
-        sender_type: {enum: [user, support_agent, expert]}
+        sender_type: {enum: [user, assistant, support_agent, expert]}
         sender_id: {type: string}
         parts: {type: array, items: {$ref: '#/components/schemas/MessagePart'}}
-        status: {enum: [accepted, completed]}
+        status: {enum: [accepted, queued, running, streaming, completed, failed, canceled]}
         created_at: {type: string, format: date-time}
     ConversationEvent:
       type: object
@@ -590,8 +798,10 @@ components:
         event_id: {type: string}
         conversation_id: {type: string}
         sequence: {type: string, pattern: '^[0-9]+$'}
-        type: {enum: [conversation.created, message.accepted, support.requested, support.queued, support.taken_over, support.message.created, support.resolved, support.canceled, support.requeued, ai.resumed]}
-        data: {type: object}
+        type: {enum: [conversation.created, message.accepted, support.requested, support.queued, support.taken_over, support.message.created, support.resolved, support.canceled, support.requeued, ai.resumed, ai.run.queued, ai.run.started, ai.run.failed, ai.run.canceled, assistant.message.created, assistant.message.reset, assistant.text.delta, assistant.message.completed]}
+        data:
+          type: object
+          description: B1 payloads remain unchanged. B2 AI events have run_id, message_id and numeric attempt; deltas additionally have decimal-string chunk_sequence and text, created has message seq, and failures may include sanitized error_code. See MESSAGE_SCHEMA.json AiEventData.
         timestamp: {type: string, format: date-time}
     Attachment:
       x-implementation: planned-P2
@@ -703,6 +913,62 @@ components:
         released_at: {type: [string, 'null'], format: date-time}
         read_through_seq: {type: [string, 'null'], pattern: '^[0-9]+$'}
         read_through_event_seq: {type: [string, 'null'], pattern: '^[0-9]+$'}
+    AiRun:
+      type: object
+      description: |
+        Java/MySQL owns state. One active run per conversation; a new user message cancels the previous
+        active run and preserves its partial output. User-message idempotency does not enqueue twice.
+        Assistant output updates the same output_message_id, never creates a message per token.
+        Attempts are incremented on claim; expired leases can recover up to three attempts. A recovery
+        emits assistant.message.reset before new text. Manual retry only requeues eligible latest input.
+        Human-mode/epoch changes invalidate active runs and late callbacks cannot publish new output.
+      required: [run_id, list_sequence, conversation_id, input_message_id, output_message_id, status, control_epoch, attempt, model, last_chunk_sequence, error_code, usage, created_at, updated_at]
+      properties:
+        run_id: {type: string}
+        list_sequence: {type: string, pattern: '^[0-9]+$'}
+        conversation_id: {type: string}
+        input_message_id: {type: string}
+        output_message_id: {type: string}
+        status: {enum: [queued, running, streaming, completed, failed, canceled]}
+        control_epoch: {type: string, pattern: '^[0-9]+$'}
+        attempt: {type: integer, minimum: 0, maximum: 3}
+        model: {type: string}
+        last_chunk_sequence: {type: string, pattern: '^[0-9]+$'}
+        error_code: {type: [string, 'null'], description: Sanitized provider/worker code or server recovery code such as RETRY_EXHAUSTED; never a provider error body.}
+        usage:
+          oneOf:
+            - {$ref: './MESSAGE_SCHEMA.json#/$defs/TokenUsage'}
+            - {type: 'null'}
+          description: Actual provider-reported usage; absent usage stays null and is never estimated.
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    LegacySession:
+      type: object
+      required: [session_id, first_message_id, last_message_id, message_count, created_at, updated_at]
+      properties:
+        session_id: {type: string}
+        first_message_id: {type: string, pattern: '^[0-9]+$'}
+        last_message_id: {type: string, pattern: '^[0-9]+$'}
+        message_count: {type: string, pattern: '^[0-9]+$'}
+        created_at: {type: [string, 'null'], format: date-time}
+        updated_at: {type: [string, 'null'], format: date-time}
+    LegacyMessage:
+      type: object
+      required: [source_id, session_id, sender_type, parts, created_at, read_only, has_audio]
+      properties:
+        source_id: {type: string, pattern: '^[0-9]+$'}
+        session_id: {type: string}
+        sender_type: {enum: [user, assistant, unknown]}
+        parts:
+          type: array
+          items:
+            type: object
+            properties:
+              type: {const: text}
+              text: {type: [string, 'null']}
+        created_at: {type: [string, 'null'], format: date-time}
+        read_only: {const: true}
+        has_audio: {type: boolean}
     Annotation:
       x-implementation: planned-P5
       type: object

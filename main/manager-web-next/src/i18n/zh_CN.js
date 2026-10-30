@@ -64,6 +64,16 @@ export default {
   'support.resolved': "已结束",
   'support.canceled': "已取消",
   'support.RELEASED': "接待已释放",
+  "ai.queued": "等待回复",
+  "ai.running": "生成中",
+  "ai.streaming": "生成中",
+  "ai.completed": "已完成",
+  "ai.failed": "回复失败，请重试",
+  "ai.canceled": "已停止",
+  "ai.stop": "停止",
+  "ai.retry": "重试",
+  "ai.capability": "支持 AI 文字回复与人工文字服务。",
+  "ai.unavailable": "AI 回复当前不可用，仍可保存消息和使用人工服务。",
   'support.capability': "支持文字记录、位置展示与人工文字服务。恢复AI仅切换状态，当前尚未接入AI执行和附件。",
 
   // 登录页面相关提示文本

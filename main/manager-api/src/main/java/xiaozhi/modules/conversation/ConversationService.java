@@ -28,6 +28,10 @@ public class ConversationService {
     private final ConversationAccessService access;
     private final ObjectMapper json;
     private final TransactionTemplate transactions;
+    private xiaozhi.modules.ai.AiExecutionService aiExecution;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAiExecution(xiaozhi.modules.ai.AiExecutionService service) { this.aiExecution = service; }
 
     public ConversationService(ConversationDao dao, ObjectMapper json, PlatformTransactionManager manager) {
         this.dao = dao;
@@ -42,7 +46,8 @@ public class ConversationService {
             throw badRequest("INVALID_REQUEST");
         }
         try {
-            return json.readerFor(type).with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).readValue(body);
+            return json.readerFor(type).with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .without(DeserializationFeature.ACCEPT_FLOAT_AS_INT).readValue(body);
         } catch (JsonProcessingException e) {
             throw badRequest("INVALID_REQUEST");
         } catch (java.io.IOException e) {
@@ -111,6 +116,7 @@ public class ConversationService {
             dao.insertMessage(messageId, id, seq, request.clientMessageId(), owner, parts, hash);
             dao.insertEvent(id(), id, eventSeq, "message.accepted", encode(Map.of("message_id", messageId, "seq", seq)));
             dao.advance(id, seq, eventSeq);
+            if (aiExecution != null) aiExecution.onUserMessage(id, messageId);
             return view(dao.duplicate(id, request.clientMessageId()));
         });
     }

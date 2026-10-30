@@ -51,9 +51,21 @@ public class ShiroConfig {
         return securityManager;
     }
 
+    public static ShiroFilterFactoryBean shirFilter(WebSecurityManager securityManager, SysParamsService sysParamsService) {
+        return buildShiroFilter(securityManager, sysParamsService, "");
+    }
+
     @Bean("shiroFilter")
-    public static ShiroFilterFactoryBean shirFilter(@Lazy WebSecurityManager securityManager,
-            @Lazy SysParamsService sysParamsService) {
+    public static ShiroFilterFactoryBean shiroFilterWithWorker(@Lazy WebSecurityManager securityManager,
+            @Lazy SysParamsService sysParamsService,
+            org.springframework.core.env.Environment environment) {
+        // This FactoryBean is itself a BeanPostProcessor and is constructed before @Value's
+        // embedded placeholder resolver is ready. Environment is available at that early phase.
+        return buildShiroFilter(securityManager, sysParamsService, environment.getProperty("ai.worker.key", ""));
+    }
+
+    private static ShiroFilterFactoryBean buildShiroFilter(WebSecurityManager securityManager,
+            SysParamsService sysParamsService, String aiWorkerKey) {
         ShiroFilterConfiguration config = new ShiroFilterConfiguration();
         config.setFilterOncePerRequest(true);
 
@@ -67,6 +79,7 @@ public class ShiroConfig {
         filters.put("conversation", new ConversationOauth2Filter());
         // 服务密钥过滤
         filters.put("server", new ServerSecretFilter(sysParamsService));
+        filters.put("aiWorker", new xiaozhi.modules.ai.AiWorkerKeyFilter(aiWorkerKey));
         shiroFilter.setFilters(filters);
 
         // 添加Shiro的内置过滤器
@@ -101,6 +114,7 @@ public class ShiroConfig {
         filterMap.put("/agent/chat-title/**", "server");
         filterMap.put("/agent/play/**", "anon");
         filterMap.put("/voiceClone/play/**", "anon");
+        filterMap.put("/internal/ai-worker/**", "aiWorker");
         filterMap.put("/api/v1/ai/**", "conversation");
         filterMap.put("/api/v1/support/**", "conversation");
         filterMap.put("/**", "oauth2");

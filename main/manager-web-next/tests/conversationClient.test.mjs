@@ -27,3 +27,25 @@ describe('conversation transport', () => {
     await expect(client.send('id', {})).rejects.toThrow('消息编号冲突');
   });
 });
+
+describe('AI transport precision and cancellation', () => {
+  it('reconnects with the exact decimal string cursor in both URL and Last-Event-ID, keeping token in headers', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response(200, {}));
+    const client = createConversationClient({ baseUrl: '/xiaozhi', getToken: () => 'private', onUnauthorized: vi.fn(), fetchImpl });
+    const abort = new AbortController();
+    await client.stream('c', '9223372036854775807', abort.signal);
+    const [url, opts] = fetchImpl.mock.calls[0];
+    expect(url).toContain('after=9223372036854775807'); expect(url).not.toContain('private');
+    expect(opts.headers['Last-Event-ID']).toBe('9223372036854775807');
+    expect(opts.headers.Authorization).toBe('Bearer private'); expect(opts.signal).toBe(abort.signal);
+  });
+  it('propagates selection abort to JSON requests without converting it into timeout', async () => {
+    const fetchImpl = vi.fn((url, { signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    }));
+    const client = createConversationClient({ baseUrl: '/xiaozhi', getToken: () => '', onUnauthorized: vi.fn(), fetchImpl });
+    const abort = new AbortController(); const pending = client.messages('c', '0', abort.signal);
+    abort.abort(); await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchImpl.mock.calls[0][1].signal.aborted).toBe(true);
+  });
+});

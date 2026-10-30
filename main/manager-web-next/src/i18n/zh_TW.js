@@ -63,6 +63,16 @@ export default {
   'support.resolved': "已結束",
   'support.canceled': "已取消",
   'support.RELEASED': "接待已釋放",
+  "ai.queued": "等待回覆",
+  "ai.running": "產生中",
+  "ai.streaming": "產生中",
+  "ai.completed": "已完成",
+  "ai.failed": "回覆失敗，請重試",
+  "ai.canceled": "已停止",
+  "ai.stop": "停止",
+  "ai.retry": "重試",
+  "ai.capability": "支援 AI 文字回覆與人工文字服務。",
+  "ai.unavailable": "AI 回覆目前無法使用，仍可儲存訊息及使用人工服務。",
   'support.capability': "支援文字記錄、位置顯示與人工文字服務。恢復 AI 僅切換狀態，目前尚未接入 AI 執行與附件。",
 
   // 登錄頁面相關提示文本

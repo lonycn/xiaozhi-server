@@ -48,24 +48,30 @@ public class MediaPolicy implements RoomOwnership {
     }
     @Override public boolean allowed(OwnedRoom room,Operation operation,String identity) {
         try {
-            var rows=store.rows("SELECT * FROM support_media_room WHERE session_id=? AND generation=? AND room_name=?",Long.parseLong(room.sessionId()),room.generation(),room.roomName());if(rows.size()!=1)return false;
-            var r=rows.getFirst();var s=store.session(number(r,"session_id"),false);String status=string(s,"status");long roomId=number(r,"id");
+            // A caller may already have an older RR snapshot before waiting for
+            // the conversation lock. Authorization needs current reads there.
+            // Outside a transaction these reads remain short autocommit reads;
+            // no database lock is held while the adapter performs network IO.
+            boolean locking=org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive();
+            String currentRead=locking?" FOR UPDATE":"";
+            var rows=store.rows("SELECT * FROM support_media_room WHERE session_id=? AND generation=? AND room_name=?"+currentRead,Long.parseLong(room.sessionId()),room.generation(),room.roomName());if(rows.size()!=1)return false;
+            var r=rows.getFirst();var s=store.session(number(r,"session_id"),locking);String status=string(s,"status");long roomId=number(r,"id");
             if(operation==Operation.LIST || operation==Operation.GET)return true;
             if(operation==Operation.REMOVE || operation==Operation.DELETE) {
                 String kind=operation==Operation.REMOVE?"remove_participant":"delete_room";
-                return Boolean.TRUE.equals(store.jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM support_media_outbox WHERE room_id=? AND kind=? AND status='running' AND lease_expires_at>CURRENT_TIMESTAMP(3) AND (identity=? OR (identity IS NULL AND ? IS NULL)))",Boolean.class,roomId,kind,identity,identity));
+                return Boolean.TRUE.equals(store.jdbc().queryForObject("SELECT EXISTS(SELECT 1 FROM support_media_outbox WHERE room_id=? AND kind=? AND status='running' AND lease_expires_at>CURRENT_TIMESTAMP(3) AND (identity=? OR (identity IS NULL AND ? IS NULL)))",Boolean.class,roomId,kind,identity,identity));
             }
             if(!Set.of("connecting","active","reconnecting").contains(status))return false;
-            var pending=store.pending(number(s,"id"),false);boolean preparation=pending!=null && number(pending,"target_generation")==room.generation() && Set.of("preparing","ready","committing").contains(string(pending,"status")) && pending.get("customer_approved_at")!=null && pending.get("target_accepted_at")!=null;
+            var pending=store.pending(number(s,"id"),locking);boolean preparation=pending!=null && number(pending,"target_generation")==room.generation() && Set.of("preparing","ready","committing").contains(string(pending,"status")) && pending.get("customer_approved_at")!=null && pending.get("target_accepted_at")!=null;
             if(number(s,"current_generation")!=room.generation() && !preparation)return false;
             if(operation==Operation.CREATE)return "preparing".equals(string(r,"status"));
             if(operation!=Operation.TOKEN || !Set.of("ready","active").contains(string(r,"status")))return false;
-            var members=store.members(roomId);var member=members.stream().filter(m->Objects.equals(identity,string(m,"identity"))).findFirst().orElse(null);
+            var members=store.rows("SELECT * FROM support_media_member WHERE room_id=? ORDER BY user_id"+currentRead,roomId);var member=members.stream().filter(m->Objects.equals(identity,string(m,"identity"))).findFirst().orElse(null);
             if(member==null || member.get("consented_at")==null || !Set.of("accepted","active").contains(string(member,"status")))return false;
             if(members.size()!=2 || members.stream().anyMatch(m->m.get("consented_at")==null || string(m,"status").equals("revoked")))return false;
             account(number(member,"user_id"));account(number(s,"customer_user_id"));profile(number(s,"agent_user_id"),false);
             // Read-only ownership checks do not acquire locks around network I/O.
-            boolean assignment=Boolean.TRUE.equals(store.jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM support_assignment a JOIN support_request q ON q.id=a.request_id WHERE a.id=? AND a.released_at IS NULL AND q.status='active' AND q.assigned_agent_user_id=a.agent_user_id AND a.agent_user_id=?)",Boolean.class,s.get("assignment_id"),s.get("agent_user_id")));
+            boolean assignment=!store.rows("SELECT a.id FROM support_assignment a JOIN support_request q ON q.id=a.request_id WHERE a.id=? AND a.released_at IS NULL AND q.status='active' AND q.assigned_agent_user_id=a.agent_user_id AND a.agent_user_id=?"+currentRead,s.get("assignment_id"),s.get("agent_user_id")).isEmpty();
             if(!assignment)return false;
             if(preparation)profile(number(pending,"target_agent_user_id"),false);
             return true;

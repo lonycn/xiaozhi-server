@@ -47,6 +47,9 @@ public class XssFilter implements Filter {
         // bounded read. Rewriting/buffering JSON here would invalidate the signature and bypass
         // that bound. Keep every other URL on the existing XSS path.
         if ("/internal/livekit/webhook".equals(request.getServletPath())) return true;
+        // Dedicated-key worker callbacks preserve literal provider transcripts; controller reads
+        // at most 1 MiB before strict parsing. This excludes no sibling or child URL.
+        if (request.getServletPath().matches("/internal/realtime-worker/sessions/[a-f0-9]{32}/events")) return true;
         // 放行不过滤的URL
         return properties.getExcludeUrls().stream()
                 .anyMatch(excludeUrl -> pathMatcher.match(excludeUrl, request.getServletPath()));

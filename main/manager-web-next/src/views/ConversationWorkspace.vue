@@ -21,7 +21,7 @@
           <div v-if="!selected" class="welcome-state"><span class="welcome-icon"><LegacyIcon class="el-icon-chat-dot-round" /></span><h2>从一个问题开始</h2><p>记录故障现象，保留每一次沟通。<br />选择左侧会话，或新建一段对话。</p><button class="primary-button" @click="openCreate">新建对话 <LegacyIcon class="el-icon-right" /></button></div>
           <div v-else-if="loadingMessages && !messages.length" class="welcome-state" role="status"><LegacyIcon class="el-icon-loading" /><p>正在读取聊天记录…</p></div>
           <div v-else-if="!messages.length" class="welcome-state"><span class="welcome-icon"><LegacyIcon class="el-icon-edit-outline" /></span><h2>这段对话还没有消息</h2><p>可以描述设备、故障表现和已尝试的操作。</p></div>
-          <article v-for="message in messages" :key="message.id" class="message-row" :class="{ incoming: message.sender_type && message.sender_type !== 'user' }"><div class="message-content"><div class="message-meta">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }} <span>{{ formatDate(message.created_at, true) }}</span></div><div class="message-bubble"><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><AttachmentPart v-else-if="['image', 'video', 'audio', 'file'].includes(part.type) && part.attachment_id" :part="part" :scope-key="attachmentScope" :can-annotate="!!selected && selected.state !== 'RESOLVED' && !sending && !loadingMessages" @annotate="openAnnotation" @snapshot="openAnnotationSnapshot" /><div v-else-if="part.type === 'location'" class="location-card"><LegacyIcon class="el-icon-location-outline" /> 共享位置：{{ part.latitude }}, {{ part.longitude }}<small>{{ part.coordinate_system }} · 精度 {{ part.accuracy_m }} 米</small></div></template></div><div v-if="message.sender_type === 'assistant'" class="message-saved">{{ $t('ai.' + (message.status || 'completed')) }} <template v-if="!humanActive && selected?.state === 'AI_ACTIVE' && runFor(message)"><button v-if="['queued', 'running', 'streaming'].includes(runFor(message).status)" :disabled="runBusy[`${selected.id}:${runFor(message).run_id}`]" @click="runAction(runFor(message), 'cancel')">{{ $t('ai.stop') }}</button><button v-if="['failed', 'canceled'].includes(runFor(message).status)" :disabled="runBusy[`${selected.id}:${runFor(message).run_id}`]" @click="runAction(runFor(message), 'retry')">{{ $t('ai.retry') }}</button></template></div><div v-else class="message-saved"><LegacyIcon class="el-icon-check" /> 已保存</div></div><span class="sender-avatar">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }}</span></article>
+          <article v-for="message in messages" :key="message.id" class="message-row" :class="{ incoming: message.sender_type && message.sender_type !== 'user' }"><div class="message-content"><div class="message-meta">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }} <span>{{ formatDate(message.created_at, true) }}</span></div><div class="message-bubble"><p v-if="message.sender_type === 'user' && !message.parts.length && ['transcribing','failed'].includes(message.status)">{{ $t('realtime.input_' + message.status) }}</p><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><AttachmentPart v-else-if="['image', 'video', 'audio', 'file'].includes(part.type) && part.attachment_id" :part="part" :scope-key="attachmentScope" :can-annotate="!!selected && selected.state !== 'RESOLVED' && !sending && !loadingMessages" @annotate="openAnnotation" @snapshot="openAnnotationSnapshot" /><div v-else-if="part.type === 'location'" class="location-card"><LegacyIcon class="el-icon-location-outline" /> 共享位置：{{ part.latitude }}, {{ part.longitude }}<small>{{ part.coordinate_system }} · 精度 {{ part.accuracy_m }} 米</small></div></template></div><div v-if="message.sender_type === 'assistant'" class="message-saved">{{ $t('ai.' + (message.status || 'completed')) }} <span v-if="message.status === 'failed'">{{ $t(aiFailureKey(runFor(message)?.error_code || message.error_code)) }}</span> <template v-if="!humanActive && selected?.state === 'AI_ACTIVE' && runFor(message)"><button v-if="['queued', 'running', 'streaming'].includes(runFor(message).status)" :disabled="runBusy[`${selected.id}:${runFor(message).run_id}`]" @click="runAction(runFor(message), 'cancel')">{{ $t('ai.stop') }}</button><button v-if="['failed', 'canceled'].includes(runFor(message).status) && runFor(message).error_code !== 'OMNI_AUDIO_LIMIT'" :disabled="runBusy[`${selected.id}:${runFor(message).run_id}`]" @click="runAction(runFor(message), 'retry')">{{ $t('ai.retry') }}</button></template></div><div v-else class="message-saved"><LegacyIcon class="el-icon-check" /> 已保存 <span v-if="realtimeInjections[message.id]"> · {{ $t('realtime.injection_' + realtimeInjections[message.id].status) }}</span></div></div><span class="sender-avatar">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }}</span></article>
         </div>
         <footer class="composer-area">
           <div v-if="selected" class="support-controls" aria-live="polite">
@@ -33,10 +33,12 @@
           </div>
           <p v-if="mediaNotices[selected?.id]" class="media-snapshot-notice" role="status">{{ $t('media.snapshotNotice') }}</p>
           <div class="capability-note"><LegacyIcon class="el-icon-info" /><span>{{ $t(aiAvailable === false ? 'ai.unavailable' : 'ai.capability') }}</span></div>
-          <MediaSessionOverlay :conversation-id="selected?.id || ''" :request-id="supportRequest?.status === 'active' ? supportRequest.request_id : ''" :identity="attachmentIdentity" :user-id="mediaUserId" :writable="selected?.state === 'HUMAN_ACTIVE'" @frame="openLiveFrame" />
+          <AIRealtimeOverlay ref="aiRealtime" :conversation-id="selected?.id || ''" :identity="attachmentIdentity" :allowed="realtimeAllowed" @state="realtimeChanged" @history="pollConversation" />
+          <MediaSessionOverlay :conversation-id="selected?.id || ''" :request-id="supportRequest?.status === 'active' ? supportRequest.request_id : ''" :identity="attachmentIdentity" :user-id="mediaUserId" :writable="selected?.state === 'HUMAN_ACTIVE'" @changed="humanMediaChanged" @frame="openLiveFrame" />
           <AnnotationEditor ref="annotationEditor" :conversation-id="selected?.id || ''" :scope-key="attachmentScope" :identity="attachmentIdentity" :writable="!!selected && selected.state !== 'RESOLVED'" :disabled="sending || loadingMessages" @ready="stageAnnotation" />
-          <AttachmentComposer :key="attachmentScope" v-model="attachmentRows" :conversation-id="selected?.id || ''" :identity="attachmentIdentity" :disabled="sending || loadingMessages || selected?.state === 'RESOLVED'" />
-          <form class="message-composer" @submit.prevent="sendMessage"><textarea v-model="draft" aria-label="消息内容" :disabled="!selected || sending || selected.state === 'RESOLVED'" maxlength="8000" rows="3" :placeholder="selected ? '描述你的问题…' : '新建或选择会话后，即可开始记录'" @keydown="composerKeydown" /><div class="composer-bottom"><span>{{ draft.length }}/8000 <span class="keyboard-hint">· Enter 发送，Shift + Enter 换行</span></span><button type="submit" class="primary-button send-button" :disabled="!selected || (!draft.trim() && !attachmentRows.length) || !attachmentsReady || sending || loadingMessages || selected.state === 'RESOLVED'"><LegacyIcon :class="sending ? 'el-icon-loading' : 'el-icon-position'" /> {{ sending ? '保存中' : '发送消息' }}</button></div></form>
+          <p v-if="realtimeBusy && attachmentRows.length" role="status">{{ $t('realtime.attachmentDraft') }}</p>
+          <AttachmentComposer :key="attachmentScope" v-model="attachmentRows" :conversation-id="selected?.id || ''" :identity="attachmentIdentity" :disabled="sending || loadingMessages || realtimeBusy || selected?.state === 'RESOLVED'" />
+          <form class="message-composer" @submit.prevent="sendMessage"><textarea v-model="draft" aria-label="消息内容" :disabled="!selected || sending || selected.state === 'RESOLVED'" maxlength="8000" rows="3" :placeholder="selected ? '描述你的问题…' : '新建或选择会话后，即可开始记录'" @keydown="composerKeydown" /><div class="composer-bottom"><span>{{ draft.length }}/8000 <span class="keyboard-hint">· Enter 发送，Shift + Enter 换行</span></span><button type="submit" class="primary-button send-button" :disabled="!selected || (!draft.trim() && (composerTextOnly || !attachmentRows.length)) || (!composerTextOnly && !attachmentsReady) || sending || loadingMessages || selected.state === 'RESOLVED'"><LegacyIcon :class="sending ? 'el-icon-loading' : 'el-icon-position'" /> {{ sending ? '保存中' : '发送消息' }}</button></div></form>
         </footer>
       </section>
     </div>
@@ -49,6 +51,9 @@
 </template>
 
 <script>
+import AIRealtimeOverlay from '../components/AIRealtimeOverlay.vue';
+import { aiFailureKey } from '../utils/aiErrors.mjs';
+import { REALTIME_TERMINAL } from '../realtime/session.mjs';
 import MediaSessionOverlay from '../components/MediaSessionOverlay.vue';
 import AnnotationEditor from '../components/AnnotationEditor.vue';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
@@ -69,11 +74,15 @@ function cursorInteger(value) {
 
 export default {
   name: 'ConversationWorkspace',
-  components: { AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay },
+  components: { AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay, AIRealtimeOverlay },
   data() {
-    return { environmentLabel: import.meta.env.VITE_ENV_LABEL || '开发预览', identityEpoch: 0, identityController: new AbortController(), attachmentDrafts: {}, mediaNotices: {}, conversations: [], selected: null, messages: [], drafts: {}, pending: {}, error: '', createError: '', loadingList: false, loadingMessages: false, sending: false, createVisible: false, creating: false, newTitle: '', listCursor: 0, listHasMore: false, selectionVersion: 0, supportRequest: null, supportBusy: false, handoffPending: {}, pollTimer: null, messageCursor: '0', eventCursor: '0', pollBusy: false, disposed: false, runs: [], aiAvailable: null, streamController: null, streamCursor: '0', streamProjections: {}, selectionController: null, runBusy: {} };
+    return { environmentLabel: import.meta.env.VITE_ENV_LABEL || '开发预览', identityEpoch: 0, identityController: new AbortController(), attachmentDrafts: {}, realtimeState: null, humanMedia: null, mediaNotices: {}, conversations: [], selected: null, messages: [], drafts: {}, pending: {}, error: '', createError: '', loadingList: false, loadingMessages: false, sending: false, createVisible: false, creating: false, newTitle: '', listCursor: 0, listHasMore: false, selectionVersion: 0, supportRequest: null, supportBusy: false, handoffPending: {}, pollTimer: null, messageCursor: '0', eventCursor: '0', pollBusy: false, disposed: false, runs: [], aiAvailable: null, streamController: null, streamCursor: '0', streamProjections: {}, selectionController: null, runBusy: {} };
   },
   computed: {
+    realtimeBusy() { return !!this.realtimeState?.session && !REALTIME_TERMINAL.has(this.realtimeState.session.status); },
+    composerTextOnly() { const pending = this.pending[this.selected?.id]; return this.realtimeBusy || !!(pending?.realtimeTextOnly && pending.text === this.draft); },
+    realtimeAllowed() { return !!this.mediaUserId && this.selected?.state === 'AI_ACTIVE' && !this.humanMedia; },
+    realtimeInjections() { return Object.fromEntries((this.realtimeState?.injections || []).map(item => [item.message_id, item])); },
     mediaUserId() { return String(store.state.userInfo?.id || store.state.userInfo?.user_id || store.state.userInfo?.userId || ''); },
     attachmentIdentity() { return attachmentIdentity(store.state); },
     attachmentScope() { return `${this.attachmentIdentity}:${this.selected?.id || ''}`; },
@@ -89,6 +98,9 @@ export default {
   mounted() { this.loadConversations(); this.pollTimer = setInterval(() => this.pollConversation(), 4000); },
   beforeUnmount() { this.disposed = true; this.identityController.abort(); this.streamController?.abort(); this.selectionController?.abort(); this.selectionVersion++; clearInterval(this.pollTimer); },
   methods: {
+    aiFailureKey,
+    realtimeChanged(state) { this.realtimeState = state; },
+    humanMediaChanged(session) { if (session && session.conversation_id !== this.selected?.id) return; this.humanMedia = session && !['ended','failed','rejected','canceled','expired'].includes(session.status) ? session : null; },
     openLiveFrame({ frame, conversationId }) { if (conversationId === this.selected?.id) this.$refs.annotationEditor?.openFrame(frame.id); },
     openAnnotation(source) { this.$refs.annotationEditor?.openSource(source); },
     openAnnotationSnapshot(id) { this.$refs.annotationEditor?.openSnapshot(id); },
@@ -102,7 +114,7 @@ export default {
     resetIdentity() {
       ++this.identityEpoch; ++this.selectionVersion; this.identityController.abort(); this.identityController = new AbortController();
       this.selectionController?.abort(); this.streamController?.abort();
-      this.attachmentDrafts = {}; this.mediaNotices = {}; this.drafts = {}; this.pending = {}; this.conversations = []; this.selected = null; this.messages = []; this.supportRequest = null; this.runs = [];
+      this.attachmentDrafts = {}; this.realtimeState = null; this.humanMedia = null; this.mediaNotices = {}; this.drafts = {}; this.pending = {}; this.conversations = []; this.selected = null; this.messages = []; this.supportRequest = null; this.runs = [];
       this.loadingList = false; this.loadingMessages = false; this.sending = false; this.supportBusy = false; this.creating = false; this.createVisible = false; this.error = ''; this.createError = ''; this.listCursor = 0; this.listHasMore = false;
     },
     runFor(message) { return this.runs.find(run => run.output_message_id === message.id); },
@@ -218,6 +230,7 @@ export default {
       finally { if (version === this.selectionVersion) this.supportBusy = false; }
     },
     handoff() {
+      this.$refs.aiRealtime?.shutdown();
       return this.supportAction(async id => {
         const clientId = this.handoffPending[id] || (this.handoffPending[id] = crypto.randomUUID());
         const result = await conversationApi.handoff(id, { client_request_id: clientId, requested_mode: 'text', target_agent_user_id: null });
@@ -260,7 +273,7 @@ export default {
       this.selectionController = new AbortController();
       const version = ++this.selectionVersion;
       this.runs = []; this.aiAvailable = null; this.streamCursor = '0'; this.streamProjections = {}; this.pollBusy = false; this.sending = false; this.supportBusy = false;
-      this.selected = item; this.messages = []; this.supportRequest = null; this.messageCursor = '0'; this.eventCursor = '0'; this.loadingMessages = true; this.error = '';
+      this.humanMedia = null; this.selected = item; this.messages = []; this.supportRequest = null; this.messageCursor = '0'; this.eventCursor = '0'; this.loadingMessages = true; this.error = '';
       try {
         let after = 0; let more = true;
         while (more) {
@@ -280,11 +293,11 @@ export default {
     scrollToLatest() { this.$nextTick(() => { const list = this.$refs.messageList; if (list) list.scrollTop = list.scrollHeight; }); },
     composerKeydown(event) { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); this.sendMessage(); } },
     async sendMessage() {
-      if (!this.selected || this.selected.state === 'RESOLVED' || (!this.draft.trim() && !this.attachmentRows.length) || !this.attachmentsReady || this.sending || this.loadingMessages) return;
-      const id = this.selected.id, version = this.selectionVersion; const text = this.draft, rows = [...this.attachmentRows], parts = mixedMessageParts(text, rows), signature = JSON.stringify(parts);
+      if (!this.selected || this.selected.state === 'RESOLVED' || (!this.draft.trim() && (this.composerTextOnly || !this.attachmentRows.length)) || (!this.composerTextOnly && !this.attachmentsReady) || this.sending || this.loadingMessages) return;
+      const id = this.selected.id, version = this.selectionVersion; const text = this.draft, rows = this.composerTextOnly ? [] : [...this.attachmentRows], parts = mixedMessageParts(text, rows), signature = JSON.stringify(parts);
       const previous = this.pending[id];
       const clientId = previous?.signature === signature ? previous.clientId : crypto.randomUUID();
-      this.pending[id] = { id, text, signature, clientId }; this.sending = true; this.error = '';
+      this.pending[id] = { id, text, signature, clientId, realtimeTextOnly: this.composerTextOnly }; this.sending = true; this.error = '';
       try {
         const message = await conversationApi.send(id, { client_message_id: clientId, parts }, this.selectionController?.signal);
         if (version !== this.selectionVersion || this.disposed) return;

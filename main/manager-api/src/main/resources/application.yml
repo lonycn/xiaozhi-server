@@ -73,6 +73,7 @@ features:
   attachments-enabled: false
   annotations-enabled: false
   support-media-enabled: false
+  realtime-ai-enabled: false
 
 # Worker credential is dedicated to this execution protocol and never a user/server token.
 ai:
@@ -116,3 +117,11 @@ support-media:
   ready-seconds: 15
   reconnect-seconds: 60
   maintenance-delay-ms: 3000
+
+# P3 controlled provider WS execution bridge; credentials for the provider remain in Python only.
+realtime:
+  model: qwen3.8-omni-flash-realtime
+  worker:
+    key: ${REALTIME_WORKER_KEY:}
+    public-url: ${REALTIME_WORKER_PUBLIC_URL:}
+  maintenance-delay-ms: 2000

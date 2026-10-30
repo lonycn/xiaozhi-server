@@ -30,6 +30,10 @@ public class ConversationService {
     private final TransactionTemplate transactions;
     private xiaozhi.modules.ai.AiExecutionService aiExecution;
     private xiaozhi.modules.attachment.AttachmentService attachments;
+    private xiaozhi.modules.realtime.RealtimeHooks realtime;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setRealtime(xiaozhi.modules.realtime.RealtimeHooks service) { realtime = service; }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAttachments(xiaozhi.modules.attachment.AttachmentService service) { this.attachments = service; }
@@ -121,7 +125,7 @@ public class ConversationService {
             bindAttachments(owner, id, messageId, seq, request.parts());
             dao.insertEvent(id(), id, eventSeq, "message.accepted", encode(Map.of("message_id", messageId, "seq", seq)));
             dao.advance(id, seq, eventSeq);
-            if (aiExecution != null) aiExecution.onUserMessage(id, messageId);
+            if ((realtime == null || !realtime.onUserMessage(id, messageId)) && aiExecution != null) aiExecution.onUserMessage(id, messageId);
             return view(dao.duplicate(id, request.clientMessageId()));
         });
     }

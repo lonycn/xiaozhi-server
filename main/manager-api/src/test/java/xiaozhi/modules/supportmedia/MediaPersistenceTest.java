@@ -155,4 +155,21 @@ class MediaPersistenceTest {
 
     @Test @Order(12) void datetimeMeasurementsStayRealAcrossMatchingJdbcAndMysqlTimezones(){Session s=create(78,AUDIO);Instant now=Instant.now();assertTrue(Duration.between(now,s.createdAt()).abs().toSeconds()<10);long remaining=Duration.between(now,s.expiresAt()).toSeconds();assertTrue(remaining>=30 && remaining<=50,"invitation should be seconds away, never eight hours");db.update("UPDATE support_media_session SET expires_at=DATE_SUB(CURRENT_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE id=?",s.id());maintenance.expire();maintenance.processOutbox();assertEquals("expired",media.get(7L,s.id()).status());}
 
+    @Test @Order(13) void tokenOwnershipReadsLatestAfterRoomTransitionDespiteRepeatableReadSnapshot() {
+        Session invited=create(71,AUDIO);
+        Session accepted=media.accept(71L,invited.id(),new Accept(invited.controlEpoch(),AUDIO));
+        var room=store.generation(Long.parseLong(accepted.id()),1);
+        String identity=string(store.member(number(room,"id"),7),"identity");
+        store.tx(()->{
+            assertEquals("preparing",string(store.room(number(room,"id"),false),"status"));
+            // Another connection commits the actual asynchronous room transition.
+            CompletableFuture.runAsync(()->db.update("UPDATE support_media_room SET status='ready',livekit_sid='RM_rr_fixture' WHERE id=?",room.get("id"))).join();
+            assertEquals("ready",string(store.generation(Long.parseLong(accepted.id()),1),"status"));
+            assertTrue(policy.allowed(MediaService.owned(room),Operation.TOKEN,identity),
+                    "Current locked state must not be denied using an older consistent-read snapshot");
+            return null;
+        });
+        end(accepted);
+    }
+
 }

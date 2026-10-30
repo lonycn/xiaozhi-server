@@ -15,6 +15,8 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+import re
+import shlex
 from urllib.parse import urlsplit
 
 DEV = Path(__file__).resolve().parent
@@ -94,6 +96,12 @@ def configure():
         if not rtc.get("room-prefix"):
             raise RuntimeError("RTC enabled without private configuration")
         properties["features.support-media-enabled"] = "true"
+    realtime = realtime_settings()
+    if realtime.get("enabled") is True:
+        validate_realtime_settings(realtime)
+        properties.update({"features.realtime-ai-enabled": "true",
+                           "realtime.worker.key": realtime["worker_key"],
+                           "realtime.worker.public-url": realtime["public_url"]})
     (RUNTIME / "application-dev.properties").write_text("\n".join(f"{key}={value}" for key, value in properties.items()) + "\n")
     for name in ("credentials.json", "compose.env", "application-dev.properties"):
         (RUNTIME / name).chmod(0o600)
@@ -219,6 +227,184 @@ def disable_rtc():
         validate_rtc(settings)
         settings["enabled"] = False
         private_json("rtc-settings.json", settings)
+
+
+def realtime_settings():
+    path = RUNTIME / "realtime-settings.json"
+    if not path.exists():
+        return {"enabled": False}
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or type(data.get("enabled")) is not bool:
+        raise RuntimeError("Invalid realtime settings")
+    return data
+
+
+def realtime_public_url(value):
+    try:
+        if not isinstance(value, str) or any(ord(c) < 33 or ord(c) == 127 or c == "\\" for c in value):
+            raise ValueError()
+        u = urlsplit(value)
+        if (u.scheme not in ("ws", "wss") or not u.hostname or u.username or u.password
+                or u.query or u.fragment or u.path != "/realtime" or u.port == 0
+                or (u.scheme == "ws" and u.hostname not in ("127.0.0.1", "localhost", "::1"))):
+            raise ValueError()
+        return u.geturl()
+    except ValueError:
+        raise RuntimeError("Invalid realtime public WebSocket URL") from None
+
+
+def validate_realtime_settings(settings):
+    key = settings.get("worker_key")
+    if not isinstance(key, str) or not 32 <= len(key) <= 512 or not re.fullmatch(r"[A-Za-z0-9_-]+", key):
+        raise RuntimeError("Invalid realtime worker key")
+    if not isinstance(settings.get("server_id"), str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", settings["server_id"]):
+        raise RuntimeError("Invalid realtime server identity")
+    realtime_public_url(settings.get("public_url"))
+
+
+def realtime_jar_check():
+    marker = "BOOT-INF/classes/xiaozhi/modules/realtime/RealtimeController.class"
+    maintenance = "BOOT-INF/classes/xiaozhi/modules/realtime/RealtimeMaintenance.class"
+    try:
+        with zipfile.ZipFile(API / "target/xiaozhi-esp32-api.jar") as archive:
+            if not {marker, maintenance}.issubset(archive.namelist()):
+                raise RuntimeError("Realtime requires a built API with realtime and maintenance support")
+    except (OSError, zipfile.BadZipFile):
+        raise RuntimeError("Realtime requires a built API with realtime and maintenance support") from None
+
+
+def realtime_provider_config():
+    path = RUNTIME / "ai-worker.json"
+    try:
+        if path.stat().st_mode & 0o077:
+            raise ValueError()
+        source = json.loads(path.read_text())
+        url = urlsplit(source["base_url"])
+        api_key = source["api_key"]
+        workspace = source.get("workspace_id", "")
+        if (url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment
+                or url.port not in (None, 443) or not isinstance(api_key, str) or not api_key.strip()
+                or any(ord(c) < 32 or ord(c) == 127 for c in api_key)):
+            raise ValueError()
+        host = url.hostname
+        if host in ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"):
+            if not isinstance(workspace, str) or not re.fullmatch(r"[a-zA-Z0-9-]{1,80}", workspace):
+                raise ValueError()
+            region = "cn-beijing" if host == "dashscope.aliyuncs.com" else "ap-southeast-1"
+            host = f"{workspace}.{region}.maas.aliyuncs.com"
+        elif not re.fullmatch(r"[a-z0-9-]+\.(cn-beijing|ap-southeast-1)\.maas\.aliyuncs\.com", host):
+            raise ValueError()
+        elif workspace and workspace.lower() != host.split(".", 1)[0]:
+            raise ValueError()
+        return "wss://" + host + "/api-ws/v1/realtime", api_key
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        raise RuntimeError("Realtime needs a valid private workspace Bailian AI worker configuration") from None
+
+
+def prepare_realtime(public_url=None):
+    realtime_jar_check()
+    provider_url, api_key = realtime_provider_config()
+    existing = realtime_settings()
+    key = existing.get("worker_key") or secrets.token_urlsafe(48)
+    server_id = existing.get("server_id") or "dev-realtime-" + secrets.token_hex(12)
+    settings = {"enabled": True, "worker_key": key, "server_id": server_id,
+                "public_url": realtime_public_url(public_url or existing.get("public_url") or "ws://127.0.0.1:18899/realtime")}
+    validate_realtime_settings(settings)
+    if key == api_key:
+        raise RuntimeError("Realtime worker key must be independent")
+    worker = {"enabled": True, "manager_url": API_URL, "worker_key": key,
+              "provider_url": provider_url, "api_key": api_key, "host": "127.0.0.1", "port": 18899,
+              "worker_id": "dev-realtime-local", "server_id": server_id,
+              "origins": ["http://127.0.0.1:18894", "http://localhost:18894"], "allow_missing_origin": False}
+    private_json("realtime-worker.json", worker)
+    private_json("realtime-settings.json", settings)
+
+
+def realtime_process():
+    path = RUNTIME / "realtime-worker-process.json"
+    if not path.exists():
+        return None
+    try:
+        info = json.loads(path.read_text())
+        pid = info["pid"]
+        if type(pid) is not int or pid <= 1 or not info["identity"] or process_identity(pid) != info["identity"]:
+            return None
+        command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        args = shlex.split(command)
+        if not any(args[i:i + 2] == ["-m", "realtime_worker"] for i in range(len(args) - 1)):
+            return None
+        if not any(args[i:i + 2] == ["--config", str(RUNTIME / "realtime-worker.json")] for i in range(len(args) - 1)):
+            return None
+        return info
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def realtime_python():
+    python = os.environ.get("XIAOZHI_REALTIME_WORKER_PYTHON", str(ROOT.parent / ".realtime-venv/bin/python"))
+    try:
+        subprocess.run([python, "-c", "import aiohttp, httpx, websockets, PIL"], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Realtime worker requires its prepared independent Python environment") from None
+    return python
+
+
+def start_realtime_worker():
+    if realtime_process(): return
+    settings = realtime_settings()
+    if settings.get("enabled") is not True:
+        raise RuntimeError("Realtime is not enabled")
+    validate_realtime_settings(settings)
+    python = realtime_python()
+    try:
+        path = RUNTIME / "realtime-worker.json"
+        if path.stat().st_mode & 0o077:
+            raise ValueError()
+        worker = json.loads(path.read_text())
+        if (worker.get("enabled") is not True or worker.get("worker_key") != settings["worker_key"]
+                or worker.get("server_id") != settings["server_id"] or worker.get("host") != "127.0.0.1"
+                or worker.get("port") != 18899 or worker.get("manager_url") != API_URL
+                or worker.get("origins") != ["http://127.0.0.1:18894", "http://localhost:18894"]
+                or worker.get("allow_missing_origin") is not False):
+            raise ValueError()
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise RuntimeError("Invalid private realtime worker configuration") from None
+    with (RUNTIME / "realtime-worker.log").open("a") as log:
+        process = subprocess.Popen([python, "-m", "realtime_worker", "--config", str(RUNTIME / "realtime-worker.json")],
+                                   cwd=ROOT / "main/xiaozhi-server", stdout=log, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+    identity = process_identity(process.pid)
+    if not identity:
+        raise RuntimeError("Realtime worker exited; inspect its private log")
+    private_json("realtime-worker-process.json", {"pid": process.pid, "identity": identity})
+    if not realtime_process():
+        raise RuntimeError("Realtime worker identity verification failed")
+
+
+def stop_realtime_worker():
+    info = realtime_process()
+    if not info:
+        record = RUNTIME / "realtime-worker-process.json"
+        if record.exists():
+            try:
+                pid = json.loads(record.read_text())["pid"]
+                if type(pid) is not int or pid <= 1:
+                    raise ValueError()
+                if process_identity(pid):
+                    raise RuntimeError("Realtime process identity mismatch; refusing to stop or disable")
+                record.unlink()
+            except (OSError, ValueError, KeyError, TypeError):
+                raise RuntimeError("Invalid realtime process record; refusing to stop or disable") from None
+        return
+    os.killpg(info["pid"], signal.SIGTERM)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if not realtime_process():
+            (RUNTIME / "realtime-worker-process.json").unlink(missing_ok=True)
+            return
+        time.sleep(.1)
+    raise RuntimeError("Realtime worker did not stop; feature remains enabled")
 
 
 def set_annotations_enabled(enabled):
@@ -574,7 +760,7 @@ def stop_process(find_process, filename):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
     parser.add_argument("--storage", choices=["filesystem", "s3"])
@@ -582,6 +768,7 @@ def main():
     parser.add_argument("--vision-model", help="Previously verified Bailian vision model for this Dev workspace")
     parser.add_argument("--rtc-env", help="Existing private LiveKit configuration file")
     parser.add_argument("--rtc-public-url", help="Client-reachable LiveKit URL")
+    parser.add_argument("--realtime-public-url", help="Client-reachable realtime WebSocket URL")
     args = parser.parse_args()
     configure()
     if args.action == "media-enable":
@@ -631,6 +818,30 @@ def main():
         print("RTC disabled; room cleanup continues asynchronously when configured")
     elif args.action == "rtc-status":
         print("RTC enabled:", rtc_settings().get("enabled") is True)
+    elif args.action == "realtime-enable":
+        realtime_jar_check()
+        realtime_provider_config()
+        realtime_python()
+        if args.realtime_public_url:
+            realtime_public_url(args.realtime_public_url)
+        stop_realtime_worker()
+        prepare_realtime(args.realtime_public_url)
+        configure()
+        recreate_api()
+        start_realtime_worker()
+        print("Realtime enabled")
+    elif args.action == "realtime-disable":
+        realtime_jar_check()
+        stop_realtime_worker()
+        settings = realtime_settings()
+        settings["enabled"] = False
+        private_json("realtime-settings.json", settings)
+        configure()
+        recreate_api()
+        print("Realtime disabled; session history retained and leases expire asynchronously")
+    elif args.action == "realtime-status":
+        print("Realtime enabled:", realtime_settings().get("enabled") is True)
+        print("Realtime worker running:", bool(realtime_process()))
     elif args.action == "ai-enable":
         model = export_ai_config()
         stop_process(ai_process, "ai-worker-process.json")
@@ -681,6 +892,8 @@ def main():
         compose("up", "-d", "--wait", "mysql", "redis")
         if args.seed_local_console:
             seed_local_console()
+        if realtime_settings().get("enabled") is True:
+            realtime_jar_check()
         stage_api_jar()
         compose("up", "-d", "--force-recreate", "api")
         print("Waiting for Dev API…", flush=True)
@@ -689,11 +902,14 @@ def main():
             start_media_worker()
         if ai_settings().get("enabled") is True:
             start_ai_worker()
+        if realtime_settings().get("enabled") is True:
+            start_realtime_worker()
         start_candidate()
         print("Waiting for Dev frontend…", flush=True)
         wait_http(CANDIDATE_URL)
         print(CANDIDATE_URL + "/#/conversations", flush=True)
     elif args.action == "stop":
+        stop_realtime_worker()
         stop_process(media_process, "media-worker-process.json")
         stop_process(ai_process, "ai-worker-process.json")
         stop_process(candidate_process, "candidate-process.json")

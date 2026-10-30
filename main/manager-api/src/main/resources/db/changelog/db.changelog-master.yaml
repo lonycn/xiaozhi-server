@@ -772,3 +772,6 @@ databaseChangeLog:
   - include:
       file: support-media.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: realtime-ai.changelog.yaml
+      relativeToChangelogFile: true

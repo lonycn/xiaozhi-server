@@ -31,11 +31,11 @@ public class MediaWebhookController {
             if(r!=null){boolean stale=!roomSid.isEmpty() && r.get("livekit_sid")!=null && !roomSid.equals(string(r,"livekit_sid"));result=stale?"stale_ignored":"observed";
                 if(!stale){var members=store.members(number(r,"id"));var member=members.stream().filter(m->identity.equals(string(m,"identity"))).findFirst().orElse(null);
                     if(type.equals("participant_joined") && identity.matches("[A-Za-z0-9_-]{1,64}") && (member==null || "revoked".equals(string(member,"status")) || Set.of("retired","cleanup_pending","cleaned").contains(string(r,"status"))))service.queue(s,r,null,"remove_participant",identity,true);
-                    if(type.equals("participant_left") && member!=null && sid.equals(string(member,"participant_sid")))store.jdbc.update("UPDATE support_media_member SET ready_at=NULL,receiving_audio=0,receiving_video=0 WHERE id=?",member.get("id"));
-                    if(type.equals("room_finished") && !Set.of("retired","cleanup_pending","cleaned").contains(string(r,"status")))store.jdbc.update("UPDATE support_media_member SET ready_at=NULL,receiving_audio=0,receiving_video=0 WHERE room_id=?",r.get("id"));
+                    if(type.equals("participant_left") && member!=null && sid.equals(string(member,"participant_sid")))store.jdbc().update("UPDATE support_media_member SET ready_at=NULL,receiving_audio=0,receiving_video=0 WHERE id=?",member.get("id"));
+                    if(type.equals("room_finished") && !Set.of("retired","cleanup_pending","cleaned").contains(string(r,"status")))store.jdbc().update("UPDATE support_media_member SET ready_at=NULL,receiving_audio=0,receiving_video=0 WHERE room_id=?",r.get("id"));
                 }
             }
-            store.jdbc.update("INSERT INTO support_media_webhook(event_id,body_hash,session_id,room_id,event_type,result) VALUES(?,?,?,?,?,?)",id,digest,s==null?null:s.get("id"),r==null?null:r.get("id"),type,result);return null;
+            store.jdbc().update("INSERT INTO support_media_webhook(event_id,body_hash,session_id,room_id,event_type,result) VALUES(?,?,?,?,?,?)",id,digest,s==null?null:s.get("id"),r==null?null:r.get("id"),type,result);return null;
         });return new Result<>().ok(Map.of("accepted",true));
     }
 }

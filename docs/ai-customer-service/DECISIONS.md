@@ -27,3 +27,9 @@
 ## ADR-007：Dev 常驻开发与渐进迁移 Vue 3
 
 按用户要求建立 `Dev` 分支，后续日常开发/测试基于 Dev，运行独立的 `xiaozhi-server-dev` 环境。当前先用现有 Vue 2 后台新增统一对话页面，打通真正的持久 API。Vue 3 是后续前端升级方向，结合 Vite、Vue Router 4、Vue 3 组件库分模块迁移；原计划“不重构 Vue 3”不再是长期限制，但本轮不将 61 个现有组件整体迁移。迁移步骤与启停见 `dev/README.md`。
+
+## ADR-008：P3 实时 AI 使用单一受控 WebSocket bridge（2026-10-30）
+
+在 B1–B5 账本基础上，以独立、默认关闭的 Python realtime_worker 对接已验证开通的 qwen3.8-omni-flash-realtime。Java 持有会话、单次短连接票据、租约、control_epoch、统一消息和文本注入 ACK 的最终权限；浏览器不持 provider key，也不能提交 assistant 转写或任意工具结果。模型真实 audio commit 先预留“转写中”用户消息，真实 ASR 完成再填入同一条；回复、取消部分和实际用量沿用同一会话历史。启动显式取消未完成 B2 run；人工切换在原事务中终结 realtime，B5 真人媒体保持独立。
+
+本决策增量扩展原 P3 验证范围，保留原规划及既有 ADR。直接 provider WebRTC/AOQ 的移动弱网和低延迟收益仍需另行验证，当前不并建第二条生产人机通道。摄像头是显式同意、限频限大小的 JPEG 随音频采样，不能称为已实现完整视频。业务工具无可信 adapter 时明确 unsupported；不制造执行结果。详细协议与边界见 [实时 AI 契约](REALTIME_AI_CONTRACT.md)、[P3 细化决策](REALTIME_AI_DECISIONS.md)。

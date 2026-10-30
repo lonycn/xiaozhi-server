@@ -1,0 +1,5 @@
+# Independent worker environment; no ESP32 device/audio dependencies.
+aiohttp==3.14.5
+httpx==0.28.1
+websockets==14.2
+Pillow==11.3.0

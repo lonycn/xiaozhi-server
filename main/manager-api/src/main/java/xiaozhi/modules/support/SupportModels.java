@@ -18,6 +18,9 @@ public final class SupportModels {
     public record Agent(long userId, String role, boolean enabled, int capacityText, boolean accepting,
                         Instant presenceExpiresAt) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record AgentSummary(long userId, String username, boolean accountEnabled, String role,
+                               boolean enabled, int capacityText, boolean accepting, Instant presenceExpiresAt) { }
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Request(String requestId, long listSequence, String conversationId, String clientRequestId,
                           String status, String requestedMode, Long targetAgentUserId, Long assignedAgentUserId,
                           Instant requestedAt, Instant assignedAt, Instant firstResponseAt, Instant endedAt,

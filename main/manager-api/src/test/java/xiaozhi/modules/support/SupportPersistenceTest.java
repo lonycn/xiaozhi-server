@@ -237,4 +237,41 @@ class SupportPersistenceTest {
         support.claim(3L, request);
         assertEquals(1, number("SELECT COUNT(*) FROM support_assignment WHERE request_id=? AND released_at IS NULL", request));
     }
+
+    @Test
+    void deskReadsRestoreOnlyLiveAssignmentsAndPreserveProfilePagination() {
+        assertNull(support.me(5L));
+        assertEquals("support_agent", support.me(3L).role());
+        support.upsertAgent(1L, 3L, new AgentUpdate("support_agent", true, 2));
+        String first = handoff(conversation());
+        String other = handoff(conversation());
+        String last = handoff(conversation());
+        support.claim(3L, first);
+        support.claim(4L, other);
+        support.claim(3L, last);
+        var page = support.assigned(3L, 0, 1);
+        assertTrue(page.hasMore());
+        assertEquals(last, page.items().getFirst().requestId());
+        var next = support.assigned(3L, page.nextCursor(), 1);
+        assertFalse(next.hasMore());
+        assertEquals(first, next.items().getFirst().requestId());
+        assertEquals(List.of(other), support.assigned(4L, 0, 100).items().stream().map(Request::requestId).toList());
+        support.requeue(3L, first, new EndRequest("交接"), false);
+        assertEquals(List.of(last), support.assigned(3L, 0, 100).items().stream().map(Request::requestId).toList());
+        support.resolve(4L, other, null);
+        support.claim(4L, first);
+        assertEquals(List.of(last), support.assigned(3L, 0, 100).items().stream().map(Request::requestId).toList());
+        assertEquals(403, problem(() -> support.assigned(5L, 0, 100)));
+        assertEquals(403, problem(() -> support.agents(3L, 0, 100)));
+        var agents = support.agents(1L, 0, 1);
+        assertTrue(agents.hasMore());
+        assertEquals(4L, agents.items().getFirst().userId());
+        assertEquals(3L, support.agents(1L, agents.nextCursor(), 1).items().getFirst().userId());
+        jdbc.update("UPDATE sys_user SET status=0 WHERE id=3");
+        assertEquals(403, problem(() -> support.me(3L)));
+        assertFalse(support.agents(1L, 4, 1).items().getFirst().accountEnabled());
+        support.upsertAgent(1L, 4L, new AgentUpdate("expert", false, 1));
+        assertNull(support.me(4L));
+        assertEquals(403, problem(() -> support.assigned(4L, 0, 100)));
+    }
 }

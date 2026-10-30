@@ -10,11 +10,11 @@
 
 ```sh
 python3 dev/manage.py up
-python3 dev/manage.py candidate-up
-python3 dev/manage.py candidate-status
+python3 dev/manage.py up
+python3 dev/manage.py status
 ```
 
-访问 <http://127.0.0.1:18894/#/conversations>，登录账号沿用本机 Dev 智控台。旧前端仍在 18892，Dev API 在 18893。需要停止新前端时执行 `python3 dev/manage.py candidate-stop`，该命令保留后端与 Dev 数据。
+访问 <http://127.0.0.1:18894/#/conversations>，登录账号沿用本机 Dev 智控台。旧前端可通过 `python3 dev/manage.py legacy-up` 在 18892 启动，Dev API 在 18893。需要停止新前端时执行 `python3 dev/manage.py candidate-stop`，该命令保留后端与 Dev 数据。
 
 也可直接在本目录执行 `npm run dev`。可选环境变量见 `.env.example`；私有覆盖放在忽略提交的 `.env.local`。`VITE_*` 是会进入浏览器的公开配置，禁止放入服务密钥。开发和静态预览默认代理 `/xiaozhi` 到 18893。
 
@@ -56,6 +56,8 @@ Docker 验证尝试在下载 Node/nginx 基础镜像元数据时遇到 Docker Hu
 
 ## 本次边界与回退
 
-本次完成前端框架迁移。原规划中的 AI 回复、附件存储、人工接待和实时音视频是后续业务开发内容，页面继续明确显示已有能力范围。外部知识库、云端音色克隆、真实音频采集/播放、设备连接及完整文件上传需要相应服务、浏览器权限和真实设备配合验收。
+框架迁移后已完成 B1 人工文字服务整合：用户申请/取消、客服接单/回复/重排/结束、刷新恢复接待及管理员档案配置。AI 实际执行、附件存储和实时音视频仍为后续业务开发内容，恢复 AI 按钮仅恢复状态。外部知识库、云端音色克隆、真实音频采集/播放、设备连接及完整文件上传需要相应服务、浏览器权限和真实设备配合验收。
 
-按本次“新建一个文件夹迭代”的要求，保留 `manager-web-next`，没有执行 M5 中替换旧目录的步骤，也没有切换默认发布镜像。需要回退使用旧前端时打开 18892；不要删除 Dev 数据卷。此次不改变设备固件、OTA/WebSocket 地址或现有生产服务。
+按本次“新建一个文件夹迭代”的要求，保留 `manager-web-next`，没有合并或删除旧目录。日常 `dev/manage.py up` 和默认 `Dockerfile-web` 构建路径已选用 Vue 3；Docker 构建默认保持新增会话/客服入口关闭，需构建参数 `VITE_CONVERSATION_ENABLED=true` 并同时启用后端两个开关才能开放。现有生产镜像和服务未切换。需要回退使用旧前端时执行 `python3 dev/manage.py legacy-up` 并打开 18892；不要删除 Dev 数据卷。此次不改变设备固件、OTA/WebSocket 地址或现有生产服务。
+
+整合验证补充：149 项单元/组件测试、10 项契约测试、13 项快照辅助测试、7 项 Dev 进程测试通过，六种语言各 1605 个键一致，生产静态构建通过。真实浏览器使用隔离账号与数据库验证了档案配置、转人工、双向消息、刷新恢复、重新排队、结束/取消及明确恢复状态；390px 用户页和客服页检查无横向溢出。后端回归和实际部署边界见 [验证记录](../../docs/ai-customer-service/SUPPORT_B1_VALIDATION.md)。

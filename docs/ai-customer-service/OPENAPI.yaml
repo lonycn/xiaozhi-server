@@ -204,6 +204,73 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/me:
+    get:
+      operationId: getCurrentSupportAgent
+      description: Any authenticated enabled account can read its own enabled profile, or null when absent/disabled. Does not renew presence or grant staff permissions.
+      responses:
+        '200':
+          description: Current enabled staff profile or null
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        oneOf:
+                          - {$ref: '#/components/schemas/SupportAgent'}
+                          - {type: 'null'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/support/assigned:
+    get:
+      operationId: listCurrentSupportAssignments
+      description: Requires support:queue:read and an enabled staff profile/account. Only active requests with this actor as current assignee and an unreleased assignment are returned; historical assignments grant no live metadata access. Presence expiry does not hide current assignments.
+      parameters:
+        - {name: before, in: query, description: Exclusive list_sequence cursor; zero starts the list., schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Current assignments ordered by list_sequence descending
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/SupportRequest'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/support/agents:
+    get:
+      operationId: listSupportAgents
+      description: Requires support:agents:manage and an enabled super-admin account. Includes disabled profiles/accounts for management. Lists existing profiles only and grants no conversation access.
+      parameters:
+        - {name: before, in: query, description: Exclusive user_id cursor; zero starts the list., schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Staff profiles ordered by user_id descending
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/SupportAgentSummary'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
   /api/v1/support/agents/{userId}:
     put:
       operationId: updateSupportAgent
@@ -573,6 +640,14 @@ components:
         capacity_text: {type: integer, minimum: 1, maximum: 20}
         accepting: {type: boolean}
         presence_expires_at: {type: [string, 'null'], format: date-time}
+    SupportAgentSummary:
+      allOf:
+        - {$ref: '#/components/schemas/SupportAgent'}
+        - type: object
+          required: [username, account_enabled]
+          properties:
+            username: {type: string}
+            account_enabled: {type: boolean}
     Handoff:
       type: object
       additionalProperties: false

@@ -40,7 +40,7 @@ def main():
     # Bind the advertised HTTP target to this specific database before creating fixtures.
     existing = sql("SELECT COUNT(*) FROM support_request;")
     assert existing.isdigit()
-    base = int(time.time() * 1000) * 10
+    base = 8_000_000_000_000_000_000 + int(time.time() * 1000) * 10
     users = {name: base + n for n, name in enumerate(("admin", "owner", "staff", "expert", "stranger"))}
     tokens = {name: secrets.token_hex(24) for name in users}
     for name, actor in users.items():
@@ -70,12 +70,18 @@ def main():
 
     call("GET", "/api/v1/support/queue", status=401)
     call("GET", "/api/v1/support/queue", "stranger", status=403)
+    assert call("GET", "/api/v1/support/me", "owner") is None
+    call("GET", "/api/v1/support/agents", "owner", status=403)
     for name, role in (("staff", "support_agent"), ("expert", "expert")):
         call("PUT", f"/api/v1/support/agents/{users[name]}", "owner",
              {"role": role, "enabled": True, "capacity_text": 1}, status=403)
         call("PUT", f"/api/v1/support/agents/{users[name]}", "admin",
              {"role": role, "enabled": True, "capacity_text": 1})
         call("POST", "/api/v1/support/presence", name, {"accepting": True})
+        assert call("GET", "/api/v1/support/me", name)["user_id"] == str(users[name])
+    agents = call("GET", "/api/v1/support/agents?limit=1&before=" + str(users["expert"] + 1), "admin")
+    assert agents["has_more"] and agents["items"][0]["user_id"] == str(users["expert"])
+    assert call("GET", "/api/v1/support/agents?limit=1&before=" + agents["next_cursor"], "admin")["items"][0]["user_id"] == str(users["staff"])
     conversation = call("POST", "/api/v1/ai/conversations", "owner", {"title": "B1 isolated HTTP smoke"})["id"]
     assert sql(f"SELECT COUNT(*) FROM ai_conversation WHERE id='{conversation}';") == "1", "API uses a different database"
     route = f"/api/v1/ai/conversations/{conversation}"
@@ -90,6 +96,8 @@ def main():
     assert any(item["request_id"] == request for item in call("GET", "/api/v1/support/queue", "staff")["items"])
     call("POST", support + "/claim", "staff", {})
     call("POST", support + "/claim", "staff", {})
+    assert call("GET", "/api/v1/support/assigned", "staff")["items"][0]["request_id"] == request
+    assert call("GET", "/api/v1/support/assigned", "expert")["items"] == []
     call("POST", support + "/claim", "expert", {}, status=409)
     call("GET", support, "stranger", status=403)
     call("GET", route + "/messages", "stranger", status=404)
@@ -100,6 +108,7 @@ def main():
     call("POST", support + "/cancel", "owner", {}, status=409)
     call("POST", route + "/resume-ai", "owner", {}, status=409)
     call("POST", support + "/requeue", "staff", {"reason": "转交专家"})
+    assert call("GET", "/api/v1/support/assigned", "staff")["items"] == []
     cutoff = call("GET", route + "/messages", "staff")["items"]
     call("POST", support + "/claim", "expert", {})
     expert = call("POST", support + "/messages", "expert", text("expert-reply", "专家指导"))
@@ -109,6 +118,8 @@ def main():
     call("GET", route, "staff", status=404)
     call("POST", support + "/messages", "staff", text("late", "迟到回复"), status=403)
     sql(f"UPDATE support_agent_profile SET enabled=0 WHERE user_id={users['expert']};")
+    assert call("GET", "/api/v1/support/me", "expert") is None
+    call("GET", "/api/v1/support/assigned", "expert", status=403)
     call("POST", support + "/messages", "expert", text("disabled", "禁用回复"), status=403)
     call("GET", route + "/messages", "expert", status=404)
     call("POST", support + "/requeue", "admin", {"reason": "禁用账号恢复排队"})

@@ -2,7 +2,7 @@
 
 日期：2026-10-30。适用分支：`Dev`。
 
-实施进度：B1 人工文字服务及其权限/账本基础已落地，实际接口以 [B1 契约](SUPPORT_B1_API.md) 和 [验证记录](SUPPORT_B1_VALIDATION.md) 为准。下文保留完整规划，涉及媒体、AI 执行等后续阶段的描述不代表已经开放。
+实施进度：B1 人工文字服务、权限/账本基础及 Vue 3 客服工作台已落地，日常 Dev 默认使用 Vue 3，实际接口以 [B1 契约](SUPPORT_B1_API.md) 和 [验证记录](SUPPORT_B1_VALIDATION.md) 为准。下文保留完整规划，涉及媒体、AI 执行等后续阶段的描述不代表已经开放。
 
 `aimeet` 的人工咨询、媒体授权、截图标注、专家转接与 App 接入可以复用到小智后端。整合以小智的统一 Conversation、现有账号和 MySQL 为主体，分批迁移业务规则与测试，复用 LiveKit 和私有对象存储基础设施。原 `aimeet` 保留现有用途，不整体搬入它的 FastAPI、PostgreSQL 用户库和 React 前端。
 

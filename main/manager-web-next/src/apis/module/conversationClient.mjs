@@ -1,5 +1,5 @@
 /** Async API client with explicit HTTP errors and injectable transport for tests. */
-export function createConversationClient({ baseUrl, getToken, onUnauthorized, fetchImpl = globalThis.fetch }) {
+export function createConversationClient({ baseUrl, getToken, onUnauthorized, fetchImpl = globalThis.fetch, errorMessage }) {
   async function request(path = '', options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
@@ -15,6 +15,7 @@ export function createConversationClient({ baseUrl, getToken, onUnauthorized, fe
         throw new Error('登录已过期，请重新登录');
       }
       if (!response.ok || body?.code !== 0) {
+        if (errorMessage && /\/(handoff|resume-ai)$/.test(path)) throw Object.assign(new Error(errorMessage(body?.msg, response.status)), { code: body?.msg, status: response.status });
         const messages = {
           CLIENT_MESSAGE_ID_REUSED: '消息编号冲突，请刷新后再试',
           CONVERSATION_NOT_FOUND: '会话不存在或当前账号无权访问',
@@ -33,6 +34,10 @@ export function createConversationClient({ baseUrl, getToken, onUnauthorized, fe
     }
   }
   return {
+    detail: id => request(`/${encodeURIComponent(id)}`),
+    events: (id, after = 0) => request(`/${encodeURIComponent(id)}/events?after=${after}&limit=100`),
+    handoff: (id, payload) => request(`/${encodeURIComponent(id)}/handoff`, { method: 'POST', body: JSON.stringify(payload) }),
+    resume: id => request(`/${encodeURIComponent(id)}/resume-ai`, { method: 'POST', body: '{}' }),
     list: (before = 0) => request(`?before=${before}&limit=50`),
     create: title => request('', { method: 'POST', body: JSON.stringify({ title }) }),
     messages: (id, after = 0) => request(`/${encodeURIComponent(id)}/messages?after=${after}&limit=100`),

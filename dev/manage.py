@@ -69,10 +69,13 @@ def build():
     print("Building Dev API…", flush=True)
     with (RUNTIME / "build-api.log").open("w") as log:
         subprocess.run(["mvn", "-B", "-DskipTests", "package"], cwd=API, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
-    if not (WEB / "node_modules").exists():
+    modules = CANDIDATE / "node_modules"
+    if modules.is_symlink():
+        raise RuntimeError("Linked Vue 3 node_modules are not supported")
+    if not modules.is_dir():
         print("Installing locked frontend dependencies…", flush=True)
         with (RUNTIME / "install-web.log").open("w") as log:
-            subprocess.run(["npm", "ci", "--no-audit", "--no-fund"], cwd=WEB, stdout=log, stderr=subprocess.STDOUT, check=True)
+            subprocess.run(["npm", "ci", "--no-audit", "--no-fund"], cwd=CANDIDATE, stdout=log, stderr=subprocess.STDOUT, check=True)
 
 
 def seed_local_console():
@@ -104,9 +107,12 @@ def process_identity(pid):
 def web_process():
     path = RUNTIME / "web-process.json"
     if path.exists():
-        info = json.loads(path.read_text())
-        if info["identity"] and process_identity(info["pid"]) == info["identity"]:
-            return info
+        try:
+            info = json.loads(path.read_text())
+            if info["identity"] and process_identity(info["pid"]) == info["identity"]:
+                return info
+        except (ValueError, KeyError, TypeError):
+            pass
     return None
 
 
@@ -171,9 +177,16 @@ def wait_http(url, timeout=90):
     raise RuntimeError(f"Timed out waiting for {url}; inspect dev/.runtime logs")
 
 
+def stop_process(find_process, filename):
+    info = find_process()
+    if info:
+        os.killpg(info["pid"], signal.SIGTERM)
+        (RUNTIME / filename).unlink(missing_ok=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
     args = parser.parse_args()
@@ -190,6 +203,15 @@ def main():
         if info:
             os.killpg(info["pid"], signal.SIGTERM)
             (RUNTIME / "candidate-process.json").unlink(missing_ok=True)
+    elif args.action == "legacy-up":
+        start_web()
+        wait_http(WEB_URL)
+        print(WEB_URL + "/#/conversations")
+    elif args.action == "legacy-status":
+        print("Vue 2 legacy:", "running" if web_process() else "stopped")
+        print(WEB_URL + "/#/conversations")
+    elif args.action == "legacy-stop":
+        stop_process(web_process, "web-process.json")
     elif args.action == "up":
         if args.build or not (API / "target/xiaozhi-esp32-api.jar").exists():
             build()
@@ -199,20 +221,18 @@ def main():
         compose("up", "-d", "--force-recreate", "api")
         print("Waiting for Dev API…", flush=True)
         wait_http(API_URL + "/user/pub-config")
-        start_web()
+        start_candidate()
         print("Waiting for Dev frontend…", flush=True)
-        wait_http(WEB_URL)
-        print(WEB_URL + "/#/conversations", flush=True)
+        wait_http(CANDIDATE_URL)
+        print(CANDIDATE_URL + "/#/conversations", flush=True)
     elif args.action == "stop":
-        info = web_process()
-        if info:
-            os.killpg(info["pid"], signal.SIGTERM)
-            (RUNTIME / "web-process.json").unlink(missing_ok=True)
+        stop_process(candidate_process, "candidate-process.json")
+        stop_process(web_process, "web-process.json")
         compose("stop")
     else:
         compose("ps")
-        print("Frontend process:", "running" if web_process() else "stopped")
-        print(WEB_URL + "/#/conversations")
+        print("Vue 3 frontend:", "running" if candidate_process() else "stopped")
+        print(CANDIDATE_URL + "/#/conversations")
 
 
 if __name__ == "__main__":

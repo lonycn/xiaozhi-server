@@ -20,6 +20,23 @@ public class SupportController {
     private final SupportService service;
     private final ConversationService conversations;
 
+    @GetMapping("/support/me")
+    public Result<Agent> me() { return ok(service.me(SecurityUser.getUserId())); }
+
+    @GetMapping("/support/assigned")
+    @RequiresPermissions("support:queue:read")
+    public Result<CursorPage<Request>> assigned(@RequestParam(defaultValue="0") long before,
+                                                @RequestParam(defaultValue="50") int limit) {
+        return ok(service.assigned(SecurityUser.getUserId(),before,limit));
+    }
+
+    @GetMapping("/support/agents")
+    @RequiresPermissions("support:agents:manage")
+    public Result<CursorPage<AgentSummary>> agents(@RequestParam(defaultValue="0") long before,
+                                                  @RequestParam(defaultValue="50") int limit) {
+        return ok(service.agents(SecurityUser.getUserId(),before,limit));
+    }
+
     @PutMapping("/support/agents/{userId}")
     @RequiresPermissions("support:agents:manage")
     public Result<Agent> agent(@PathVariable Long userId, @RequestBody JsonNode body) {

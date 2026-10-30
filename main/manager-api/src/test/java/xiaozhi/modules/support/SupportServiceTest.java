@@ -112,6 +112,37 @@ class SupportServiceTest {
         assertEquals(404,status(() -> service.get(2L,ID)));
     }
 
+    @Test void readEndpointsRequireAuthenticationEnabledProfilesAndAccounts() {
+        assertEquals(401,status(() -> service.me(null)));
+        assertEquals(401,status(() -> service.assigned(null,0,50)));
+        assertEquals(401,status(() -> service.agents(null,0,50)));
+        assertEquals(2L,service.me(2L).userId());
+        jdbc.profileEnabled=false;
+        assertNull(service.me(2L));
+        assertEquals(403,status(() -> service.assigned(2L,0,50)));
+        jdbc.profileEnabled=true;
+        jdbc.accountEnabled=false;
+        assertEquals(403,status(() -> service.me(2L)));
+        assertEquals(403,status(() -> service.assigned(2L,0,50)));
+        assertTrue(jdbc.writes.isEmpty());
+        verifyNoInteractions(conversations);
+    }
+
+    @Test void readListsValidateBoundsAndAgentListIsAdministratorOnly() {
+        for (int limit : List.of(0,101)) {
+            assertEquals(400,status(() -> service.assigned(2L,0,limit)));
+            assertEquals(400,status(() -> service.agents(1L,0,limit)));
+        }
+        assertEquals(400,status(() -> service.assigned(2L,-1,50)));
+        assertEquals(400,status(() -> service.agents(1L,-1,50)));
+        assertEquals(0,jdbc.reads);
+        assertEquals(403,status(() -> service.agents(2L,0,50)));
+        jdbc.accountEnabled=false;
+        assertEquals(403,status(() -> service.agents(1L,0,50)));
+        assertTrue(jdbc.writes.isEmpty());
+        verifyNoInteractions(conversations);
+    }
+
     @Test void strictBodiesRejectSpoofedIdentityAndContext() throws Exception {
         var json=JsonMapper.builder().build();
         var parser=new ConversationService(mock(ConversationDao.class),json,manager());
@@ -160,6 +191,8 @@ class SupportServiceTest {
         List<String> writes=new ArrayList<>();
         @Override public <T> List<T> query(String sql,RowMapper<T> mapper,Object... args) {
             reads++;
+            if (sql.contains("support_agent_profile WHERE user_id=? AND enabled=1") && !profileEnabled)
+                return List.of();
             Map<String,Object> values=new HashMap<>();
             values.put("id",ID); values.put("conversation_id",ID); values.put("owner_user_id",1L);
             values.put("state",conversationState); values.put("last_seq",0L); values.put("last_event_seq",3L);

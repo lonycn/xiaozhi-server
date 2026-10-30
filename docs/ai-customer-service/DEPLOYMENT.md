@@ -47,3 +47,5 @@ curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 ## 当前本机部署边界
 
 此 Git checkout 使用独立的 Dev Compose 服务（API 18893、Vue 3 预览 18894），启停方式见 [Dev 说明](../../dev/README.md)。原智控台与 ESP32 运行服务保持独立。部署到设备实际使用的服务前，要合并本地 Workspace ASR、TTS 配置与 OTA 兼容补丁，核对配置及服务间鉴权，备份后再构建和发布。HTTP 本机开发验收不能替代公网 HTTPS/WSS、ESP32 实机或 Android 验收。
+
+默认 `Dockerfile-web` 已改为从 `main/manager-web-next` 使用 Node 22 和独立锁文件构建 Vue 3。生产构建默认关闭新增入口，开放时添加 `--build-arg VITE_CONVERSATION_ENABLED=true` 并启用后端两项功能开关。静态前端独立镜像仍可使用 `Dockerfile-web-next`；本次没有发布生产镜像。

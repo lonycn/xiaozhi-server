@@ -61,6 +61,47 @@ public class SupportService {
         });
     }
 
+    /** Read-only restoration of the signed-in staff profile; this does not renew presence. */
+    public Agent me(Long actor) {
+        long user = actor(actor);
+        if (jdbc.queryForList("SELECT id FROM sys_user WHERE id=? AND status=1", user).isEmpty())
+            throw problem(403, "ENABLED_SUPPORT_ACCOUNT_REQUIRED");
+        List<Agent> rows = jdbc.query("SELECT * FROM support_agent_profile WHERE user_id=? AND enabled=1",
+                SupportService::agentRow, user);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    /** Profile administration never implies permission to read conversations. */
+    public CursorPage<AgentSummary> agents(Long actor, long before, int limit) {
+        long user = actor(actor);
+        pagination(before, limit);
+        administrator(user);
+        List<AgentSummary> rows = jdbc.query("""
+                SELECT p.*, u.username, u.status AS account_status FROM support_agent_profile p
+                JOIN sys_user u ON u.id=p.user_id WHERE p.user_id < ? ORDER BY p.user_id DESC LIMIT ?
+                """, (rs,n) -> new AgentSummary(rs.getLong("user_id"), rs.getString("username"),
+                rs.getInt("account_status") == 1, rs.getString("role"), rs.getBoolean("enabled"),
+                rs.getInt("capacity_text"), rs.getBoolean("accepting"), instant(rs,"presence_expires_at")),
+                before == 0 ? Long.MAX_VALUE : before, limit + 1);
+        List<AgentSummary> items = rows.stream().limit(limit).toList();
+        return new CursorPage<>(items, items.isEmpty() ? before : items.getLast().userId(), rows.size() > limit);
+    }
+
+    /** Only live assignment rows can restore the active desk after a page reload. */
+    public CursorPage<Request> assigned(Long actor, long before, int limit) {
+        long user = actor(actor);
+        pagination(before, limit);
+        profile(user, false);
+        List<Request> rows = jdbc.query("""
+                SELECT r.* FROM support_request r WHERE r.status='active' AND r.assigned_agent_user_id=?
+                AND r.list_sequence < ? AND EXISTS (SELECT 1 FROM support_assignment a
+                WHERE a.request_id=r.id AND a.agent_user_id=? AND a.released_at IS NULL)
+                ORDER BY r.list_sequence DESC LIMIT ?
+                """, SupportService::requestRow, user, before == 0 ? Long.MAX_VALUE : before, user, limit + 1);
+        List<Request> items = rows.stream().limit(limit).toList();
+        return new CursorPage<>(items, items.isEmpty() ? before : items.getLast().listSequence(), rows.size() > limit);
+    }
+
     public Agent presence(Long actor, PresenceUpdate body) {
         long user = actor(actor);
         if (body == null || body.accepting() == null) throw problem(400, "ACCEPTING_REQUIRED");
@@ -129,7 +170,7 @@ public class SupportService {
 
     public CursorPage<Request> queue(Long actor, long before, int limit) {
         long user = actor(actor);
-        if (before < 0 || limit < 1 || limit > 100) throw problem(400, "INVALID_CURSOR_OR_LIMIT");
+        pagination(before, limit);
         profile(user, false);
         List<Request> rows = jdbc.query("""
                 SELECT * FROM support_request WHERE status='queued' AND list_sequence < ?
@@ -298,8 +339,7 @@ public class SupportService {
 
     private Agent rawProfile(long user, boolean lock) {
         List<Agent> rows = jdbc.query("SELECT * FROM support_agent_profile WHERE user_id=?" + (lock ? " FOR UPDATE" : ""),
-                (rs,n) -> new Agent(rs.getLong("user_id"), rs.getString("role"), rs.getBoolean("enabled"),
-                        rs.getInt("capacity_text"), rs.getBoolean("accepting"), instant(rs,"presence_expires_at")), user);
+                SupportService::agentRow, user);
         if (rows.isEmpty()) throw problem(403, "ENABLED_SUPPORT_PROFILE_REQUIRED");
         return rows.getFirst();
     }
@@ -343,6 +383,10 @@ public class SupportService {
                 id(), conversationId, sequence, type, data);
         jdbc.update("UPDATE ai_conversation SET last_event_seq=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?", sequence, conversationId);
     }
+    private static Agent agentRow(ResultSet rs, int row) throws SQLException {
+        return new Agent(rs.getLong("user_id"), rs.getString("role"), rs.getBoolean("enabled"),
+                rs.getInt("capacity_text"), rs.getBoolean("accepting"), instant(rs,"presence_expires_at"));
+    }
     private static Request requestRow(ResultSet rs, int row) throws SQLException {
         return new Request(rs.getString("id"),rs.getLong("list_sequence"),rs.getString("conversation_id"),
                 rs.getString("client_request_id"),rs.getString("status"),rs.getString("requested_mode"),
@@ -360,6 +404,9 @@ public class SupportService {
     private void administrator(long user) {
         if (jdbc.queryForList("SELECT id FROM sys_user WHERE id=? AND status=1 AND super_admin=1",user).isEmpty())
             throw problem(403, "SUPPORT_ADMIN_REQUIRED");
+    }
+    private static void pagination(long before, int limit) {
+        if (before < 0 || limit < 1 || limit > 100) throw problem(400, "INVALID_CURSOR_OR_LIMIT");
     }
     private static long actor(Long user) {
         if (user == null || user <= 0) throw problem(401, "AUTHENTICATION_REQUIRED");

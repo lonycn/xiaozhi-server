@@ -1,0 +1,166 @@
+<template>
+  <main class="support-workspace">
+    <header><h1>{{ $t('support.workspace') }}</h1><router-link to="/home">{{ $t('support.back') }}</router-link></header>
+    <el-alert v-if="error" :title="error" type="error" show-icon @close="error = ''" />
+    <p v-if="loading" role="status">{{ $t('support.loading') }}</p>
+    <p v-if="!loading && !profile" role="status">{{ admin ? `${$t('support.agent')} · ${$t('knowledgeBaseDialog.statusDisabled')}` : $t('support.denied') }}</p>
+    <section v-if="profile">
+      <div class="toolbar"><strong>{{ $t('support.agent') }} · {{ agentName }}</strong><el-switch :aria-label="$t('support.accepting')" v-model="accepting" :disabled="presenceBusy" :active-text="$t('support.accepting')" :inactive-text="$t('support.paused')" @change="updatePresence" /><span>{{ $t('support.lease') }}</span><el-button :disabled="refreshBusy" @click="refresh">{{ $t('support.refresh') }}</el-button></div>
+      <div class="workspace-grid">
+        <aside>
+          <h2>{{ $t('support.mine') }}</h2>
+          <p v-if="!assigned.length">{{ $t('support.empty') }}</p>
+          <el-button v-for="request in assigned" :key="request.request_id" class="request-button" :disabled="sending || historyLoading || actionBusy" @click="selectRequest(request)">{{ titles[request.conversation_id] || $t('support.consultation') }} · {{ formatDate(request.requested_at) }} · {{ $t('support.' + request.status) }}</el-button>
+          <h2>{{ $t('support.queue') }}</h2>
+          <p v-if="!queue.length">{{ $t('support.empty') }}</p>
+          <div v-for="request in queue" :key="request.request_id" class="queue-row"><span :title="request.request_id">{{ $t('support.consultation') }} · {{ formatDate(request.requested_at) }}</span><el-button :disabled="!accepting || actionBusy || historyLoading" @click="claim(request)">{{ $t('support.claim') }}</el-button></div>
+        </aside>
+        <section class="chat">
+          <template v-if="selected">
+            <div class="toolbar"><strong>{{ titles[selected.conversation_id] || $t('support.consultation') }} · {{ $t('support.' + selected.status) }}</strong><el-button :disabled="actionBusy || sending || !active" @click="end('resolve')">{{ $t('support.resolve') }}</el-button><el-button :disabled="actionBusy || sending || !active" @click="end('requeue')">{{ $t('support.requeue') }}</el-button></div>
+            <p v-if="historyLoading">{{ $t('support.loading') }}</p>
+            <small :title="selected.request_id">{{ $t('support.request') }} · {{ selected.request_id }}</small><div class="history" aria-live="polite"><article v-for="message in messages" :key="message.id"><small>{{ $t('support.' + senderKey(message.sender_type)) }} · {{ formatDate(message.created_at) }}</small><p v-for="(part, index) in message.parts" :key="index">{{ part.type === 'text' ? part.text : $t('support.nonText') }}</p></article></div>
+            <form @submit.prevent="send"><el-input v-model="draft" type="textarea" :rows="3" maxlength="8000" :disabled="sending || !active" :aria-label="$t('support.reply')" /><el-button native-type="submit" type="primary" :loading="sending" :disabled="!active || !draft.trim() || historyLoading">{{ $t('support.reply') }}</el-button><p>{{ $t('support.retryNote') }}</p></form>
+          </template><p v-else>{{ $t('support.select') }}</p>
+        </section>
+      </div>
+    </section>
+    <section v-if="admin" class="admin">
+      <h2>{{ $t('support.profiles') }}</h2><p>{{ $t('support.profileNote') }}</p>
+      <form class="toolbar" @submit.prevent="saveProfile"><el-input v-model="edit.user_id" :aria-label="$t('support.userId')" :placeholder="$t('support.userId')" /><el-select v-model="edit.role" :aria-label="$t('support.role')"><el-option value="support_agent" :label="$t('support.agent')" /><el-option value="expert" :label="$t('support.expert')" /></el-select><el-switch :aria-label="$t('support.enabled')" v-model="edit.enabled" :active-text="$t('support.enabled')" /><el-input-number v-model="edit.capacity_text" :min="1" :max="20" :aria-label="$t('support.capacity')" /><el-button native-type="submit" type="primary" :loading="saving" :disabled="!/^\d+$/.test(edit.user_id)">{{ $t('support.save') }}</el-button></form>
+      <el-table :data="agents"><el-table-column :label="$t('support.username')"><template #default="{ row }">{{ row.username }}<el-tag v-if="row.account_enabled === false" type="danger" size="small">{{ $t('knowledgeBaseDialog.statusDisabled') }}</el-tag></template></el-table-column><el-table-column prop="user_id" :label="$t('support.userId')" /><el-table-column :label="$t('support.role')"><template #default="{ row }">{{ $t(row.role === 'expert' ? 'support.expert' : 'support.agent') }}</template></el-table-column><el-table-column :label="$t('support.enabled')"><template #default="{ row }">{{ $t(row.enabled ? 'knowledgeBaseDialog.statusEnabled' : 'knowledgeBaseDialog.statusDisabled') }}</template></el-table-column><el-table-column prop="capacity_text" :label="$t('support.capacity')" /><el-table-column :label="$t('support.edit')"><template #default="{ row }"><el-button @click="edit = { user_id: row.user_id, role: row.role, enabled: row.enabled, capacity_text: row.capacity_text }">{{ $t('support.edit') }}</el-button></template></el-table-column></el-table>
+    </section>
+  </main>
+</template>
+<script>
+import supportApi from '../apis/module/support';
+import conversationApi from '../apis/module/conversation';
+import store from '../store';
+import { isSupportAdmin, allPages, senderKey, cursorInteger } from '../utils/support.mjs';
+export default {
+  name: 'SupportWorkspace',
+  data: () => ({ profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
+  computed: {
+    admin() { return isSupportAdmin(store.state.userInfo); },
+    agentName() { return store.state.userInfo?.username || this.profile?.user_id || ''; },
+    active() { return !!this.profile && this.selected?.status === 'active'; },
+    draft: { get() { return this.drafts[this.selected?.request_id] || ''; }, set(value) { if (this.selected) this.drafts[this.selected.request_id] = value; } },
+  },
+  async mounted() {
+    try { this.profile = await supportApi.me(); } catch (error) { if (![403, 404].includes(error.status)) this.error = error.message; }
+    if (this.disposed) return;
+    if (this.profile) { this.accepting = false; await this.updatePresence(false); if (this.disposed || !this.profile) return; this.heartbeat = setInterval(() => this.updatePresence(this.accepting), 15000); this.poll = setInterval(() => this.refresh(), 4000); }
+    await this.refresh(); this.loading = false;
+  },
+  beforeUnmount() { this.disposed = true; this.version++; clearInterval(this.heartbeat); clearInterval(this.poll); if (this.profile) supportApi.presence(false).catch(() => {}); },
+  methods: {
+    senderKey,
+    revokeStaff() {
+      ++this.staffEpoch; ++this.version;
+      clearInterval(this.heartbeat); clearInterval(this.poll); this.heartbeat = null; this.poll = null;
+      this.profile = null; this.accepting = false; this.queue = []; this.assigned = []; this.selected = null; this.messages = [];
+      this.loading = false;
+    },
+    async verifyStaffAccess(error) {
+      if (error.status !== 403 || this.disposed || !this.profile) return;
+      // A lost assignment is a resource-level 403; only /me determines whether
+      // the current account has lost its entire staff profile.
+      if (!this.permissionCheck) {
+        const epoch = this.staffEpoch;
+        this.permissionCheck = (async () => {
+          try {
+            const profile = await supportApi.me();
+            if (this.disposed || epoch !== this.staffEpoch) return;
+            if (!profile) this.revokeStaff();
+            else this.profile = profile;
+          } catch (checkError) {
+            if (!this.disposed && epoch === this.staffEpoch && checkError.status === 403) this.revokeStaff();
+          }
+        })().finally(() => { this.permissionCheck = null; });
+      }
+      await this.permissionCheck;
+    },
+    formatDate(value) { return value ? new Date(value).toLocaleString() : ''; },
+    async listAll(fetchPage) {
+      const result = []; let cursor = '0';
+      while (!this.disposed) {
+        const page = await fetchPage(cursor); result.push(...page.items);
+        if (!page.has_more) break;
+        if (cursorInteger(page.next_cursor) === 0n || (cursor !== '0' && cursorInteger(page.next_cursor) >= cursorInteger(cursor))) throw new Error('历史记录游标异常，请刷新后重试');
+        cursor = page.next_cursor;
+      }
+      return result;
+    },
+    async updatePresence(value) {
+      if (this.presenceBusy || !this.profile || this.disposed) return;
+      this.presenceBusy = true; const epoch = this.staffEpoch;
+      try { const profile = await supportApi.presence(value); if (!this.disposed && epoch === this.staffEpoch) { this.profile = profile; this.accepting = profile.accepting; } }
+      catch (error) { this.error = error.message; this.accepting = false; await this.verifyStaffAccess(error); }
+      finally { this.presenceBusy = false; if (this.disposed) supportApi.presence(false).catch(() => {}); }
+    },
+    async refresh() {
+      if (this.refreshBusy || this.disposed) return; this.refreshBusy = true;
+      try {
+        if (this.profile) {
+          const epoch = this.staffEpoch;
+          let queue, assigned;
+          try { [queue, assigned] = await Promise.all([this.listAll(cursor => supportApi.queue(cursor)), this.listAll(cursor => supportApi.assigned(cursor))]); }
+          catch (error) { await this.verifyStaffAccess(error); throw error; }
+          if (this.disposed || epoch !== this.staffEpoch) return; this.queue = queue; this.assigned = assigned;
+          if (this.selected && !this.sending && !this.historyLoading && !this.actionBusy) {
+            const request = assigned.find(item => item.request_id === this.selected.request_id);
+            if (request) { this.selected = request; await this.loadHistory(false); }
+            else if (this.active) this.selected = { ...this.selected, status: 'RELEASED' };
+          }
+        }
+        if (this.admin) { const agents = await this.listAll(cursor => supportApi.agents(cursor)); if (!this.disposed) this.agents = agents; }
+      } catch (error) { if (!this.disposed) this.error = error.message; }
+      finally { this.refreshBusy = false; }
+    },
+    async selectRequest(request, force = false) { if (!this.profile || this.sending || this.historyLoading || (this.actionBusy && !force)) return; this.selected = request; this.messages = []; const version = ++this.version;
+      const title = conversationApi.detail(request.conversation_id).then(detail => { if (!this.disposed && version === this.version) this.titles[request.conversation_id] = detail.title; }).catch(error => this.verifyStaffAccess(error));
+      await this.loadHistory(true); await title; },
+    async loadHistory(reset) {
+      if (!this.selected || this.historyLoading) return;
+      const version = this.version, request = this.selected; this.historyLoading = true;
+      try {
+        const after = reset ? '0' : (this.messages.at(-1)?.seq || '0');
+        const page = await allPages(cursor => conversationApi.messages(request.conversation_id, cursor), after);
+        if (version !== this.version || this.disposed) return;
+        for (const message of page.items) if (!this.messages.some(item => item.id === message.id)) this.messages.push(message);
+      } catch (error) { if (version === this.version) this.error = error.message; await this.verifyStaffAccess(error); }
+      finally { this.historyLoading = false; }
+    },
+    async claim(request) {
+      if (this.actionBusy || this.historyLoading || !this.profile || !this.accepting) return; this.actionBusy = true; this.error = ''; const epoch = this.staffEpoch;
+      try { const claimed = await supportApi.action(request.request_id, 'claim'); if (this.disposed || epoch !== this.staffEpoch) return; await this.selectRequest(claimed, true); await this.refresh(); }
+      catch (error) { this.error = error.message; await this.verifyStaffAccess(error); } finally { this.actionBusy = false; }
+    },
+    async end(action) {
+      if (!this.active || this.actionBusy || this.sending) return; this.actionBusy = true; const epoch = this.staffEpoch;
+      try { const selected = await supportApi.action(this.selected.request_id, action); if (this.disposed || epoch !== this.staffEpoch) return; this.selected = selected; await this.refresh(); }
+      catch (error) { this.error = error.message; await this.verifyStaffAccess(error); } finally { this.actionBusy = false; }
+    },
+    async send() {
+      if (!this.active || this.sending || !this.draft.trim() || this.historyLoading) return;
+      const request = this.selected, text = this.draft, previous = this.pending[request.request_id];
+      const clientId = previous?.text === text ? previous.clientId : crypto.randomUUID();
+      this.pending[request.request_id] = { text, clientId }; this.sending = true; this.error = '';
+      try {
+        const message = await supportApi.send(request.request_id, { client_message_id: clientId, parts: [{ type: 'text', text }] });
+        if (!this.disposed && this.selected?.request_id === request.request_id) { if (!this.messages.some(item => item.id === message.id)) this.messages.push(message); if (this.draft === text) this.draft = ''; }
+        delete this.pending[request.request_id];
+      } catch (error) { this.error = error.message; await this.verifyStaffAccess(error); } finally { this.sending = false; }
+    },
+    async saveProfile() {
+      if (this.saving || !this.admin || !/^\d+$/.test(this.edit.user_id)) return; this.saving = true;
+      try { const { user_id, ...payload } = this.edit; await supportApi.profile(user_id, payload); await this.refresh(); }
+      catch (error) { this.error = error.message; } finally { this.saving = false; }
+    },
+  },
+};
+</script>
+<style scoped>
+.support-workspace { padding: 24px; max-width: 1500px; margin: auto; text-align: left; color: #344968; }
+header,.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; } header { justify-content: space-between; } h1 { font-size: 22px; } h2 { font-size: 16px; } .toolbar .el-input { width: 230px; } .toolbar .el-select { width: 180px; } .workspace-grid { display: grid; grid-template-columns: 330px minmax(0,1fr); gap: 24px; } aside,.chat,.admin { min-width: 0; box-sizing: border-box; border: 1px solid #e6ebf3; padding: 18px; border-radius: 10px; background: white; } .queue-row { display: flex; gap: 8px; align-items: center; overflow-wrap: anywhere; margin: 8px 0; font-size: 12px; }.request-button { display: block; height: auto; white-space: normal; overflow-wrap: anywhere; text-align: left; margin: 8px 0; max-width: 100%; overflow: hidden; } .history { min-height: 200px; max-height: 55vh; overflow: auto; } article { border-bottom: 1px solid #edf1f5; padding: 12px; } article p { white-space: pre-wrap; overflow-wrap: anywhere; } small { color: #7b8ca5; } form p,.toolbar span { font-size: 12px; color: #7b8ca5; } form .el-button { margin-top: 8px; } .admin { margin-top: 24px; } @media(max-width:760px) { .workspace-grid { grid-template-columns: minmax(0,1fr); } .support-workspace { padding: 12px; } }
+</style>

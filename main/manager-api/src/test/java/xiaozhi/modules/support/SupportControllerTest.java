@@ -59,6 +59,31 @@ class SupportControllerTest {
     }
 
     @Test
+    void readRoutesUseAuthenticatedActorAndExplicitPermissions() throws Exception {
+        var service = mock(SupportService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new SupportController(service, parser()))
+                .setControllerAdvice(new SupportExceptionHandler()).build();
+        try (var security = mockStatic(SecurityUser.class)) {
+            security.when(SecurityUser::getUserId).thenReturn(7L);
+            mvc.perform(get("/api/v1/support/me?user_id=9")).andExpect(status().isOk());
+            mvc.perform(get("/api/v1/support/assigned?before=9007199254740993&limit=3&user_id=9"))
+                    .andExpect(status().isOk());
+            mvc.perform(get("/api/v1/support/agents")).andExpect(status().isOk());
+            verify(service).me(7L);
+            verify(service).assigned(7L,9007199254740993L,3);
+            verify(service).agents(7L,0,50);
+            mvc.perform(get("/api/v1/support/assigned?before=bad")).andExpect(status().isBadRequest());
+            mvc.perform(get("/api/v1/support/agents?limit=bad")).andExpect(status().isBadRequest());
+        }
+        assertNull(SupportController.class.getMethod("me")
+                .getAnnotation(org.apache.shiro.authz.annotation.RequiresPermissions.class));
+        assertArrayEquals(new String[]{"support:queue:read"}, SupportController.class.getMethod("assigned",long.class,int.class)
+                .getAnnotation(org.apache.shiro.authz.annotation.RequiresPermissions.class).value());
+        assertArrayEquals(new String[]{"support:agents:manage"}, SupportController.class.getMethod("agents",long.class,int.class)
+                .getAnnotation(org.apache.shiro.authz.annotation.RequiresPermissions.class).value());
+    }
+
+    @Test
     void mapsServiceFailuresToHttpStatuses() throws Exception {
         var service = mock(SupportService.class);
         var mvc = MockMvcBuilders.standaloneSetup(new SupportController(service, parser()))

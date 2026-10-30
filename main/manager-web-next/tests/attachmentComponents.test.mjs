@@ -98,3 +98,12 @@ describe('shared attachment composer', () => {
     expect(wrapper.vm.unavailable).toBe(true); expect(wrapper.find('input').element.disabled).toBe(true); expect(wrapper.text()).toContain('attachments.unavailable'); expect(wrapper.props('modelValue')).toHaveLength(1);
   });
 });
+
+describe('B4 attachment provenance actions', () => {
+  it('emits annotation actions only for writable message media and traces IDs from server metadata', async () => {
+    api.get.mockResolvedValue({id:'9223372036854775806',filename:'render.jpg',status:'ready',jobs:[],metadata:{annotation_id:'12',frame_id:'10'}});
+    part();await wrapper.setProps({canAnnotate:true});const annotate=wrapper.findAll('button').find(button => button.text()==='annotations.annotate');await annotate.trigger('click');expect(wrapper.emitted('annotate')[0][0]).toEqual({attachmentId:'9223372036854775806'});
+    expect(wrapper.text()).not.toContain('annotations.sourceScene');await wrapper.vm.open(false);const provenance=wrapper.findAll('button').find(button => button.text()==='annotations.sourceScene');await provenance.trigger('click');expect(wrapper.emitted('snapshot')[0][0]).toBe('12');
+    await wrapper.setProps({canAnnotate:false});expect(wrapper.findAll('button').some(button => button.text()==='annotations.annotate')).toBe(false);
+  });
+});

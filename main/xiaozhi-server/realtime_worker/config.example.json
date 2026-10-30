@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "manager_url": "http://127.0.0.1:18893/xiaozhi",
+  "worker_key": "REPLACE_WITH_INDEPENDENT_32_PLUS_CHARACTER_WORKER_KEY",
+  "provider_url": "wss://YOUR_WORKSPACE.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime",
+  "api_key": "REPLACE_WITH_PRIVATE_BAILIAN_API_KEY",
+  "host": "127.0.0.1",
+  "port": 18899,
+  "origins": ["http://127.0.0.1:18894"],
+  "worker_id": "realtime-local",
+  "server_id": "realtime-local-1"
+}

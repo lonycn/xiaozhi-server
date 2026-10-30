@@ -775,3 +775,6 @@ databaseChangeLog:
   - include:
       file: external-identity.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: realtime-ai.changelog.yaml
+      relativeToChangelogFile: true

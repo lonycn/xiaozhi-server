@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202610302300-realtime-ai
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202610302300.sql
+            relativeToChangelogFile: true

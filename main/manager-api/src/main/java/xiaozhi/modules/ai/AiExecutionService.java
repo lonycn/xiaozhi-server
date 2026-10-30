@@ -29,6 +29,10 @@ public class AiExecutionService {
     private String visionModel = "";
     private String omniModel = "";
     private AiAttachmentContext attachments;
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.realtime.RealtimeHooks> realtime;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setRealtime(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.realtime.RealtimeHooks> value) { realtime=value; }
+    private boolean realtimeActive(String conversationId) { return realtime!=null && realtime.getIfAvailable()!=null && realtime.getObject().activeInConversation(conversationId); }
     private final java.util.concurrent.atomic.AtomicLong discoveryCursor = new java.util.concurrent.atomic.AtomicLong();
     static final String DISCOVERY_QUERY = "SELECT id,conversation_id,list_sequence FROM ai_run WHERE list_sequence>? AND (status='queued' OR (status IN ('running','streaming') AND lease_expires_at<=CURRENT_TIMESTAMP(3))) ORDER BY list_sequence LIMIT 32";
     private static final Set<String> ERRORS = Set.of("MODEL_MISMATCH", "PROVIDER_AUTH", "PROVIDER_RATE_LIMIT",
@@ -57,7 +61,7 @@ public class AiExecutionService {
     public void onUserMessage(String conversationId, String inputId) {
         if (!enabled) return;
         Map<String,Object> c = conversation(conversationId);
-        if (!"AI_ACTIVE".equals(c.get("state"))) return;
+        if (!"AI_ACTIVE".equals(c.get("state")) || realtimeActive(conversationId)) return;
         cancelActive(conversationId);
         long sequence = number(c, "last_seq") + 1;
         String run = id(), output = id();
@@ -121,6 +125,7 @@ public class AiExecutionService {
             new ConversationDao(jdbc).owned(conversationId, actor, true);
             var c = conversation(conversationId);
             var r = inConversation(runId, conversationId);
+            if (realtimeActive(conversationId)) throw problem(409,"REALTIME_ALREADY_ACTIVE");
             if (!"AI_ACTIVE".equals(c.get("state")) || !("failed".equals(r.get("status")) || "canceled".equals(r.get("status")))
                     || number(r,"attempt") >= 3) throw problem(409,"RUN_NOT_RETRYABLE");
             String latest = jdbc.queryForObject("SELECT id FROM ai_message WHERE conversation_id=? AND sender_type='user' ORDER BY seq DESC LIMIT 1",String.class,conversationId);
@@ -151,7 +156,7 @@ public class AiExecutionService {
                 var c = conversation((String) candidate.get("conversation_id"));
                 var r = row((String) candidate.get("id"), true);
                 if (!active(r)) return null;
-                if (!ownerEnabled(c) || !"AI_ACTIVE".equals(c.get("state")) || number(c,"control_epoch") != number(r,"control_epoch")) {
+                if (!ownerEnabled(c) || !"AI_ACTIVE".equals(c.get("state")) || number(c,"control_epoch") != number(r,"control_epoch") || realtimeActive((String)c.get("id"))) {
                     terminal(r,"canceled",null,"ai.run.canceled"); return null;
                 }
                 if (!"queued".equals(r.get("status")) && leaseLive(r)) return null;

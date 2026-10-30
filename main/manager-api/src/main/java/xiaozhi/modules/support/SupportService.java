@@ -31,6 +31,9 @@ public class SupportService {
     private final TransactionTemplate transactions;
     private final ConversationService conversations;
     private xiaozhi.modules.ai.AiExecutionService aiExecution;
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.realtime.RealtimeHooks> realtime;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setRealtime(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.realtime.RealtimeHooks> value) { realtime=value; }
     private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.supportmedia.SupportMediaHooks> mediaProvider;
     private xiaozhi.modules.supportmedia.SupportMediaHooks mediaForTests;
     @org.springframework.beans.factory.annotation.Autowired
@@ -381,6 +384,7 @@ public class SupportService {
         return rows.getFirst();
     }
     private void state(String conversationId, String state, boolean incrementEpoch) {
+        if (realtime!=null && realtime.getIfAvailable()!=null) realtime.getObject().cancelInConversation(conversationId,"HUMAN_CONTROL_CHANGED");
         if (aiExecution != null) aiExecution.cancelActive(conversationId);
         jdbc.update("UPDATE ai_conversation SET state=?,control_epoch=control_epoch+?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",
                 state, incrementEpoch ? 1 : 0, conversationId);

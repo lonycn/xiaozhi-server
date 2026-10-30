@@ -25,6 +25,9 @@ export function createSupportClient({ baseUrl, getToken, onUnauthorized, fetchIm
     } finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort); }
   }
   return {
+    summaries: (id, before = '0', signal) => request(`/conversations/${encodeURIComponent(id)}/summary?before=${encodeURIComponent(before)}&limit=20`, 'GET', undefined, signal),
+    prepareSummary: (id, signal) => request(`/conversations/${encodeURIComponent(id)}/summary/draft`, 'POST', {}, signal),
+    editSummary: (id, payload, signal) => request(`/conversations/${encodeURIComponent(id)}/summary`, 'PUT', payload, signal),
     me: () => request('/me'),
     queue: (before = '0') => request(`/queue?before=${encodeURIComponent(before)}&limit=50`),
     assigned: (before = '0') => request(`/assigned?before=${encodeURIComponent(before)}&limit=50`),

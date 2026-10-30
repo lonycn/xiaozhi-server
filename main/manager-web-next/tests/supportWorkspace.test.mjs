@@ -10,7 +10,7 @@ vi.mock('../src/store', () => ({ default: { state } }));
 const page = (items = []) => ({ items, next_cursor: '0', has_more: false });
 const profile = { user_id: '9223372036854775806', enabled: true, accepting: false };
 let wrapper;
-function mountDesk() { wrapper = mount(Workspace, { global: { mocks: { $t: key => key }, stubs: { RouterLink: true, ElAlert: true, ElSwitch: true, ElButton: { template: '<button><slot /></button>' }, ElInput: true, ElInputNumber: true, ElSelect: true, ElOption: true, ElTable: true, ElTableColumn: true } } }); return wrapper; }
+function mountDesk() { wrapper = mount(Workspace, { global: { mocks: { $t: key => key }, stubs: { SupportSummaryPanel: true, RouterLink: true, ElAlert: true, ElSwitch: true, ElButton: { template: '<button><slot /></button>' }, ElInput: true, ElInputNumber: true, ElSelect: true, ElOption: true, ElTable: true, ElTableColumn: true } } }); return wrapper; }
 beforeEach(() => { vi.useFakeTimers(); vi.resetAllMocks(); state.userInfo = {}; api.me.mockResolvedValue(profile); api.presence.mockImplementation(async accepting => ({ ...profile, accepting })); api.queue.mockResolvedValue(page()); api.assigned.mockResolvedValue(page()); api.agents.mockResolvedValue(page()); conversation.messages.mockResolvedValue(page()); conversation.detail.mockResolvedValue({ title: '咨询' }); });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); });
 describe('support desk', () => {

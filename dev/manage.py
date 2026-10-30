@@ -17,6 +17,8 @@ DEV = Path(__file__).resolve().parent
 ROOT = DEV.parent
 RUNTIME = DEV / ".runtime"
 WEB = ROOT / "main/manager-web"
+CANDIDATE = ROOT / "main/manager-web-next"
+CANDIDATE_URL = "http://127.0.0.1:18894"
 API = ROOT / "main/manager-api"
 WEB_URL = "http://127.0.0.1:18892"
 API_URL = "http://127.0.0.1:18893/xiaozhi"
@@ -122,6 +124,39 @@ def start_web():
     (RUNTIME / "web-process.json").write_text(json.dumps({"pid": process.pid, "identity": identity}))
 
 
+def candidate_process():
+    path = RUNTIME / "candidate-process.json"
+    if path.exists():
+        try:
+            info = json.loads(path.read_text())
+            if info["identity"] and process_identity(info["pid"]) == info["identity"]:
+                return info
+        except (ValueError, KeyError, TypeError):
+            pass
+    return None
+
+
+def start_candidate():
+    if candidate_process():
+        return
+    modules = CANDIDATE / "node_modules"
+    if modules.is_symlink() or not modules.is_dir():
+        raise RuntimeError("Install candidate dependencies in manager-web-next with npm ci; linked node_modules are not supported")
+    with socket.socket() as check:
+        if check.connect_ex(("127.0.0.1", 18894)) == 0:
+            raise RuntimeError("Port 18894 belongs to another process")
+    env = {**os.environ, "VITE_API_BASE_URL": "/xiaozhi",
+           "VITE_API_PROXY_TARGET": "http://127.0.0.1:18893",
+           "VITE_CONVERSATION_ENABLED": "true", "VITE_ENV_LABEL": "Dev Vue 3"}
+    with (RUNTIME / "candidate.log").open("a") as log:
+        process = subprocess.Popen(["npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", "18894", "--strictPort"],
+                                   cwd=CANDIDATE, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    identity = process_identity(process.pid)
+    if not identity:
+        raise RuntimeError("Candidate process exited; inspect dev/.runtime/candidate.log")
+    (RUNTIME / "candidate-process.json").write_text(json.dumps({"pid": process.pid, "identity": identity}))
+
+
 def wait_http(url, timeout=90):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -137,12 +172,24 @@ def wait_http(url, timeout=90):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
     args = parser.parse_args()
     configure()
-    if args.action == "up":
+    if args.action == "candidate-up":
+        start_candidate()
+        wait_http(CANDIDATE_URL)
+        print(CANDIDATE_URL + "/#/conversations")
+    elif args.action == "candidate-status":
+        print("Vue 3 candidate:", "running" if candidate_process() else "stopped")
+        print(CANDIDATE_URL + "/#/conversations")
+    elif args.action == "candidate-stop":
+        info = candidate_process()
+        if info:
+            os.killpg(info["pid"], signal.SIGTERM)
+            (RUNTIME / "candidate-process.json").unlink(missing_ok=True)
+    elif args.action == "up":
         if args.build or not (API / "target/xiaozhi-esp32-api.jar").exists():
             build()
         compose("up", "-d", "--wait", "mysql", "redis")

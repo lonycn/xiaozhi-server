@@ -49,9 +49,31 @@ python3 dev/manage.py up --build --seed-local-console
 
 长期目标采用 Vue 3 + Vite + Vue Router 4，并选择 Vue 3 组件库；Element Plus 可作为现有 Element 风格的迁移候选。当前 61 个 Vue 单文件组件依赖 Vue 2.6、Vuex 3、Vue Router 3、Element UI 2，不能只更新一个版本号就完成迁移。
 
-本轮先保留现有栈，交付可运行的 Dev 和统一对话页面。后续独立迁移任务按登录/权限、布局/导航、模型/设备配置、对话与客服模块切分，逐块迁移与回归。新组件避免直接依赖 Vue 内部 API，API client 与展示组件解耦，便于之后移植。
+Vue 3 独立迁移已落在 `main/manager-web-next`，运行方式见下节。原目录保留用于并行对照和回退，新前端的实现、验证范围与后续边界见该目录的 `README.md`。新功能继续在候选目录迭代。
 
 官方依据：
 
 - [Vue 2 维护结束说明](https://v2.vuejs.org/eol/)
 - [Vue 3 迁移构建与组件库限制](https://v3-migration.vuejs.org/migration-build.html)
+
+## Vue 3 候选前端
+
+候选页面独立运行在 <http://127.0.0.1:18894/#/conversations>，使用 Dev API（18893）。先按上述步骤启动 Dev，再在候选目录用 `npm ci` 安装自己的依赖，然后执行：
+
+```sh
+python3 dev/manage.py candidate-up
+python3 dev/manage.py candidate-status
+python3 dev/manage.py candidate-stop
+```
+
+候选进程和日志分别记录于 `dev/.runtime/candidate-process.json` 与 `candidate.log`。停止候选页面不会停止已有前端、API 或数据库。18894 被其他进程占用时启动会报错，不会终止该进程。
+
+也可以构建独立的静态候选镜像，并连接已启动的 Dev 网络：
+
+```sh
+docker build -f Dockerfile-web-next -t xiaozhi-vue3-preview .
+docker run --rm --name xiaozhi-vue3-preview --network xiaozhi-server-dev_default \
+  -p 127.0.0.1:18895:8080 -e API_PROXY_TARGET=http://api:8002 xiaozhi-vue3-preview
+```
+
+访问 <http://127.0.0.1:18895/#/conversations>。镜像通过 `/xiaozhi/` 代理到 `API_PROXY_TARGET`；默认目标是 Dev 网络中的 `http://api:8002`。退出容器不影响 Dev 数据及其他服务。

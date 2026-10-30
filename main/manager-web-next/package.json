@@ -1,0 +1,46 @@
+{
+  "name": "xiaozhi-manager-web-next",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 18894 --strictPort",
+    "serve": "vite --host 127.0.0.1 --port 18894 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 18895 --strictPort",
+    "test": "npm run test:contract && npm run test:unit",
+    "test:unit": "vitest run",
+    "test:contract": "node --test tests/*Contract.test.mjs",
+    "test:snapshot": "node --test src/components/agentSnapshotDisplayUtils.test.mjs src/apis/module/agentSnapshotApi.test.mjs",
+    "check:i18n": "node scripts/check-i18n.cjs"
+  },
+  "dependencies": {
+    "vue": "3.5.44",
+    "vue-router": "4.6.4",
+    "pinia": "3.0.4",
+    "element-plus": "2.14.7",
+    "@element-plus/icons-vue": "^2.3.2",
+    "vue-i18n": "11.4.16",
+    "flyio": "0.6.14",
+    "highlight.js": "11.12.0",
+    "normalize.css": "8.0.1",
+    "opus-decoder": "0.7.7",
+    "opus-recorder": "8.0.5",
+    "sm-crypto": "0.3.13",
+    "v-code-diff": "1.16.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vue/compiler-sfc": "3.5.44",
+    "@vue/test-utils": "2.5.1",
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "@vitest/coverage-v8": "5.0.5",
+    "jsdom": "^27.0.0",
+    "sass": "^1.93.0",
+    "typescript": "^5.9.0"
+  }
+}

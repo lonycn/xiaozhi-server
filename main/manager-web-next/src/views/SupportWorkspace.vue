@@ -21,7 +21,8 @@
           <template v-if="selected">
             <div class="toolbar"><strong>{{ titles[selected.conversation_id] || $t('support.consultation') }} · {{ $t('support.' + selected.status) }}</strong><el-button :disabled="actionBusy || sending || !active" @click="end('resolve')">{{ $t('support.resolve') }}</el-button><el-button :disabled="actionBusy || sending || !active" @click="end('requeue')">{{ $t('support.requeue') }}</el-button></div>
             <p v-if="historyLoading">{{ $t('support.loading') }}</p>
-            <small :title="selected.request_id">{{ $t('support.request') }} · {{ selected.request_id }}</small><div class="history" aria-live="polite"><article v-for="message in messages" :key="message.id"><small>{{ $t('support.' + senderKey(message.sender_type)) }} · {{ formatDate(message.created_at) }}</small><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><AttachmentPart v-else-if="['image', 'video', 'audio', 'file'].includes(part.type) && part.attachment_id" :part="part" :scope-key="attachmentScope" :can-annotate="active && !sending && !historyLoading && !actionBusy" @annotate="openAnnotation" @snapshot="openAnnotationSnapshot" /><p v-else-if="part.type === 'location'">{{ part.latitude }}, {{ part.longitude }} · {{ part.coordinate_system }}</p><p v-else>{{ $t('support.nonText') }}</p></template></article></div>
+            <SupportSummaryPanel :key="attachmentScope" :conversation-id="selected.conversation_id" :messages="messages" :writable="active" @source="focusSummarySource" />
+            <small :title="selected.request_id">{{ $t('support.request') }} · {{ selected.request_id }}</small><div class="history" aria-live="polite"><article v-for="message in messages" :key="message.id" :id="`support-message-${message.id}`"><small>{{ $t('support.' + senderKey(message.sender_type)) }} · {{ formatDate(message.created_at) }}</small><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><AttachmentPart v-else-if="['image', 'video', 'audio', 'file'].includes(part.type) && part.attachment_id" :part="part" :scope-key="attachmentScope" :can-annotate="active && !sending && !historyLoading && !actionBusy" @annotate="openAnnotation" @snapshot="openAnnotationSnapshot" /><p v-else-if="part.type === 'location'">{{ part.latitude }}, {{ part.longitude }} · {{ part.coordinate_system }}</p><p v-else>{{ $t('support.nonText') }}</p></template></article></div>
             <AttachmentComposer :key="attachmentScope" v-model="attachmentRows" :conversation-id="selected.conversation_id" :identity="attachmentIdentity" :disabled="sending || !active || historyLoading" /><form @submit.prevent="send"><el-input v-model="draft" type="textarea" :rows="3" maxlength="8000" :disabled="sending || !active" :aria-label="$t('support.reply')" @keydown="composerKeydown" /><el-button native-type="submit" type="primary" :loading="sending" :disabled="!active || (!draft.trim() && !attachmentRows.length) || !attachmentsReady || historyLoading">{{ $t('support.reply') }}</el-button><p>{{ $t('support.retryNote') }}</p></form>
           </template><p v-else>{{ $t('support.select') }}</p>
         </section>
@@ -35,6 +36,7 @@
   </section>
 </template>
 <script>
+import SupportSummaryPanel from '../components/SupportSummaryPanel.vue';
 import MediaSessionOverlay from '../components/MediaSessionOverlay.vue';
 import AnnotationEditor from '../components/AnnotationEditor.vue';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
@@ -46,7 +48,7 @@ import store from '../store';
 import { isSupportAdmin, allPages, senderKey, cursorInteger } from '../utils/support.mjs';
 export default {
   name: 'SupportWorkspace',
-  components: { AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay },
+  components: { SupportSummaryPanel, AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay },
   data: () => ({ attachmentDrafts: {}, mediaAdopting: false, selectionController: null, profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
   computed: {
     mediaUserId() { return String(store.state.userInfo?.id || store.state.userInfo?.user_id || store.state.userInfo?.userId || ''); },
@@ -69,6 +71,7 @@ export default {
   },
   beforeUnmount() { this.disposed = true; this.selectionController?.abort(); this.version++; clearInterval(this.heartbeat); clearInterval(this.poll); if (this.profile) supportApi.presence(false).catch(() => {}); },
   methods: {
+    focusSummarySource(ref) { if (this.messages.some(message => message.id === ref.message_id && String(message.seq) === String(ref.seq))) document.getElementById(`support-message-${ref.message_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); },
     async mediaChanged(session) { if (!session || session.agent_user_id !== this.mediaUserId || this.selected?.request_id === session.request_id || !this.profile || this.mediaAdopting) return; this.mediaAdopting = true; try { await this.refresh(); const request = this.assigned.find(item => item.request_id === session.request_id); if (request) await this.selectRequest(request); } finally { this.mediaAdopting = false; } },
     openLiveFrame({ frame, conversationId }) { if (conversationId === this.selected?.conversation_id) this.$refs.annotationEditor?.openFrame(frame.id); },
     openAnnotation(source) { this.$refs.annotationEditor?.openSource(source); },

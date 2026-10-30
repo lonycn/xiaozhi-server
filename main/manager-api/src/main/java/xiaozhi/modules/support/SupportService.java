@@ -34,6 +34,9 @@ public class SupportService {
     private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.realtime.RealtimeHooks> realtime;
     @org.springframework.beans.factory.annotation.Autowired
     public void setRealtime(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.realtime.RealtimeHooks> value) { realtime=value; }
+    private xiaozhi.modules.supportsummary.SupportSummaryService summaries;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSummaries(xiaozhi.modules.supportsummary.SupportSummaryService value) { summaries=value; }
     private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.supportmedia.SupportMediaHooks> mediaProvider;
     private xiaozhi.modules.supportmedia.SupportMediaHooks mediaForTests;
     @org.springframework.beans.factory.annotation.Autowired
@@ -178,6 +181,7 @@ public class SupportService {
             state(conversationId, "HUMAN_QUEUED", true);
             event(conversationId, "support.requested", requestId);
             event(conversationId, "support.queued", requestId);
+            if(summaries!=null)summaries.createForHandoff(conversationId);
             return request(requestId, false);
         });
     }

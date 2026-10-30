@@ -83,7 +83,7 @@ B 再通过真实摘要编辑 UI，将安全风险改为 `unknown`：“待确�
 
 该健康检查在显式 reload 后由测试工具重新填入原技术草稿，**不能据此宣称草稿跨 reload 自动持久化**。生成、新消息和内部编辑期间的草稿保持已有前述独立证据。18898 是本次 UI 验收路径；结束检查时原 Dev 18894/18893 以及 AI/media/realtime/summary workers 均运行，此处进程状态由部署协调者核验，不替代真实媒体回归。
 
-部署后 SQL 备份为 `dev/.runtime/backups/after-summary-assistance-20261030T164626Z.sql`，506315 bytes，SHA256 `42610ce81185af50523403971a7ae972f7a6f4de47b58eaa35967890c7cfa54c`。最终数据库计数：用户 4、旧设备历史 25、消息 29、迁移 117、辅助任务 1、attempt 3、摘要 revision 3。消息从部署前 27 增至 29 对应明确新增的 seq 5/6 两条技术输入；生成、加入草稿和内部修订没有增加公开消息。证明：`/Users/lengwang/code/esp32/work/summary-assistance-after-deploy-20261031.json`。全部先前备份、原卷、测试 schema 及失败记录保留。
+部署后 SQL 备份为 `dev/.runtime/backups/after-summary-assistance-20261030T164626Z.sql`，506315 bytes，SHA256 `42610ce81185af50523403971a7ae972f7a6f4de47b58eaa35967890c7cfa54c`。最终数据库计数：用户 4、旧设备历史 25、消息 29、迁移 117、辅助任务 1、attempt 3、摘要 revision 3。消息从部署前 27 增至 29 对应明确新增的 seq 5/6 两条技术输入；生成、加入草稿和内部修订没有增加公开消息。证明：`/Users/lengwang/code/esp32/work/summary-assistance-after-deploy-20261031.json`。本轮前后 SQL 备份、原卷、测试 schema 及失败记录均保留。此前恢复阶段无法定位的 APFS 克隆/快照仍按恢复记录列为待核查项，不能把本轮 SQL 备份校验视为该问题已解决。
 
 ## 验收限制
 

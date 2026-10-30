@@ -238,9 +238,8 @@ public class SupportService {
             conversation(hint.conversationId(), true);
             Request req = request(requestId, true);
             current(req, user);
-            if (body == null || body.parts() == null || body.parts().isEmpty()
-                    || body.parts().stream().anyMatch(p -> p == null || !"text".equals(p.type())))
-                throw problem(400, "SUPPORT_TEXT_REQUIRED");
+            // ConversationService validates all ordered text/location/media parts and performs
+            // attachment binding in this same message transaction after current-assignment checks.
             Message message = conversations.sendSupport(user, req.conversationId(), body, agent.role());
             jdbc.update("UPDATE support_request SET first_response_at=COALESCE(first_response_at,CURRENT_TIMESTAMP(3)) WHERE id=?", requestId);
             return message;

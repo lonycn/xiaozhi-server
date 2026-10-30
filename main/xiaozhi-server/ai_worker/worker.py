@@ -65,6 +65,10 @@ class Worker:
                     raise ProviderFailure('MODEL_CAPABILITY_UNAVAILABLE')
                 if image and variant != 'display':
                     timestamp = ref.get('time_ms')
+                    # The manager's global Long serializer emits decimal strings.
+                    # Normalize only this bounded measurement, never identifiers.
+                    if type(timestamp) is str and re.fullmatch(r'(0|[1-9][0-9]{0,5})', timestamp):
+                        timestamp = int(timestamp)
                     if kind != 'video' or type(timestamp) is not int or not 0 <= timestamp <= 180000:
                         raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
                 data = await self.manager.media(task, ref, (8 << 20) if image else (256 << 10))
@@ -74,7 +78,7 @@ class Worker:
                         raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
                     note = f"Verified attachment {ref.get('attachment_id')}"
                     if kind == 'video':
-                        note += f" video frame at {ref['time_ms']} ms"
+                        note += f" video frame at {timestamp} ms"
                     content.append({'type': 'text', 'text': note})
                     content.append({'type': 'image_url', 'image_url': {'url':
                         'data:image/jpeg;base64,' + base64.b64encode(data).decode('ascii')}})

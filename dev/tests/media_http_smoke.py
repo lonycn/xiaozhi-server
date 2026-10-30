@@ -21,7 +21,7 @@ import urllib.request
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('phase', choices=['protocol', 'decoder'])
+    parser.add_argument('phase', choices=['protocol', 'decoder', 'annotation'])
     parser.add_argument('--url', default='http://127.0.0.1:19893/xiaozhi')
     parser.add_argument('--container', default='xiaozhi-media-b3-test')
     parser.add_argument('--database', default='xiaozhi_media_test_full_r2')
@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--fixture-file', required=True)
     parser.add_argument('--video')
     parser.add_argument('--pdf')
+    parser.add_argument('--render-output', help='Optional local JPEG evidence from the annotation phase')
     args = parser.parse_args()
     if urllib.parse.urlsplit(args.url).hostname != '127.0.0.1' or not re.fullmatch(r'xiaozhi_media_test_[a-z0-9_]+', args.database):
         raise SystemExit('Requires disposable loopback xiaozhi_media_test_* database')
@@ -165,7 +166,7 @@ def main():
         data['support_request'] = handoff['request_id']
         data['attachments']['protocol'] = attachment
         save()
-    else:
+    elif args.phase == 'decoder':
         repo = Path(__file__).resolve().parents[2]
         sources = [('image', 'logo.png', 'image/png', (repo / 'main/manager-web-next/src/assets/xiaozhi-logo.png').read_bytes()),
                    ('audio', 'repository.wav', 'audio/wav', (repo / 'main/xiaozhi-server/config/assets/max_output_size.wav').read_bytes()),
@@ -204,6 +205,75 @@ def main():
         assert request('POST', route + '/messages', 'owner', message)['id'] == sent['id']
         assert len(sent['parts']) == len(parts)
         assert len(request('GET', route + '/runs', 'owner')['items']) == 1
+        save()
+    else:
+        # Only append synthetic test records; old or failed attempts are preserved.
+        staff = accounts['staff']['id']
+        request('PUT', '/api/v1/support/agents/' + staff, 'admin',
+                {'role': 'expert', 'enabled': True, 'capacity_text': 3})
+        request('POST', '/api/v1/support/presence', 'staff', {'accepting': True})
+        support = '/api/v1/support/requests/' + data['support_request']
+        request('POST', support + '/claim', 'staff', {})
+        source = data['attachments']['video']
+        original = meta(source)
+        frame_body = {'conversation_id': data['conversation'], 'client_frame_id': 'b4-' + secrets.token_hex(8),
+                      'source_attachment_id': source, 'time_ms': 501}
+        frame = request('POST', '/api/v1/support/frames', 'staff', frame_body)
+        assert request('POST', '/api/v1/support/frames', 'staff', frame_body)['id'] == frame['id']
+        request('POST', '/api/v1/support/frames', 'staff', {**frame_body, 'time_ms': 502}, expected=409)
+        request('GET', '/api/v1/support/frames/' + frame['id'], 'owner', expected=404)
+        request('GET', '/api/v1/support/frames/' + frame['id'], 'stranger', expected=404)
+
+        def wait_snapshot(kind, id):
+            for _ in range(80):
+                snapshot = request('GET', '/api/v1/support/' + kind + '/' + id, 'staff')
+                if snapshot['status'] in ('ready', 'failed'):
+                    assert snapshot['status'] == 'ready', snapshot['error_code']
+                    return snapshot
+                time.sleep(.5)
+            raise AssertionError('snapshot worker did not reach a terminal state')
+
+        frame = wait_snapshot('frames', frame['id'])
+        assert type(frame['actual_time_ms']) is int and 501 <= frame['actual_time_ms'] < 2000
+        assert frame['actual_time_ms'] != 501 and frame['capture_policy'] == 'first_at_or_after'
+        scene = {'format': 'annotation-v1', 'frame_id': frame['id'], 'width': frame['width'], 'height': frame['height'],
+                 'elements': [
+                     {'id': 'arrow', 'type': 'arrow', 'color': '#FF0000', 'stroke_width': .008,
+                      'points': [{'x': .1, 'y': .15}, {'x': .4, 'y': .35}]},
+                     {'id': 'circle', 'type': 'circle', 'color': '#00AA00', 'stroke_width': .008,
+                      'cx': .65, 'cy': .3, 'radius': .1},
+                     {'id': 'rect', 'type': 'rect', 'color': '#0000FF', 'stroke_width': .008,
+                      'x': .1, 'y': .45, 'width': .25, 'height': .2},
+                     {'id': 'freehand', 'type': 'freehand', 'color': '#A000A0', 'stroke_width': .008,
+                      'points': [{'x': .5, 'y': .6}, {'x': .6, 'y': .5}, {'x': .7, 'y': .6}]},
+                     {'id': 'text', 'type': 'text', 'color': '#000000', 'x': .1, 'y': .8,
+                      'text': '检查阀门', 'font_size': .06}]}
+        body = {'conversation_id': data['conversation'], 'client_annotation_id': 'b4-' + secrets.token_hex(8),
+                'frame_id': frame['id'], 'label': '独立标注验收', 'scene': scene}
+        request('POST', '/api/v1/support/annotations', 'staff', {**body, 'scene': {**scene, 'external_url': 'https://example.invalid/'}}, expected=400)
+        annotation = request('POST', '/api/v1/support/annotations', 'staff', body)
+        assert request('POST', '/api/v1/support/annotations', 'staff', body)['id'] == annotation['id']
+        request('POST', '/api/v1/support/annotations', 'staff', {**body, 'label': 'changed'}, expected=409)
+        request('GET', '/api/v1/support/annotations/' + annotation['id'], 'owner', expected=404)
+        annotation = wait_snapshot('annotations', annotation['id'])
+        ticket = request('GET', '/api/v1/ai/attachments/' + annotation['render_attachment_id'] + '/access?variant=display', 'staff')
+        raw, _ = request('GET', ticket['url'].removeprefix('/xiaozhi'), binary=True)
+        assert raw.startswith(b'\xff\xd8')
+        if args.render_output: Path(args.render_output).write_bytes(raw)
+        message = {'client_message_id': 'b4-' + secrets.token_hex(8),
+                   'parts': [{'type': 'text', 'text': '技术验收：不可变标注回复'},
+                             {'type': 'image', 'attachment_id': annotation['render_attachment_id']}]}
+        sent = request('POST', support + '/messages', 'staff', message)
+        assert request('POST', support + '/messages', 'staff', message)['id'] == sent['id']
+        assert request('GET', '/api/v1/support/annotations/' + annotation['id'], 'owner')['scene'] == annotation['scene']
+        assert request('GET', '/api/v1/support/frames/' + frame['id'], 'owner')['id'] == frame['id']
+        evidence = meta(frame['frame_attachment_id'])
+        assert evidence['metadata']['source_attachment_id'] == source
+        assert meta(source)['sha256'] == original['sha256']
+        count = sql("SELECT COUNT(*) FROM ai_attachment WHERE id IN (" + frame['frame_attachment_id'] + ',' + annotation['render_attachment_id'] + ") AND linked_message_id='" + sent['id'] + "';")
+        assert count == '2'
+        data['annotation'] = {'frame_id': frame['id'], 'annotation_id': annotation['id'], 'reply_id': sent['id'],
+                              'requested_time_ms': 501, 'actual_time_ms': frame['actual_time_ms']}
         save()
     print(json.dumps({'result': 'passed', 'phase': args.phase, 'http_checks': checks,
                       'database': args.database, 'provider_calls': 0, 'business_rows_deleted': 0}))

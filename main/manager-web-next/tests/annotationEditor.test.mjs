@@ -102,4 +102,13 @@ describe('annotation editor snapshots and private canvas', () => {
     vm.textKeydown({key:'Enter',isComposing:false,preventDefault});expect(vm.scene.elements[0]).toMatchObject({type:'text',text:'检查冷库'});expect(vm.scene.elements[0].stroke_width).toBeUndefined();
     vm.textPosition={x:.1,y:.1};vm.textDraft='🙂'.repeat(1001);vm.commitText();expect(vm.textDraft).toBe('🙂'.repeat(1001));expect(vm.error).toBe('annotations.invalidScene');
   });
+  it('pauses temporary send work without reporting permission loss and fences late editor responses', async () => {
+    const response=deferred();api.createFrame.mockReturnValueOnce(response.promise);const vm=desk(),opening=vm.openSource({attachmentId:'9'});await flushPromises();const signal=api.createFrame.mock.calls[0][1];
+    await wrapper.setProps({disabled:true});expect(vm.writable).toBe(true);expect(signal.aborted).toBe(true);expect(vm.visible).toBe(false);expect(vm.error).toBe('');
+    response.resolve(frame);await opening;expect(vm.scene).toBeNull();expect(images.blob).not.toHaveBeenCalled();
+    await vm.openSource({attachmentId:'9'});await vm.openSnapshot('12');await vm.loadSnapshots();await vm.saveSnapshot();await vm.retryCurrent();await vm.addToReply();expect(api.createFrame).toHaveBeenCalledTimes(1);expect(api.get).not.toHaveBeenCalled();expect(api.list).not.toHaveBeenCalled();expect(api.save).not.toHaveBeenCalled();expect(wrapper.emitted('ready')).toBeUndefined();
+    await wrapper.setProps({disabled:false});expect(vm.error).toBe('');await vm.openSource({attachmentId:'9'});expect(vm.visible).toBe(true);expect(vm.scene).toEqual(scene);
+    await wrapper.setProps({writable:false});expect(vm.visible).toBe(false);expect(vm.error).toBe('annotations.denied');expect(images.release).toHaveBeenCalled();
+  });
+
 });

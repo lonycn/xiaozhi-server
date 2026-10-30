@@ -72,7 +72,7 @@ public class AiExecutionService {
 
     /** Called by every human mode/epoch transition inside its existing transaction. */
     public void cancelActive(String conversationId) {
-        for (var r : jdbc.queryForList("SELECT * FROM ai_run WHERE conversation_id=? AND active_slot=1 FOR UPDATE", conversationId))
+        for (var r : runRows("SELECT * FROM ai_run WHERE conversation_id=? AND active_slot=1 FOR UPDATE", conversationId))
             terminal(r, "canceled", null, "ai.run.canceled");
     }
 
@@ -89,7 +89,7 @@ public class AiExecutionService {
             var grant = access.read(actor, conversationId, true);
             // A run is mutable; released staff receive immutable events/messages only.
             if (!grant.owner() && !grant.current()) throw problem(404,"CONVERSATION_NOT_FOUND");
-            var rows = jdbc.queryForList("SELECT * FROM ai_run WHERE conversation_id=? AND list_sequence<? ORDER BY list_sequence DESC LIMIT ?",
+            var rows = runRows("SELECT * FROM ai_run WHERE conversation_id=? AND list_sequence<? ORDER BY list_sequence DESC LIMIT ?",
                     conversationId, before == 0 ? Long.MAX_VALUE : before, limit + 1);
             var items = rows.stream().limit(limit).map(this::view).toList();
             return new CursorPage<>(items, items.isEmpty() ? before : items.getLast().listSequence(), rows.size() > limit);
@@ -319,7 +319,7 @@ public class AiExecutionService {
         if(rows.isEmpty()) throw problem(404,"CONVERSATION_NOT_FOUND"); return rows.getFirst();
     }
     private Map<String,Object> row(String id,boolean lock) {
-        var rows=jdbc.queryForList("SELECT * FROM ai_run WHERE id=?"+(lock?" FOR UPDATE":""),id);
+        var rows=runRows("SELECT * FROM ai_run WHERE id=?"+(lock?" FOR UPDATE":""),id);
         if(rows.isEmpty()) throw problem(404,"RUN_NOT_FOUND"); return rows.getFirst();
     }
     private Map<String,Object> inConversation(String id,String conv) {
@@ -340,7 +340,10 @@ public class AiExecutionService {
     private static long actor(Long actor) { if(actor==null||actor<=0)throw problem(401,"AUTHENTICATION_REQUIRED");return actor; }
     private static void validId(String id) {if(id==null||!id.matches("[a-f0-9]{32}"))throw problem(404,"RESOURCE_NOT_FOUND");}
     private static long number(Map<String,Object> r,String key) {return ((Number)r.get(key)).longValue();}
-    private static Instant instant(Object v) {return v instanceof Timestamp t?t.toInstant():((java.time.LocalDateTime)v).toInstant(java.time.ZoneOffset.UTC);}
+    private List<Map<String,Object>> runRows(String sql,Object...args) {
+        return jdbc.query(sql,new xiaozhi.common.jdbc.TimestampColumnMapRowMapper(),args);
+    }
+    private static Instant instant(Object v) {return ((Timestamp)v).toInstant();}
     private static ConversationProblem problem(int code,String text) {return new ConversationProblem(code,text);}
     private static String id() {return UUID.randomUUID().toString().replace("-","");}
     private static String hash(String text) {try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}

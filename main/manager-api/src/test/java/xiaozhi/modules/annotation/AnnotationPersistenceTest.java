@@ -34,6 +34,8 @@ class AnnotationPersistenceTest {
     static final ObjectMapper JSON=JsonMapper.builder().addModule(new JavaTimeModule()).build();
     static final String KEY="isolated-b4-ticket-key-at-least-32-characters";
     static Path root;static byte[] JPEG;
+    static org.springframework.transaction.PlatformTransactionManager transactions;
+    static xiaozhi.modules.support.SupportService support;
     @BeforeAll static void initialize()throws Exception {
         String url=System.getenv("ANNOTATION_TEST_JDBC_URL");
         if(!url.matches("jdbc:mysql://127\\.0\\.0\\.1:[0-9]+/xiaozhi_annotation_test_[a-z0-9_]+(\\?.*)?"))throw new IllegalArgumentException("Requires loopback new xiaozhi_annotation_test_* database");
@@ -43,10 +45,11 @@ class AnnotationPersistenceTest {
         db.execute("CREATE TABLE ai_agent(id VARCHAR(32) PRIMARY KEY,user_id BIGINT)");db.execute("CREATE TABLE ai_agent_chat_history(id BIGINT PRIMARY KEY,content VARCHAR(100))");db.update("INSERT INTO ai_agent_chat_history VALUES(1,'keep-original-evidence')");
         for(String changelog:List.of("conversation","support","attachments","annotations"))try(var connection=source.getConnection();var migration=new Liquibase("db/changelog/"+changelog+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){migration.update(new Contexts());migration.update(new Contexts());}
         assertEquals(4,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
-        var dao=new ConversationDao(db);var manager=new DataSourceTransactionManager(source);root=Files.createTempDirectory("b4-annotation-private-fixture-");
+        var dao=new ConversationDao(db);var manager=new DataSourceTransactionManager(source);transactions=manager;root=Files.createTempDirectory("b4-annotation-private-fixture-");
         media=new AttachmentService(db,dao,JSON,manager,new MockEnvironment().withProperty("media.ticket-key",KEY),new PrivateObjectStore.Filesystem(root));
         annotations=new AnnotationService(db,media,new ConversationAccessService(dao),JSON,manager);media.setGeneratedSupportForTests(annotations);
         conversations=new ConversationService(dao,JSON,manager);conversations.setAttachments(media);
+        support=new xiaozhi.modules.support.SupportService(db,JSON,manager,conversations);
         try(var bytes=new ByteArrayOutputStream()){assertTrue(ImageIO.write(new BufferedImage(100,100,BufferedImage.TYPE_INT_RGB),"jpg",bytes));JPEG=bytes.toByteArray();}
         db.update("INSERT INTO support_agent_profile(user_id,role) VALUES(71,'support_agent'),(72,'expert')");
     }
@@ -125,4 +128,21 @@ class AnnotationPersistenceTest {
         media.completeJob(task.jobId(),new Complete(task.leaseToken(),Map.of("mime_type","image/jpeg","width",100,"height",100,"actual_time_ms",18033)));Frame result=annotations.getFrame(7L,f.id());assertEquals(18000,result.requestedTimeMs());assertEquals(18033,result.actualTimeMs());assertNotEquals(result.requestedTimeMs(),result.actualTimeMs());assertEquals(video.id(),media.get(7L,f.frameAttachmentId()).metadata().get("source_attachment_id"));
         assertThrows(ConversationProblem.class,()->media.completeJob(task.jobId(),new Complete(task.leaseToken(),Map.of("mime_type","image/jpeg","width",100,"height",100,"actual_time_ms",18000))));assertEquals(18033,annotations.getFrame(7L,f.id()).actualTimeMs());
     }
+    @Test @Order(6) void publicStaffSendSupportsLegacyTextMixedAndImageWhileKeepingFeatureAndOwnershipGuards()throws Exception {
+        String c=conversation();View src=source(c,true,false);String assignment=assign(c);
+        String request=db.queryForObject("SELECT request_id FROM support_assignment WHERE id=?",String.class,assignment);
+        MessagePart text=new MessagePart("text","先检查阀门",null,null,null,null,null,null);
+        var old=support.send(71L,request,new SendMessage("staff-legacy-text",List.of(text)));assertEquals("support_agent",old.senderType());assertEquals("text",old.parts().getFirst().type());
+        Frame mixed=frame(71,c,src.id());var mixedBody=new SendMessage("staff-mixed",List.of(text,part("image",mixed.frameAttachmentId())));
+        var sent=support.send(71L,request,mixedBody);assertEquals(List.of("text","image"),sent.parts().stream().map(MessagePart::type).toList());assertEquals(sent,support.send(71L,request,mixedBody));
+        Frame image=frame(71,c,src.id());var imageSent=support.send(71L,request,new SendMessage("staff-image-only",List.of(part("image",image.frameAttachmentId()))));assertEquals("image",imageSent.parts().getFirst().type());
+        Frame unlinked=frame(71,c,src.id());long before=db.queryForObject("SELECT COUNT(*) FROM ai_message WHERE conversation_id=?",Long.class,c);
+        var disabled=new ConversationService(new ConversationDao(db),JSON,transactions);
+        var noMedia=new xiaozhi.modules.support.SupportService(db,JSON,transactions,disabled);
+        assertEquals(415,assertThrows(ConversationProblem.class,()->noMedia.send(71L,request,new SendMessage("staff-disabled-media",List.of(part("image",unlinked.frameAttachmentId()))))).status());
+        String otherConversation=conversation();View other=source(otherConversation,true,false);
+        assertEquals(404,assertThrows(ConversationProblem.class,()->support.send(71L,request,new SendMessage("staff-forbidden",List.of(part("image",unlinked.frameAttachmentId()),part("image",other.id()))))).status());
+        assertEquals(before,db.queryForObject("SELECT COUNT(*) FROM ai_message WHERE conversation_id=?",Long.class,c));assertNull(db.queryForObject("SELECT linked_message_id FROM ai_attachment WHERE id=?",String.class,unlinked.frameAttachmentId()));
+    }
+
 }

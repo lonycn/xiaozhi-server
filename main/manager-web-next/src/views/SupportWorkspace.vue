@@ -1,7 +1,7 @@
 <template>
   <section class="support-workspace">
     <header><h1>{{ $t('support.workspace') }}</h1></header>
-    <AnnotationEditor ref="annotationEditor" :conversation-id="selected?.conversation_id || ''" :scope-key="attachmentScope" :identity="attachmentIdentity" :writable="active && !sending && !actionBusy" @ready="stageAnnotation" />
+    <AnnotationEditor ref="annotationEditor" :conversation-id="selected?.conversation_id || ''" :scope-key="attachmentScope" :identity="attachmentIdentity" :writable="active" :disabled="sending || actionBusy || historyLoading" @ready="stageAnnotation" />
     <el-alert v-if="error" :title="error" type="error" show-icon @close="error = ''" />
     <p v-if="loading" role="status">{{ $t('support.loading') }}</p>
     <p v-if="!loading && !profile" role="status">{{ admin ? `${$t('support.agent')} · ${$t('knowledgeBaseDialog.statusDisabled')}` : $t('support.denied') }}</p>

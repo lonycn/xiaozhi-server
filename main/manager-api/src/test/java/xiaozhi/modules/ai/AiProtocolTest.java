@@ -36,6 +36,9 @@ class AiProtocolTest {
     @Test void onlyActualNonnegativeCompleteUsageAccepted() {
         AiExecutionService.validateUsage(null);
         AiExecutionService.validateUsage(new Usage(0L,0L,0L));
+        AiExecutionService.validateUsage(new Usage(109L,248L,357L,44L));
+        assertThrows(ConversationProblem.class,()->AiExecutionService.validateUsage(new Usage(1L,1L,2L,2L)));
+        assertThrows(ConversationProblem.class,()->AiExecutionService.validateUsage(new Usage(1L,1L,2L,-1L)));
         assertThrows(ConversationProblem.class,()->AiExecutionService.validateUsage(new Usage(null,1L,1L)));
         assertThrows(ConversationProblem.class,()->AiExecutionService.validateUsage(new Usage(1L,-1L,0L)));
     }

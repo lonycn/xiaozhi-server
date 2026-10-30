@@ -19,7 +19,11 @@ public final class AiModels {
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Delta(String leaseToken, Long sequence, String text) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Usage(Long inputTokens, Long outputTokens, Long totalTokens) { }
+    public record Usage(Long inputTokens, Long outputTokens, Long totalTokens,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            Long inputAudioTokens) {
+        public Usage(Long inputTokens,Long outputTokens,Long totalTokens) { this(inputTokens,outputTokens,totalTokens,null); }
+    }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Complete(String leaseToken, Long lastSequence, String finishReason, Usage usage, String providerRequestId) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

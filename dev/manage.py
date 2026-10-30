@@ -61,6 +61,11 @@ def configure():
             raise RuntimeError("Invalid AI configuration")
         properties.update({"features.ai-text-enabled": "true", "ai.worker.key": key,
                            "ai.execution.model": model})
+        omni = settings.get("omni_model", "")
+        if omni:
+            if omni != "qwen3.8-omni-flash":
+                raise RuntimeError("Unsupported Omni model")
+            properties["ai.execution.omni-model"] = omni
     media = media_settings()
     if media.get("enabled") is True:
         worker_key = (RUNTIME / "media-worker-key").read_text().strip()
@@ -144,7 +149,7 @@ def private_json(name, data):
     path.chmod(0o600)
 
 
-def export_ai_config():
+def export_ai_config(omni_model=None):
     # This query is read-only and selects exactly one enabled default LLM.
     query = "SELECT config_json FROM ai_model_config WHERE model_type='LLM' AND is_default=1 AND is_enabled=1"
     try:
@@ -182,6 +187,12 @@ def export_ai_config():
         if vision:
             worker.update(vision_model=vision, vision_base_url=config["base_url"],
                           vision_api_key=api_key, vision_workspace_id=config.get("workspace_id", ""))
+        omni = ai_settings().get("omni_model", "") if omni_model is None else omni_model
+        if omni:
+            if omni != "qwen3.8-omni-flash":
+                raise ValueError("unsupported Omni model")
+            worker.update(omni_model=omni, omni_base_url=config["base_url"],
+                          omni_api_key=api_key, omni_workspace_id=config.get("workspace_id", ""))
         private_json("ai-worker.json", worker)
         return model
     except (ValueError, TypeError, KeyError, OSError, subprocess.SubprocessError):
@@ -475,6 +486,7 @@ def main():
     parser.add_argument("--storage", choices=["filesystem", "s3"])
     parser.add_argument("--storage-env", help="Existing private S3 configuration file; no bucket creation")
     parser.add_argument("--vision-model", help="Previously verified Bailian vision model for this Dev workspace")
+    parser.add_argument("--omni-model", help="Explicit non-realtime qwen3.8-omni-flash; empty disables raw sound analysis")
     args = parser.parse_args()
     configure()
     if args.action == "media-enable":
@@ -513,9 +525,12 @@ def main():
         print("Annotations enabled:", settings.get("enabled") is True and settings.get("annotations_enabled") is True)
         print("Media enabled:", settings.get("enabled") is True)
     elif args.action == "ai-enable":
-        model = export_ai_config()
+        model = export_ai_config() if args.omni_model is None else export_ai_config(args.omni_model)
         stop_process(ai_process, "ai-worker-process.json")
-        private_json("ai-settings.json", {"enabled": True, "model": model})
+        settings = {"enabled": True, "model": model}
+        omni = ai_settings().get("omni_model", "") if args.omni_model is None else args.omni_model
+        if omni: settings["omni_model"] = omni
+        private_json("ai-settings.json", settings)
         configure()
         recreate_api()
         start_ai_worker()

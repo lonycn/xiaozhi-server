@@ -52,10 +52,11 @@ class Manager:
 
     async def media(self, task, ref, maximum):
         """Only current-run derivative capabilities; never accept a URL from a task."""
-        run_id, attachment_id = str(task.get('run_id', '')), str(ref.get('attachment_id', ''))
+        run_id, attachment_id = task.get('run_id'), ref.get('attachment_id')
         variant = ref.get('variant')
-        if (not re.fullmatch(r'[a-f0-9]{32}', run_id) or not re.fullmatch(r'[0-9]{1,20}', attachment_id)
-                or variant not in ('display', 'text', 'transcript', *(f'frame_{i}' for i in range(6)))):
+        if (not isinstance(run_id, str) or not isinstance(attachment_id, str)
+                or not re.fullmatch(r'[a-f0-9]{32}', run_id) or not re.fullmatch(r'[0-9]{1,20}', attachment_id)
+                or variant not in ('display', 'text', 'transcript', 'audio', *(f'frame_{i}' for i in range(6)))):
             from .provider import ProviderFailure
             raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
         path = f'internal/ai-worker/runs/{run_id}/attachments/{attachment_id}/content'
@@ -75,7 +76,7 @@ class Manager:
                     result.extend(chunk)
                     if len(result) > maximum:
                         from .provider import ProviderFailure
-                        raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+                        raise ProviderFailure('OMNI_AUDIO_LIMIT' if variant == 'audio' else 'MEDIA_INPUT_UNAVAILABLE')
                 return bytes(result)
         except httpx.TransportError:
             raise ControlError() from None

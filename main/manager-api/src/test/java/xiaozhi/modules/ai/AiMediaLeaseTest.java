@@ -104,4 +104,20 @@ class AiMediaLeaseTest {
         verify(f.jdbc,never()).update(anyString(),any(Object[].class));
     }
 
+    @Test void rawAudioRequiresCurrentRunOmniSelectionAndExactAttachmentVariant() throws Exception {
+        var f=new Fixture();f.service.setOmniModel("qwen3.8-omni-flash");f.run.put("model","qwen3.8-omni-flash");
+        when(f.attachments.plan(eq(CONVERSATION),eq(4L),any())).thenReturn(new AiAttachmentContext.Plan(
+            List.of(new AiModels.MediaRef("123","audio","audio/wav","audio",null)),false,false,true,null));
+        when(f.attachments.content("123",CONVERSATION,4,"audio")).thenReturn(
+            new AttachmentService.Content(new ByteArrayInputStream(new byte[]{1}),1,"audio/wav","audio.wav",false));
+        try(var content=f.service.media(RUN,"123","audio",TOKEN)) {assertEquals("audio/wav",content.mimeType());}
+        assertEquals(404,assertThrows(ConversationProblem.class,()->f.service.media(RUN,"456","audio",TOKEN)).status());
+        assertEquals(404,assertThrows(ConversationProblem.class,()->f.service.media(RUN,"123","original",TOKEN)).status());
+        f.run.put("model","qwen-flash");
+        assertEquals(404,assertThrows(ConversationProblem.class,()->f.service.media(RUN,"123","audio",TOKEN)).status());
+        f.run.put("model","qwen3.8-omni-flash");f.service.setOmniModel("");
+        assertEquals(404,assertThrows(ConversationProblem.class,()->f.service.media(RUN,"123","audio",TOKEN)).status());
+        verify(f.attachments,times(1)).content("123",CONVERSATION,4,"audio");
+    }
+
 }

@@ -26,7 +26,7 @@ def error_code(error):
 
 
 class Bailian:
-    def __init__(self, config, client=None, vision_client=None):
+    def __init__(self, config, client=None, vision_client=None, omni_client=None):
         self.config = config
         self.client = client or AsyncOpenAI(
             api_key=config.api_key, base_url=config.base_url, max_retries=0,
@@ -45,11 +45,22 @@ class Bailian:
                 default_headers=({'X-DashScope-WorkSpace': config.vision_workspace_id}
                                  if config.vision_workspace_id else {}))
 
+        self.omni_client = omni_client
+        if config.omni_model and self.omni_client is None:
+            self.omni_client = AsyncOpenAI(
+                api_key=config.omni_api_key, base_url=config.omni_base_url, max_retries=0,
+                timeout=httpx.Timeout(config.provider_timeout_seconds, connect=5),
+                http_client=httpx.AsyncClient(trust_env=False),
+                default_headers=({'X-DashScope-WorkSpace': config.omni_workspace_id}
+                                 if config.omni_workspace_id else {}))
+
     @asynccontextmanager
     async def stream(self, task):
         stream = None
         try:
-            if task.get('model') == self.config.model:
+            if self.config.omni_model and task.get('model') == self.config.omni_model and self.omni_client is not None:
+                selected = self.omni_client
+            elif task.get('model') == self.config.model:
                 selected = self.client
             elif task.get('model') == self.config.vision_model and self.vision_client is not None:
                 selected = self.vision_client
@@ -58,7 +69,9 @@ class Bailian:
             stream = await selected.chat.completions.create(
                 model=task['model'], messages=task['messages'], stream=True,
                 stream_options={'include_usage': True}, max_tokens=self.config.max_tokens,
-                extra_body={'enable_thinking': False})
+                **({'modalities': ['text'], 'reasoning_effort': 'none'}
+                   if self.config.omni_model and task['model'] == self.config.omni_model
+                   else {'extra_body': {'enable_thinking': False}}))
             yield stream
         except Exception as exc:
             # Protocol errors raised inside the context must keep their identity.
@@ -74,3 +87,5 @@ class Bailian:
         await self.client.close()
         if self.vision_client is not None and self.vision_client is not self.client:
             await self.vision_client.close()
+        if self.omni_client is not None and self.omni_client not in (self.client, self.vision_client):
+            await self.omni_client.close()

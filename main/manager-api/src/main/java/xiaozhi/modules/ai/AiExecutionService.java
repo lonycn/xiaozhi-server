@@ -27,12 +27,13 @@ public class AiExecutionService {
     private String model = "qwen-flash";
     private int leaseSeconds = 45;
     private String visionModel = "";
+    private String omniModel = "";
     private AiAttachmentContext attachments;
     private final java.util.concurrent.atomic.AtomicLong discoveryCursor = new java.util.concurrent.atomic.AtomicLong();
     static final String DISCOVERY_QUERY = "SELECT id,conversation_id,list_sequence FROM ai_run WHERE list_sequence>? AND (status='queued' OR (status IN ('running','streaming') AND lease_expires_at<=CURRENT_TIMESTAMP(3))) ORDER BY list_sequence LIMIT 32";
     private static final Set<String> ERRORS = Set.of("MODEL_MISMATCH", "PROVIDER_AUTH", "PROVIDER_RATE_LIMIT",
             "PROVIDER_TIMEOUT", "PROVIDER_UNAVAILABLE", "PROVIDER_ERROR", "WORKER_ERROR",
-            "MEDIA_INPUT_UNAVAILABLE", "MODEL_CAPABILITY_UNAVAILABLE");
+            "MEDIA_INPUT_UNAVAILABLE", "MODEL_CAPABILITY_UNAVAILABLE", "OMNI_AUDIO_LIMIT");
 
     public AiExecutionService(JdbcTemplate jdbc, ObjectMapper json, PlatformTransactionManager manager) {
         this.jdbc = jdbc; this.json = json; this.tx = new TransactionTemplate(manager);
@@ -41,6 +42,10 @@ public class AiExecutionService {
     @Value("${features.ai-text-enabled:false}") public void setEnabled(boolean value) { enabled = value; }
     @Value("${ai.execution.model:qwen-flash}") public void setModel(String value) { model = value; }
     @Value("${ai.execution.vision-model:}") public void setVisionModel(String value) { visionModel = value == null ? "" : value.trim(); }
+    @Value("${ai.execution.omni-model:}") public void setOmniModel(String value) {
+        omniModel=value==null?"":value.trim();
+        if(!omniModel.isBlank() && !omniModel.equals("qwen3.8-omni-flash")) throw new IllegalArgumentException("Unsupported Omni model");
+    }
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void setAttachments(AiAttachmentContext value) { attachments = value; }
     @Value("${ai.execution.lease-seconds:45}") public void setLeaseSeconds(int value) {
@@ -154,10 +159,10 @@ public class AiExecutionService {
                 var plan = attachmentPlan(r);
                 if (plan.waiting()) return null;
                 if (plan.error() != null) { terminal(r,"failed",plan.error(),"ai.run.failed"); return null; }
-                if (plan.vision() && visionModel.isBlank()) {
+                if (plan.audio() && omniModel.isBlank() || !plan.audio() && plan.vision() && visionModel.isBlank()) {
                     terminal(r,"failed","MODEL_CAPABILITY_UNAVAILABLE","ai.run.failed"); return null;
                 }
-                String selectedModel = plan.vision() ? visionModel : model;
+                String selectedModel = plan.audio() ? omniModel : plan.vision() ? visionModel : model;
                 jdbc.update("UPDATE ai_run SET model=? WHERE id=?", selectedModel,r.get("id"));
                 int attempt = (int) number(r,"attempt") + 1;
                 String token = id() + id();
@@ -261,7 +266,8 @@ public class AiExecutionService {
     public xiaozhi.modules.attachment.AttachmentService.Content media(String runId,String attachmentId,String variant,String token) {
         record Authorized(String conversationId,long sequence) { }
         Authorized authorized=callback(runId,token,r->{
-            if(attachments==null) throw problem(404,"MEDIA_INPUT_UNAVAILABLE");
+            if(attachments==null || "audio".equals(variant) && (omniModel.isBlank() || !omniModel.equals(r.get("model"))))
+                throw problem(404,"MEDIA_INPUT_UNAVAILABLE");
             var plan=attachmentPlan(r);
             if(plan.waiting() || plan.error()!=null || plan.refs().stream().noneMatch(ref ->
                     ref.attachmentId().equals(attachmentId) && ref.variant().equals(variant)))
@@ -332,7 +338,8 @@ public class AiExecutionService {
                 instant(r.get("created_at")),instant(r.get("updated_at")));
     }
     static void validateUsage(Usage u) {
-        if(u!=null && (u.inputTokens()==null || u.outputTokens()==null || u.totalTokens()==null || u.inputTokens()<0 || u.outputTokens()<0 || u.totalTokens()<0))
+        if(u!=null && (u.inputTokens()==null || u.outputTokens()==null || u.totalTokens()==null || u.inputTokens()<0 || u.outputTokens()<0 || u.totalTokens()<0
+                || u.inputAudioTokens()!=null && (u.inputAudioTokens()<0 || u.inputAudioTokens()>u.inputTokens())))
             throw problem(400,"INVALID_USAGE");
     }
     private void requireEnabled() { if(!enabled) throw problem(503,"AI_TEXT_DISABLED"); }

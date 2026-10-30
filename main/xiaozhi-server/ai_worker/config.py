@@ -18,6 +18,10 @@ class Config:
     vision_base_url: str = ""
     vision_api_key: str = ""
     vision_workspace_id: str = ""
+    omni_model: str = ""
+    omni_base_url: str = ""
+    omni_api_key: str = ""
+    omni_workspace_id: str = ""
     max_tokens: int = 500
     heartbeat_seconds: float = 12
     poll_seconds: float = 2
@@ -45,6 +49,17 @@ class Config:
                 raise ValueError('vision provider must be the configured Bailian HTTPS endpoint')
         elif self.vision_base_url or self.vision_api_key or self.vision_workspace_id:
             raise ValueError('vision_model is required for vision configuration')
+        if self.omni_model:
+            if self.omni_model != 'qwen3.8-omni-flash':
+                raise ValueError('unsupported Omni model')
+            endpoint = urlsplit(self.omni_base_url)
+            host = endpoint.hostname or ''
+            if (endpoint.scheme != 'https' or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+                    or not (host in ('dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com') or host.endswith('.maas.aliyuncs.com'))
+                    or not isinstance(self.omni_api_key, str) or not self.omni_api_key.strip()):
+                raise ValueError('Omni requires an explicit Bailian endpoint and API key')
+        elif self.omni_base_url or self.omni_api_key or self.omni_workspace_id:
+            raise ValueError('omni_model is required for Omni configuration')
         if not 10 <= self.heartbeat_seconds <= 15 or self.poll_seconds <= 0 or self.provider_timeout_seconds <= 0:
             raise ValueError('invalid worker timing')
         if isinstance(self.max_tokens, bool) or not isinstance(self.max_tokens, int) or self.max_tokens <= 0:

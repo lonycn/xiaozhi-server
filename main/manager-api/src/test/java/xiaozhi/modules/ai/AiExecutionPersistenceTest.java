@@ -183,4 +183,28 @@ class AiExecutionPersistenceTest {
         ai.setEnabled(false);String id=conversation();conversations.send(owner,id,text("plain","ledger only"));
         assertTrue(ai.list(owner,id,0,100).items().isEmpty());assertEquals(1,conversations.messages(owner,id,0,100).items().size());
     }
+    @Test void omniRoutingRawEvidenceUsageAndHumanRevocationOnRealLeaseLedger() throws Exception {
+        var media=org.mockito.Mockito.mock(xiaozhi.modules.attachment.AttachmentService.class);
+        var context=new AiAttachmentContext(media);context.setOmniModel("qwen3.8-omni-flash");
+        ai.setAttachments(context);ai.setOmniModel("qwen3.8-omni-flash");
+        String id=conversation();var input=conversations.send(owner,id,text("omni","inspect audible evidence"));
+        // This suite owns these fresh fixtures; actual attachment grants are tested separately.
+        jdbc.update("UPDATE ai_message SET parts_json=? WHERE id=?", "[{\"type\":\"audio\",\"attachment_id\":\"123\"}]",input.id());
+        org.mockito.Mockito.when(media.aiDescriptor("123",id,input.seq())).thenReturn(
+            new xiaozhi.modules.attachment.AttachmentModels.View("123",id,"audio.wav","audio/wav","audio",32044L,"hash","ready",null,
+                Map.of("artifacts",List.of("audio")),List.of(),java.time.Instant.now()));
+        org.mockito.Mockito.when(media.aiContent("123",id,input.seq(),"audio")).thenReturn(
+            new xiaozhi.modules.attachment.AttachmentService.Content(new java.io.ByteArrayInputStream(new byte[]{1}),1,"audio/wav","audio.wav",false));
+        var task=ai.claim(new Claim("omni-worker"));assertEquals("qwen3.8-omni-flash",task.model());
+        assertEquals("audio",task.messages().getLast().attachments().getFirst().variant());
+        try(var stream=ai.media(task.runId(),"123","audio",task.leaseToken())) {assertEquals(1,stream.size());}
+        ai.complete(task.runId(),new Complete(task.leaseToken(),0L,"stop",new Usage(109L,248L,357L,44L),"omni-test-request"));
+        assertEquals(44,ai.get(owner,id,task.runId()).usage().path("input_audio_tokens").asInt());
+        conversations.send(owner,id,text("next","continue from evidence"));var next=ai.claim(new Claim("omni-worker"));
+        assertEquals("test-model",next.model());
+        assertTrue(next.messages().stream().allMatch(m->m.attachments()==null || m.attachments().isEmpty()));
+        support.handoff(owner,id,new Handoff("omni-handoff","text",null));
+        assertEquals(409,error(()->ai.media(next.runId(),"123","audio",next.leaseToken())));
+    }
+
 }

@@ -2,6 +2,12 @@ import asyncio
 import base64
 import re
 import logging
+import io
+import wave
+
+# Official inline audio cap is encoded Base64 < 10 MB, not the B3 upload cap.
+AUDIO_PREFIX = 'data:audio/wav;base64,'
+MAX_AUDIO_BYTES = ((10_000_000 - 1 - len(AUDIO_PREFIX)) // 4) * 3
 from .provider import ProviderFailure
 from .transport import ControlError, LeaseLost
 
@@ -14,7 +20,11 @@ def actual_usage(usage):
     values = [getattr(usage, name, None) for name in ('prompt_tokens', 'completion_tokens', 'total_tokens')]
     if any(type(value) is not int or value < 0 for value in values):
         return None
-    return dict(zip(('input_tokens', 'output_tokens', 'total_tokens'), values))
+    result = dict(zip(('input_tokens', 'output_tokens', 'total_tokens'), values))
+    audio = getattr(getattr(usage, 'prompt_tokens_details', None), 'audio_tokens', None)
+    if type(audio) is int and 0 <= audio <= values[0]:
+        result['input_audio_tokens'] = audio
+    return result
 
 
 class Worker:
@@ -50,18 +60,23 @@ class Worker:
                 raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
             content = [{'type': 'text', 'text': clean['content']}]
             for ref in refs:
-                if not isinstance(ref, dict):
+                if (not isinstance(ref, dict) or not isinstance(ref.get('attachment_id'), str)
+                        or not re.fullmatch(r'[0-9]{1,20}', ref['attachment_id'])):
                     raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
                 variant, mime, kind = ref.get('variant'), ref.get('mime_type'), ref.get('kind')
                 image = variant == 'display' or bool(isinstance(variant, str) and re.fullmatch(r'frame_[0-5]', variant))
                 textual = variant in ('text', 'transcript')
-                if (kind not in ('image', 'video', 'audio', 'file') or not (image or textual)
+                audio = variant == 'audio'
+                if (kind not in ('image', 'video', 'audio', 'file') or not (image or textual or audio)
                         or (image and mime != 'image/jpeg') or (textual and mime != 'text/plain')
+                        or (audio and (mime != 'audio/wav' or kind not in ('audio', 'video')))
                         or (variant == 'display' and kind != 'image')
                         or (variant == 'text' and kind != 'file')
                         or (variant == 'transcript' and kind not in ('audio', 'video'))):
                     raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
-                if image and task.get('model') != getattr(self.config, 'vision_model', ''):
+                if audio and (not getattr(self.config, 'omni_model', '') or task.get('model') != getattr(self.config, 'omni_model', '')):
+                    raise ProviderFailure('MODEL_CAPABILITY_UNAVAILABLE')
+                if image and task.get('model') not in (getattr(self.config, 'vision_model', ''), getattr(self.config, 'omni_model', '') or None):
                     raise ProviderFailure('MODEL_CAPABILITY_UNAVAILABLE')
                 if image and variant != 'display':
                     timestamp = ref.get('time_ms')
@@ -71,8 +86,28 @@ class Worker:
                         timestamp = int(timestamp)
                     if kind != 'video' or type(timestamp) is not int or not 0 <= timestamp <= 180000:
                         raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
-                data = await self.manager.media(task, ref, (8 << 20) if image else (256 << 10))
-                if image:
+                data = await self.manager.media(task, ref, MAX_AUDIO_BYTES if audio else (8 << 20) if image else (256 << 10))
+                if audio:
+                    if not data or len(data) > MAX_AUDIO_BYTES:
+                        raise ProviderFailure('OMNI_AUDIO_LIMIT')
+                    try:
+                        with wave.open(io.BytesIO(data), 'rb') as wav:
+                            if (wav.getnchannels(), wav.getframerate(), wav.getsampwidth(), wav.getcomptype()) != (1, 16000, 2, 'NONE'):
+                                raise ValueError()
+                            frames = wav.getnframes()
+                            if frames <= 0 or frames > (180 if kind == 'video' else 600) * 16000:
+                                raise ValueError()
+                            if len(wav.readframes(frames)) != frames * 2:
+                                raise ValueError()
+                    except (wave.Error, EOFError, ValueError):
+                        raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE') from None
+                    content.append({'type': 'text', 'text':
+                        f"Verified normalized audio for attachment {ref.get('attachment_id')}. "
+                        "Describe audible evidence separately from hypotheses. Environmental/mechanical sounds alone "
+                        "cannot establish a definite fault or safe operating condition; ask for measurements and expert confirmation."})
+                    content.append({'type': 'input_audio', 'input_audio': {'data':
+                        AUDIO_PREFIX + base64.b64encode(data).decode('ascii'), 'format': 'wav'}})
+                elif image:
                     image_bytes += len(data)
                     if not data or image_bytes > 24 << 20:
                         raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
@@ -132,7 +167,7 @@ class Worker:
                                     provider_request_id=request_id)
 
     async def execute(self, task):
-        if task.get('model') not in (self.config.model, getattr(self.config, 'vision_model', '') or self.config.model):
+        if task.get('model') not in (self.config.model, getattr(self.config, 'vision_model', '') or self.config.model, getattr(self.config, 'omni_model', '') or self.config.model):
             code = 'MODEL_CAPABILITY_UNAVAILABLE' if getattr(self.config, 'vision_model', '') else 'MODEL_MISMATCH'
             await self.manager.callback(task, 'fail', error_code=code)
             return

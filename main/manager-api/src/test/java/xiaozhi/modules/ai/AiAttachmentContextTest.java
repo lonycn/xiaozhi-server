@@ -70,4 +70,21 @@ class AiAttachmentContextTest {
         var parts=json.createArrayNode();for(int i=0;i<17;i++)parts.addObject().put("type","image").put("attachment_id","123");
         assertEquals("MEDIA_INPUT_UNAVAILABLE",context.plan("conversation",4,parts).error());
     }
+    @Test void explicitOmniUsesRawAudioWithoutAsrAndKeepsVerifiedVideoFrames() throws Exception {
+        var service=mock(AttachmentService.class);var context=new AiAttachmentContext(service);
+        context.setOmniModel("qwen3.8-omni-flash");
+        for(String kind:List.of("audio","video")) {
+            Map<String,Object> metadata=new HashMap<>();metadata.put("artifacts",List.of("audio","frame_0"));
+            metadata.put("has_audio",true);metadata.put("frames",List.of(Map.of("artifact","frame_0","time_ms",1500)));
+            when(service.aiDescriptor("123","conversation",4)).thenReturn(view(kind,metadata,List.of()));
+            var parts=json.createArrayNode();parts.addObject().put("type",kind).put("attachment_id","123");
+            var plan=context.plan("conversation",4,parts);
+            assertTrue(plan.audio());assertFalse(plan.waiting());assertNull(plan.error());
+            assertEquals(kind.equals("video")?List.of("frame_0","audio"):List.of("audio"),
+                    plan.refs().stream().map(AiModels.MediaRef::variant).toList());
+            metadata.put("artifacts",List.of("transcript","frame_0"));
+            assertEquals("MEDIA_INPUT_UNAVAILABLE",context.plan("conversation",4,parts).error());
+        }
+    }
+
 }

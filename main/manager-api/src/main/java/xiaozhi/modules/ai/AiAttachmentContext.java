@@ -15,9 +15,14 @@ import xiaozhi.modules.conversation.ConversationProblem;
 public class AiAttachmentContext {
     private final AttachmentService attachments;
     public AiAttachmentContext(AttachmentService attachments) { this.attachments=attachments; }
-    public record Plan(List<MediaRef> refs,boolean waiting,boolean vision,String error) { }
+    private String omniModel = "";
+    @org.springframework.beans.factory.annotation.Value("${ai.execution.omni-model:}")
+    public void setOmniModel(String value) { omniModel=value==null?"":value.trim(); }
+    public record Plan(List<MediaRef> refs,boolean waiting,boolean vision,boolean audio,String error) {
+        public Plan(List<MediaRef> refs,boolean waiting,boolean vision,String error) { this(refs,waiting,vision,false,error); }
+    }
     public Plan plan(String conversationId,long inputSeq,JsonNode parts) {
-        List<MediaRef> refs=new ArrayList<>();boolean vision=false,waiting=false;
+        List<MediaRef> refs=new ArrayList<>();boolean vision=false,waiting=false,audio=false;
         try {
             for(JsonNode part:parts) {
                 if(!part.hasNonNull("attachment_id")) continue;
@@ -47,7 +52,10 @@ public class AiAttachmentContext {
                     }
                 } else if(!kind.equals("audio")) return unavailable();
                 if(kind.equals("audio") || kind.equals("video") && Boolean.TRUE.equals(metadata.get("has_audio"))) {
-                    if(artifacts.contains("transcript")) refs.add(new MediaRef(id,"transcript","text/plain",kind,null));
+                    if(!omniModel.isBlank()) {
+                        if(!artifacts.contains("audio")) return unavailable();
+                        audio=true;refs.add(new MediaRef(id,"audio","audio/wav",kind,null));
+                    } else if(artifacts.contains("transcript")) refs.add(new MediaRef(id,"transcript","text/plain",kind,null));
                     else if(descriptor.jobs().stream().anyMatch(job -> job.jobType().equals("audio_transcription")
                             && Set.of("queued","running").contains(job.status()))) waiting=true;
                     else return unavailable();
@@ -55,7 +63,7 @@ public class AiAttachmentContext {
             }
         } catch(ConversationProblem problem) { return unavailable(); }
         if(refs.size()>16) return unavailable();
-        return new Plan(List.copyOf(refs),waiting,vision,null);
+        return new Plan(List.copyOf(refs),waiting,vision,audio,null);
     }
     private static Plan unavailable() { return new Plan(List.of(),false,false,"MEDIA_INPUT_UNAVAILABLE"); }
     public AttachmentService.Content content(String attachmentId,String conversationId,long inputSeq,String variant) {

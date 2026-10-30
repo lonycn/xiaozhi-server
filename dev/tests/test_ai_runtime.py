@@ -49,6 +49,25 @@ class AiRuntimeTest(unittest.TestCase):
         self.assertIn('SELECT config_json', compose.call_args.args[-1])
         self.assertEqual((self.runtime / 'ai-worker.json').stat().st_mode & 0o777, 0o600)
 
+    def test_omni_export_is_explicit_private_and_reuses_selected_credentials(self):
+        config = {'base_url': 'https://example.maas.aliyuncs.com/compatible-mode/v1',
+                  'api_key': 'omni-private-secret', 'model_name': 'qwen-flash'}
+        with patch.object(manage, 'compose', return_value=SimpleNamespace(stdout=json.dumps(config))):
+            manage.export_ai_config()
+            self.assertNotIn('omni_model', json.loads((self.runtime / 'ai-worker.json').read_text()))
+            manage.export_ai_config('qwen3.8-omni-flash')
+        worker = json.loads((self.runtime / 'ai-worker.json').read_text())
+        self.assertEqual(worker['omni_api_key'], config['api_key'])
+        self.assertEqual(worker['omni_base_url'], config['base_url'])
+        self.assertEqual((self.runtime / 'ai-worker.json').stat().st_mode & 0o777, 0o600)
+        self.write('ai-settings.json', {'enabled': True, 'model': 'qwen-flash', 'omni_model': worker['omni_model']})
+        manage.configure()
+        props = (self.runtime / 'application-dev.properties').read_text()
+        self.assertIn('ai.execution.omni-model=qwen3.8-omni-flash', props)
+        self.assertNotIn(config['api_key'], props)
+        with patch.object(manage, 'compose', return_value=SimpleNamespace(stdout=json.dumps(config))):
+            with self.assertRaises(RuntimeError): manage.export_ai_config('unknown-model')
+
     def test_rejects_other_provider_without_writing_worker(self):
         config = {'base_url': 'https://dashscope.aliyuncs.com.evil.test/v1', 'api_key': 'secret', 'model_name': 'model'}
         with patch.object(manage, 'compose', return_value=SimpleNamespace(stdout=json.dumps(config))):

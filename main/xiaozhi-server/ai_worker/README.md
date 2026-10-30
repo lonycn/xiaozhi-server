@@ -124,3 +124,11 @@ The `test_ai_worker_media.py` suite adds actual SDK multimodal wire assertions,
 strict reference and byte/character bounds, model routing and cancellation tests.
 It uses mocked control/model HTTP responses and does not establish live provider
 or deployed-storage acceptance.
+
+Non-realtime raw audio is opt-in through `omni_model=qwen3.8-omni-flash` plus
+explicit `omni_base_url` and `omni_api_key` (optional `omni_workspace_id`). An
+independent SDK client accepts only current-run normalized WAV capabilities;
+no ASR fallback is made for sound analysis. Inline audio is capped at 7,499,982
+bytes, including a conservative allowance for the Data URI prefix below the
+provider's 10 MB Base64 limit. Over-limit runs fail `OMNI_AUDIO_LIMIT` and retain
+the uploaded evidence. See `docs/ai-customer-service/OMNI_AUDIO_CONTRACT.md`.

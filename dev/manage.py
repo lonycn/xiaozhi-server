@@ -60,10 +60,31 @@ def configure():
             raise RuntimeError("Invalid AI configuration")
         properties.update({"features.ai-text-enabled": "true", "ai.worker.key": key,
                            "ai.execution.model": model})
+    media = media_settings()
+    if media.get("enabled") is True:
+        worker_key = (RUNTIME / "media-worker-key").read_text().strip()
+        ticket_key = (RUNTIME / "media-ticket-key").read_text().strip()
+        if any(len(key) < 32 or any(c in key for c in "\r\n") for key in (worker_key, ticket_key)):
+            raise RuntimeError("Invalid media private keys")
+        properties.update({"features.attachments-enabled": "true",
+                           "media.worker.key": worker_key,
+                           "media.ticket-key": ticket_key,
+                           "media.storage.type": media.get("storage", "filesystem"),
+                           "media.storage.root": "/app/attachments",
+                           "media.transcription-enabled": str(media.get("transcription", False)).lower()})
+        if media.get("storage") == "s3":
+            storage = json.loads((RUNTIME / "media-storage.json").read_text())
+            for key in ("endpoint", "region", "bucket", "prefix", "access-key", "secret-key"):
+                value = storage[key]
+                if not isinstance(value, str) or not value or any(c in value for c in "\r\n"):
+                    raise RuntimeError("Invalid private media storage configuration")
+                properties["media.storage.s3." + key] = value
+        if media.get("vision_model"):
+            properties["ai.execution.vision-model"] = media["vision_model"]
     (RUNTIME / "application-dev.properties").write_text("\n".join(f"{key}={value}" for key, value in properties.items()) + "\n")
     for name in ("credentials.json", "compose.env", "application-dev.properties"):
         (RUNTIME / name).chmod(0o600)
-    for name in ("logs", "uploadfile"):
+    for name in ("logs", "uploadfile", "attachments"):
         (RUNTIME / name).mkdir(exist_ok=True)
 
 
@@ -79,6 +100,16 @@ def ai_settings():
     data = json.loads(path.read_text())
     if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
         raise RuntimeError("Invalid AI settings")
+    return data
+
+
+def media_settings():
+    path = RUNTIME / "media-settings.json"
+    if not path.exists():
+        return {"enabled": False}
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
+        raise RuntimeError("Invalid media settings")
     return data
 
 
@@ -125,6 +156,10 @@ def export_ai_config():
                   "base_url": config["base_url"], "api_key": api_key, "model": model, "max_tokens": max_tokens}
         if config.get("workspace_id"):
             worker["workspace_id"] = config["workspace_id"]
+        vision = media_settings().get("vision_model")
+        if vision:
+            worker.update(vision_model=vision, vision_base_url=config["base_url"],
+                          vision_api_key=api_key, vision_workspace_id=config.get("workspace_id", ""))
         private_json("ai-worker.json", worker)
         return model
     except (ValueError, TypeError, KeyError, OSError, subprocess.SubprocessError):
@@ -161,6 +196,107 @@ def start_ai_worker():
     if not identity:
         raise RuntimeError("AI worker exited; inspect dev/.runtime/ai-worker.log")
     private_json("ai-worker-process.json", {"pid": process.pid, "identity": identity})
+
+
+def media_process():
+    path = RUNTIME / "media-worker-process.json"
+    if path.exists():
+        try:
+            info = json.loads(path.read_text())
+            if info["identity"] and process_identity(info["pid"]) == info["identity"]:
+                return info
+        except (ValueError, KeyError, TypeError):
+            pass
+    return None
+
+
+def export_media_config(storage_type=None, storage_env=None, vision_model=None):
+    """Read existing ASR settings and opt-in storage credentials; never initializes a bucket."""
+    settings = media_settings()
+    selected = storage_type or settings.get("storage", "filesystem")
+    if selected not in ("filesystem", "s3"):
+        raise RuntimeError("Unsupported media storage")
+    if settings.get("storage") and selected != settings["storage"]:
+        raise RuntimeError("Media storage cannot be switched in place; existing objects must remain readable")
+    if vision_model and (not all(c.isalnum() or c in "._-" for c in vision_model) or len(vision_model) > 128):
+        raise RuntimeError("Invalid vision model")
+    for name in ("media-worker-key", "media-ticket-key"):
+        path = RUNTIME / name
+        if not path.exists():
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as output: output.write(secrets.token_urlsafe(48))
+        path.chmod(0o600)
+    worker = {"manager_url": API_URL, "worker_key": (RUNTIME / "media-worker-key").read_text().strip(),
+              "worker_id": "dev-media-local", "ffmpeg": shutil.which("ffmpeg") or "ffmpeg",
+              "ffprobe": shutil.which("ffprobe") or "ffprobe"}
+    query = "SELECT config_json FROM ai_model_config WHERE model_type='ASR' AND is_default=1 AND is_enabled=1"
+    result = compose("exec", "-T", "mysql", "sh", "-c",
+                     'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot --batch --raw --skip-column-names xiaozhi_esp32_server -e "$1"',
+                     "sh", query, capture_output=True, text=True)
+    rows = result.stdout.strip().splitlines()
+    transcription = False
+    if len(rows) == 1:
+        config = json.loads(rows[0])
+        url = urlsplit(config.get("base_url", ""))
+        if (url.scheme == "https" and not url.username and not url.password and not url.query and not url.fragment
+                and (url.hostname in ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com")
+                     or (url.hostname or "").endswith(".maas.aliyuncs.com"))
+                and config.get("api_key") and config.get("model_name") == "qwen3-asr-flash"):
+            worker.update(asr_base_url=config["base_url"], asr_api_key=config["api_key"],
+                          asr_model=config["model_name"], asr_workspace_id=config.get("workspace_id", ""))
+            transcription = True
+    if selected == "s3":
+        storage_path = RUNTIME / "media-storage.json"
+        if storage_env:
+            values = {}
+            for line in Path(storage_env).read_text().splitlines():
+                if "=" in line and not line.lstrip().startswith("#"):
+                    key, value = line.split("=", 1)
+                    values[key.strip()] = value.strip().strip('"').strip("'")
+            endpoint = values.get("S3_ENDPOINT", "")
+            parsed = urlsplit(endpoint)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise RuntimeError("Invalid private S3 endpoint")
+            # Docker's host gateway is needed only for the API container, never a public URL.
+            if parsed.hostname in ("127.0.0.1", "localhost"):
+                endpoint = parsed._replace(netloc="host.docker.internal" + (":" + str(parsed.port) if parsed.port else "")).geturl()
+            previous = json.loads(storage_path.read_text()) if storage_path.exists() else None
+            storage = {"endpoint": endpoint, "region": values.get("S3_REGION", "us-east-1"),
+                       "bucket": values.get("S3_BUCKET", ""), "access-key": values.get("S3_ACCESS_KEY", ""),
+                       "secret-key": values.get("S3_SECRET_KEY", ""),
+                       "prefix": previous["prefix"] if previous else "xiaozhi-dev/" + secrets.token_hex(12) + "/"}
+            if any(not v or any(c in v for c in "\r\n") for v in storage.values()):
+                raise RuntimeError("Incomplete private S3 configuration")
+            if previous and any(previous[k] != storage[k] for k in ("endpoint", "bucket", "prefix")):
+                raise RuntimeError("Refusing to redirect existing media to another S3 location")
+            private_json("media-storage.json", storage)
+        elif not storage_path.exists():
+            raise RuntimeError("S3 requires --storage-env with an existing private configuration")
+    private_json("media-worker.json", worker)
+    settings.update(enabled=True, storage=selected, transcription=transcription)
+    if vision_model: settings["vision_model"] = vision_model
+    private_json("media-settings.json", settings)
+
+
+def start_media_worker():
+    if media_process(): return
+    python = os.environ.get("XIAOZHI_MEDIA_WORKER_PYTHON", str(ROOT.parent / ".media-venv/bin/python"))
+    try:
+        subprocess.run([python, "-c", "import PIL,pypdf,httpx"], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        config = json.loads((RUNTIME / "media-worker.json").read_text())
+        for name in ("ffmpeg", "ffprobe"):
+            subprocess.run([config[name], "-version"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, KeyError, subprocess.SubprocessError):
+        raise RuntimeError("Media worker requires its prepared Python environment, ffmpeg and ffprobe") from None
+    with (RUNTIME / "media-worker.log").open("a") as log:
+        process = subprocess.Popen([python, "-m", "media_worker", "--config", str(RUNTIME / "media-worker.json")],
+                                   cwd=ROOT / "main/xiaozhi-server", stdout=log, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+    identity = process_identity(process.pid)
+    if not identity:
+        raise RuntimeError("Media worker exited; inspect its private runtime log")
+    private_json("media-worker-process.json", {"pid": process.pid, "identity": identity})
 
 
 def stage_api_jar():
@@ -311,12 +447,40 @@ def stop_process(find_process, filename):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
+    parser.add_argument("--storage", choices=["filesystem", "s3"])
+    parser.add_argument("--storage-env", help="Existing private S3 configuration file; no bucket creation")
+    parser.add_argument("--vision-model", help="Previously verified Bailian vision model for this Dev workspace")
     args = parser.parse_args()
     configure()
-    if args.action == "ai-enable":
+    if args.action == "media-enable":
+        export_media_config(args.storage, args.storage_env, args.vision_model)
+        stop_process(media_process, "media-worker-process.json")
+        if ai_settings().get("enabled") is True:
+            export_ai_config()
+            stop_process(ai_process, "ai-worker-process.json")
+        configure()
+        recreate_api()
+        start_media_worker()
+        if ai_settings().get("enabled") is True: start_ai_worker()
+        start_candidate()
+        print("Private media enabled; Vue 3:", CANDIDATE_URL + "/#/conversations")
+    elif args.action == "media-disable":
+        stop_process(media_process, "media-worker-process.json")
+        settings = media_settings(); settings["enabled"] = False
+        private_json("media-settings.json", settings)
+        configure(); recreate_api()
+        print("Media disabled; existing objects and database rows retained")
+    elif args.action == "media-status":
+        settings = media_settings()
+        print("Media enabled:", settings.get("enabled") is True)
+        print("Media worker running:", bool(media_process()))
+        print("Media storage:", settings.get("storage", "filesystem"))
+        print("Transcription enabled:", settings.get("transcription") is True)
+        print("Vision model:", settings.get("vision_model", ""))
+    elif args.action == "ai-enable":
         model = export_ai_config()
         stop_process(ai_process, "ai-worker-process.json")
         private_json("ai-settings.json", {"enabled": True, "model": model})
@@ -370,6 +534,8 @@ def main():
         compose("up", "-d", "--force-recreate", "api")
         print("Waiting for Dev API…", flush=True)
         wait_http(API_URL + "/user/pub-config")
+        if media_settings().get("enabled") is True:
+            start_media_worker()
         if ai_settings().get("enabled") is True:
             start_ai_worker()
         start_candidate()
@@ -377,6 +543,7 @@ def main():
         wait_http(CANDIDATE_URL)
         print(CANDIDATE_URL + "/#/conversations", flush=True)
     elif args.action == "stop":
+        stop_process(media_process, "media-worker-process.json")
         stop_process(ai_process, "ai-worker-process.json")
         stop_process(candidate_process, "candidate-process.json")
         stop_process(web_process, "web-process.json")

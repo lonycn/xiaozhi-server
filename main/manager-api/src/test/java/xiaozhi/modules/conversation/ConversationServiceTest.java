@@ -58,9 +58,10 @@ class ConversationServiceTest {
         assertThrows(ConversationProblem.class, () -> service.request(json.readTree("""
                 {"client_message_id":"a","sender_type":"ai","parts":[{"type":"text","text":"test"}]}
                 """), SendMessage.class));
-        assertThrows(ConversationProblem.class, () -> service.request(json.readTree("""
+        SendMessage invalidTextAttachment = service.request(json.readTree("""
                 {"client_message_id":"a","parts":[{"type":"text","text":"test","attachment_id":"stolen"}]}
-                """), SendMessage.class));
+                """), SendMessage.class);
+        assertThrows(ConversationProblem.class, () -> service.send(7L, ID, invalidTextAttachment));
         verifyNoInteractions(dao);
     }
 

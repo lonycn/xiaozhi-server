@@ -37,6 +37,9 @@
     </properties>
 
     <dependencies>
+        <!-- Private B3 storage; no bucket creation or public policy APIs. -->
+        <dependency><groupId>software.amazon.awssdk</groupId><artifactId>s3</artifactId><version>2.25.60</version></dependency>
+        <dependency><groupId>software.amazon.awssdk</groupId><artifactId>url-connection-client</artifactId><version>2.25.60</version></dependency>
         <dependency>
             <groupId>org.apache.shiro</groupId>
             <artifactId>shiro-core</artifactId>

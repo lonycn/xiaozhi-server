@@ -1,6 +1,8 @@
 export function createSupportClient({ baseUrl, getToken, onUnauthorized, fetchImpl = globalThis.fetch, errorMessage = () => '请求未成功，请稍后重试' }) {
-  async function request(path, method = 'GET', payload) {
+  async function request(path, method = 'GET', payload, signal) {
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
     const timeout = setTimeout(() => controller.abort(), 30000);
     try {
       const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/api/v1/support${path}`, {
@@ -17,10 +19,10 @@ export function createSupportClient({ baseUrl, getToken, onUnauthorized, fetchIm
       }
       return body.data;
     } catch (error) {
-      if (error.name === 'AbortError') throw Object.assign(new Error(errorMessage('TIMEOUT')), { code: 'TIMEOUT' });
+      if (error.name === 'AbortError' && !signal?.aborted) throw Object.assign(new Error(errorMessage('TIMEOUT')), { code: 'TIMEOUT' });
       if (error instanceof TypeError) throw Object.assign(new Error(errorMessage('NETWORK')), { code: 'NETWORK' });
       throw error;
-    } finally { clearTimeout(timeout); }
+    } finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort); }
   }
   return {
     me: () => request('/me'),
@@ -31,6 +33,6 @@ export function createSupportClient({ baseUrl, getToken, onUnauthorized, fetchIm
     presence: accepting => request('/presence', 'POST', { accepting }),
     get: id => request(`/requests/${encodeURIComponent(id)}`),
     action: (id, action) => request(`/requests/${encodeURIComponent(id)}/${action}`, 'POST', {}),
-    send: (id, payload) => request(`/requests/${encodeURIComponent(id)}/messages`, 'POST', payload),
+    send: (id, payload, signal) => request(`/requests/${encodeURIComponent(id)}/messages`, 'POST', payload, signal),
   };
 }

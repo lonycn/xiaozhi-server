@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import re
 import logging
 from .provider import ProviderFailure
 from .transport import ControlError, LeaseLost
@@ -29,10 +31,80 @@ class Worker:
             if not isinstance(ack, dict) or ack.get('active') is not True:
                 raise LeaseLost()
 
+    async def prepare(self, task):
+        messages = task.get('messages')
+        if not isinstance(messages, list):
+            raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+        prepared, count, image_bytes, text_chars = [], 0, 0, 0
+        for index, message in enumerate(messages):
+            refs = message.get('attachments')
+            # Keep the B2 plain-text wire format and strip internal-only properties.
+            clean = {'role': message.get('role'), 'content': message.get('content', '')}
+            if not refs:
+                prepared.append(clean)
+                continue
+            if not isinstance(refs, list) or index != len(messages) - 1 or clean['role'] != 'user':
+                raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+            count += len(refs)
+            if count > 16:
+                raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+            content = [{'type': 'text', 'text': clean['content']}]
+            for ref in refs:
+                if not isinstance(ref, dict):
+                    raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+                variant, mime, kind = ref.get('variant'), ref.get('mime_type'), ref.get('kind')
+                image = variant == 'display' or bool(isinstance(variant, str) and re.fullmatch(r'frame_[0-5]', variant))
+                textual = variant in ('text', 'transcript')
+                if (kind not in ('image', 'video', 'audio', 'file') or not (image or textual)
+                        or (image and mime != 'image/jpeg') or (textual and mime != 'text/plain')
+                        or (variant == 'display' and kind != 'image')
+                        or (variant == 'text' and kind != 'file')
+                        or (variant == 'transcript' and kind not in ('audio', 'video'))):
+                    raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+                if image and task.get('model') != getattr(self.config, 'vision_model', ''):
+                    raise ProviderFailure('MODEL_CAPABILITY_UNAVAILABLE')
+                if image and variant != 'display':
+                    timestamp = ref.get('time_ms')
+                    if kind != 'video' or type(timestamp) is not int or not 0 <= timestamp <= 180000:
+                        raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+                data = await self.manager.media(task, ref, (8 << 20) if image else (256 << 10))
+                if image:
+                    image_bytes += len(data)
+                    if not data or image_bytes > 24 << 20:
+                        raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+                    note = f"Verified attachment {ref.get('attachment_id')}"
+                    if kind == 'video':
+                        note += f" video frame at {ref['time_ms']} ms"
+                    content.append({'type': 'text', 'text': note})
+                    content.append({'type': 'image_url', 'image_url': {'url':
+                        'data:image/jpeg;base64,' + base64.b64encode(data).decode('ascii')}})
+                else:
+                    try:
+                        text = data.decode('utf-8')
+                    except UnicodeError:
+                        raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE') from None
+                    text_chars += len(text)
+                    if text_chars > 60000 or '\x00' in text:
+                        raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+                    note = f"Verified {variant} for attachment {ref.get('attachment_id')}:\n"
+                    if not text.strip():
+                        text = '[No extractable text is available; do not infer unread scanned pages or speech.]'
+                    content.append({'type': 'text', 'text': note + text})
+            clean['content'] = content
+            prepared.append(clean)
+        return {**task, 'messages': prepared}
+
     async def generate(self, task):
         sequence = 0
         usage, finish_reason, request_id = None, None, None
-        async with self.provider.stream(task) as stream:
+        try:
+            if any(message.get('attachments') for message in task.get('messages', [])):
+                prepared = await asyncio.wait_for(self.prepare(task), getattr(self.config, 'provider_timeout_seconds', 60))
+            else:
+                prepared = await self.prepare(task)
+        except asyncio.TimeoutError:
+            raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE') from None
+        async with self.provider.stream(prepared) as stream:
             response = getattr(stream, 'response', None)
             headers = getattr(response, 'headers', {})
             request_id = headers.get('x-request-id') or headers.get('x-dashscope-request-id')
@@ -56,8 +128,9 @@ class Worker:
                                     provider_request_id=request_id)
 
     async def execute(self, task):
-        if task.get('model') != self.config.model:
-            await self.manager.callback(task, 'fail', error_code='MODEL_MISMATCH')
+        if task.get('model') not in (self.config.model, getattr(self.config, 'vision_model', '') or self.config.model):
+            code = 'MODEL_CAPABILITY_UNAVAILABLE' if getattr(self.config, 'vision_model', '') else 'MODEL_MISMATCH'
+            await self.manager.callback(task, 'fail', error_code=code)
             return
         # Reject leases too short for a heartbeat plus bounded transport timeout.
         if not isinstance(task.get('lease_seconds'), (int, float)) or task['lease_seconds'] < 30:

@@ -24,6 +24,9 @@
           },
           {
             "$ref": "#/$defs/LocationPart"
+          },
+          {
+            "$ref": "#/$defs/AttachmentPart"
           }
         ]
       }
@@ -172,7 +175,31 @@
         }
       },
       "description": "B2 payload within the existing ConversationEvent envelope. Delta additionally requires chunk_sequence/text; created includes message seq. Reset clears prior attempt text; queued retry can retain partial text until next claim/reset. Sequence dedup uses envelope.sequence, not message seq."
+    },
+    "AttachmentPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attachment_id"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "file"
+          ]
+        },
+        "attachment_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "description": "Positive Java signed long decimal string, at most 9223372036854775807."
+        }
+      },
+      "description": "B3: ready attachment owned by sender, in same conversation, linked once in the message transaction; at most 10 attachments, one video and one audio per message."
     }
   },
-  "description": "Implemented user requests support text and location; B1 support sends remain text-only. B2 does not accept model, owner, sender, run or lease fields from clients. Saving an AI_ACTIVE user message may enqueue an AI run when the default-off AI-text feature is explicitly enabled. Request TextPart remains bounded at 8000 characters; persisted assistant responses use AssistantTextPart. AI usage is actual provider-reported data, never an estimate; legacy read-only history is not imported into this request or model context."
+  "description": "Implemented user requests support text and location; B1 support sends remain text-only. B2 does not accept model, owner, sender, run or lease fields from clients. Saving an AI_ACTIVE user message may enqueue an AI run when the default-off AI-text feature is explicitly enabled. Request TextPart remains bounded at 8000 characters; persisted assistant responses use AssistantTextPart. AI usage is actual provider-reported data, never an estimate; legacy read-only history is not imported into this request or model context. B3 adds AttachmentPart for user and current support sender when attachments are enabled; location remains unavailable to support sends. Attachment IDs are positive Java long decimal strings; conversation IDs remain 32 lowercase hex."
 }

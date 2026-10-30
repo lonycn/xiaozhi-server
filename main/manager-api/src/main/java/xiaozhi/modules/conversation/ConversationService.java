@@ -29,6 +29,10 @@ public class ConversationService {
     private final ObjectMapper json;
     private final TransactionTemplate transactions;
     private xiaozhi.modules.ai.AiExecutionService aiExecution;
+    private xiaozhi.modules.attachment.AttachmentService attachments;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAttachments(xiaozhi.modules.attachment.AttachmentService service) { this.attachments = service; }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAiExecution(xiaozhi.modules.ai.AiExecutionService service) { this.aiExecution = service; }
@@ -114,6 +118,7 @@ public class ConversationService {
             long eventSeq = conversation.lastEventSeq() + 1;
             String messageId = id();
             dao.insertMessage(messageId, id, seq, request.clientMessageId(), owner, parts, hash);
+            bindAttachments(owner, id, messageId, seq, request.parts());
             dao.insertEvent(id(), id, eventSeq, "message.accepted", encode(Map.of("message_id", messageId, "seq", seq)));
             dao.advance(id, seq, eventSeq);
             if (aiExecution != null) aiExecution.onUserMessage(id, messageId);
@@ -148,6 +153,7 @@ public class ConversationService {
             long eventSeq = conversation.lastEventSeq() + 1;
             String messageId = id();
             dao.insertMessage(messageId, id, seq, request.clientMessageId(), actor, parts, hash, role, "completed");
+            bindAttachments(actor, id, messageId, seq, request.parts());
             dao.insertEvent(id(), id, eventSeq, "support.message.created",
                     encode(Map.of("message_id", messageId, "seq", seq, "sender_type", role)));
             dao.advance(id, seq, eventSeq);
@@ -194,33 +200,49 @@ public class ConversationService {
         if (parts == null || parts.isEmpty() || parts.size() > 16) {
             throw badRequest("PARTS_REQUIRED_MAX_16");
         }
-        int textLength = 0;
+        int textLength = 0, mediaCount = 0, videoCount = 0, audioCount = 0;
+        java.util.Set<String> attachmentIds = new java.util.HashSet<>();
         for (MessagePart part : parts) {
             if (part == null || part.type() == null) {
                 throw badRequest("INVALID_MESSAGE_PART");
             }
             if ("text".equals(part.type())) {
-                if (part.text() == null || part.text().isBlank() || part.text().length() > 8000
+                if (part.attachmentId() != null || part.text() == null || part.text().isBlank() || part.text().length() > 8000
                         || part.latitude() != null || part.longitude() != null || part.coordinateSystem() != null
                         || part.accuracyM() != null || part.source() != null || part.authorizedAt() != null) {
                     throw badRequest("INVALID_TEXT_PART");
                 }
                 textLength += part.text().length();
             } else if ("location".equals(part.type())) {
-                if (part.text() != null || !range(part.latitude(), -90, 90) || !range(part.longitude(), -180, 180)
+                if (part.attachmentId() != null || part.text() != null || !range(part.latitude(), -90, 90) || !range(part.longitude(), -180, 180)
                         || !("WGS84".equals(part.coordinateSystem()) || "GCJ02".equals(part.coordinateSystem()))
                         || !range(part.accuracyM(), 0, 100000) || !"user_shared".equals(part.source())
                         || part.authorizedAt() == null || part.authorizedAt().isAfter(Instant.now().plusSeconds(300))) {
                     throw badRequest("INVALID_LOCATION_PART");
                 }
+            } else if (java.util.Set.of("image", "video", "audio", "file").contains(part.type())) {
+                if (attachments == null) throw new ConversationProblem(415, "ATTACHMENTS_DISABLED");
+                if (part.attachmentId() == null || !part.attachmentId().matches("[1-9][0-9]{0,18}")
+                        || !attachmentIds.add(part.attachmentId()) || part.text() != null
+                        || part.latitude() != null || part.longitude() != null || part.coordinateSystem() != null
+                        || part.accuracyM() != null || part.source() != null || part.authorizedAt() != null) {
+                    throw badRequest("INVALID_ATTACHMENT_PART");
+                }
+                mediaCount++;
+                if ("video".equals(part.type())) videoCount++;
+                if ("audio".equals(part.type())) audioCount++;
+                if (mediaCount > 10 || videoCount > 1 || audioCount > 1) throw badRequest("MESSAGE_MEDIA_LIMIT");
             } else {
-                // Media cannot be referenced safely before the authenticated upload pipeline exists.
                 throw new ConversationProblem(415, "MESSAGE_PART_NOT_SUPPORTED");
             }
         }
         if (textLength > 32000) {
             throw badRequest("MESSAGE_TEXT_MAX_32000");
         }
+    }
+
+    private void bindAttachments(long actor, String conversation, String message, long seq, List<MessagePart> parts) {
+        if (attachments != null) attachments.bind(actor, conversation, message, seq, parts);
     }
 
     private static boolean range(Double value, double min, double max) {

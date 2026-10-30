@@ -7,7 +7,8 @@ info:
     features.conversation-enabled=true; support additionally requires features.support-handoff-enabled=true.
     All feature flags default to false. B2 AI text execution and authenticated SSE additionally require
     features.ai-text-enabled=true together with conversation-enabled=true. Dev explicitly opts in;
-    opt-in does not enable the feature in other environments. Media/Omni/LiveKit remain planned.
+    opt-in does not enable the feature in other environments. B3 private attachments additionally require
+    features.attachments-enabled=true; it defaults off. Omni/LiveKit remain planned.
     User-message persistence is independent of model completion; only AI_ACTIVE schedules AI execution.
     The internal worker protocol is documented in [B2_IMPLEMENTATION_CONTRACT.md](./B2_IMPLEMENTATION_CONTRACT.md)
     and [the independent Python worker README](../../main/xiaozhi-server/ai_worker/README.md).
@@ -678,10 +679,130 @@ paths:
         '400': {$ref: '#/components/responses/Invalid'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/ai/uploads/init:
+    post:
+      operationId: initAttachmentUpload
+      description: Current writable owner or support agent; uploader plus client_upload_id is idempotent. Changed parameters yield 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AttachmentInit'}
+      responses:
+        '200':
+          description: Attachment metadata and authenticated PUT upload descriptor
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties: {data: {$ref: '#/components/schemas/AttachmentInitView'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '409': {description: Client upload ID reused with different parameters}
+        '413': {description: Media size limit}
+        '415': {description: Unsupported type or filename mismatch}
+  /api/v1/ai/uploads/{attachmentId}/content:
+    parameters:
+      - {$ref: '#/components/parameters/AttachmentId'}
+    put:
+      operationId: uploadAttachmentContent
+      description: Bearer required; raw bytes and declared Content-Type must match init size and SHA-256. Bytes are immutable; identical retries are idempotent.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '200': {$ref: '#/components/responses/AttachmentResult'}
+        '409': {description: Incomplete, mismatched or conflicting upload}
+        '413': {description: Media size limit}
+        '503': {description: Storage unavailable}
+  /api/v1/ai/uploads/{attachmentId}/complete:
+    parameters:
+      - {$ref: '#/components/parameters/AttachmentId'}
+    post:
+      operationId: completeAttachmentUpload
+      description: Verify stored original and idempotently queue inspection; storage success alone is not ready.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmptyRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AttachmentResult'}
+        '409': {description: Upload incomplete or original missing}
+  /api/v1/ai/attachments/{attachmentId}:
+    parameters:
+      - {$ref: '#/components/parameters/AttachmentId'}
+    get:
+      operationId: getAttachment
+      description: Unlinked attachments are uploader-only; linked attachments follow conversation read access and historical agent message cutoff. No administrator bypass.
+      responses:
+        '200': {$ref: '#/components/responses/AttachmentResult'}
+        '404': {description: Missing or inaccessible}
+  /api/v1/ai/attachments/{attachmentId}/retry:
+    parameters:
+      - {$ref: '#/components/parameters/AttachmentId'}
+    post:
+      operationId: retryAttachment
+      description: Uploader must still have write access; original must exist, no active job, and failed job must be retryable with fewer than three claims.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmptyRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AttachmentResult'}
+        '409': {description: Not retryable or active job exists}
+  /api/v1/ai/attachments/{attachmentId}/access:
+    parameters:
+      - {$ref: '#/components/parameters/AttachmentId'}
+    get:
+      operationId: getAttachmentAccess
+      description: Issue actor-bound short ticket, valid at most 120 seconds, after resource authorization.
+      parameters:
+        - name: variant
+          in: query
+          schema: {type: string, default: display, enum: [original, display, thumbnail, text, poster, audio, transcript, frame_0, frame_1, frame_2, frame_3, frame_4, frame_5]}
+      responses:
+        '200':
+          description: Private content URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties: {data: {$ref: '#/components/schemas/AttachmentAccess'}}
+  /api/v1/ai/attachments/{attachmentId}/content:
+    parameters:
+      - {$ref: '#/components/parameters/AttachmentId'}
+    get:
+      operationId: getAttachmentTicketContent
+      security: []
+      description: This exact route accepts a ticket without Bearer. Every request validates ticket and rechecks actor account and current resource authorization, including historical cutoff. Audio/video support one byte range; response is private/no-store and nosniff.
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema: {type: string}
+        - name: Range
+          in: header
+          schema: {type: string}
+      responses:
+        '200': {description: Authorized binary content}
+        '206': {description: Audio/video byte range}
+        '401': {description: Invalid or expired ticket}
+        '404': {description: Missing or inaccessible resource}
+        '416': {description: Invalid range}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer}
   parameters:
+    AttachmentId:
+      name: attachmentId
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[1-9][0-9]{0,18}$', description: Positive Java signed long, maximum 9223372036854775807}
     RunId:
       name: runId
       in: path
@@ -712,6 +833,14 @@ components:
       in: query
       schema: {type: integer, minimum: 1, maximum: 100, default: 50}
   responses:
+    AttachmentResult:
+      description: Private attachment metadata
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: '#/components/schemas/Result'}
+              - properties: {data: {$ref: '#/components/schemas/Attachment'}}
     AiRunResult:
       description: Persisted public run state; no worker key, lease capability, provider request headers, or credentials
       content:
@@ -778,6 +907,7 @@ components:
       oneOf:
         - {$ref: './MESSAGE_SCHEMA.json#/$defs/AssistantTextPart'}
         - {$ref: './MESSAGE_SCHEMA.json#/$defs/LocationPart'}
+        - {$ref: './MESSAGE_SCHEMA.json#/$defs/AttachmentPart'}
     Message:
       type: object
       required: [id, conversation_id, seq, client_message_id, sender_type, sender_id, parts, status, created_at]
@@ -899,7 +1029,14 @@ components:
       required: [client_message_id, parts]
       properties:
         client_message_id: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$'}
-        parts: {type: array, minItems: 1, maxItems: 16, items: {$ref: './MESSAGE_SCHEMA.json#/$defs/TextPart'}}
+        parts:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            oneOf:
+              - {$ref: './MESSAGE_SCHEMA.json#/$defs/TextPart'}
+              - {$ref: './MESSAGE_SCHEMA.json#/$defs/AttachmentPart'}
     SupportAssignment:
       x-implementation: internal-persistence
       description: Internal assignment history; no public assignment CRUD API.
@@ -981,3 +1118,62 @@ components:
         preview_attachment_id: {type: string}
         author_id: {type: string}
       description: Preserve original; source/preview permissions follow the conversation.
+    AttachmentInit:
+      type: object
+      additionalProperties: false
+      required: [conversation_id, client_upload_id, filename, mime_type, size, sha256]
+      properties:
+        conversation_id: {type: string, pattern: '^[a-f0-9]{32}$'}
+        client_upload_id: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$'}
+        filename: {type: string, maxLength: 255}
+        mime_type: {enum: [image/jpeg, image/png, image/webp, application/pdf, text/plain, video/mp4, video/webm, audio/wav, audio/mpeg, audio/mp4, audio/ogg]}
+        size: {type: integer, minimum: 1, maximum: 104857600}
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+      description: Image and file limit 20 MiB; video 100 MiB; audio 50 MiB. Filename extension and actual format must match MIME.
+    Attachment:
+      type: object
+      required: [id, conversation_id, filename, mime_type, kind, size, sha256, status, error_code, metadata, jobs, created_at]
+      properties:
+        id: {type: string, pattern: '^[1-9][0-9]{0,18}$', description: Positive Java signed long, maximum 9223372036854775807}
+        conversation_id: {type: string, pattern: '^[a-f0-9]{32}$'}
+        filename: {type: string}
+        mime_type: {type: string}
+        kind: {enum: [image, video, audio, file]}
+        size: {type: integer}
+        sha256: {type: string}
+        status: {enum: [pending_upload, uploaded, processing, ready, failed, expired]}
+        error_code: {type: [string, 'null']}
+        metadata: {type: object, description: Whitelisted media properties and available artifacts; no object keys}
+        jobs: {type: array, items: {$ref: '#/components/schemas/MediaJob'}}
+        created_at: {type: string, format: date-time}
+    AttachmentInitView:
+      allOf:
+        - {$ref: '#/components/schemas/Attachment'}
+        - type: object
+          required: [upload]
+          properties:
+            upload:
+              type: object
+              required: [method, url, expires_at, max_bytes]
+              properties:
+                method: {const: PUT}
+                url: {type: string}
+                expires_at: {type: string, format: date-time}
+                max_bytes: {type: integer}
+    MediaJob:
+      type: object
+      required: [id, job_type, status, attempt, error_code]
+      properties:
+        id: {type: string, pattern: '^[1-9][0-9]{0,18}$', description: Positive Java signed long, maximum 9223372036854775807}
+        job_type: {enum: [inspect_media, audio_transcription]}
+        status: {enum: [queued, running, completed, failed]}
+        attempt: {type: integer, minimum: 0, maximum: 3}
+        error_code: {type: [string, 'null']}
+    AttachmentAccess:
+      type: object
+      required: [url, expires_at, mime_type, filename]
+      properties:
+        url: {type: string}
+        expires_at: {type: string, format: date-time}
+        mime_type: {type: string}
+        filename: {type: string}

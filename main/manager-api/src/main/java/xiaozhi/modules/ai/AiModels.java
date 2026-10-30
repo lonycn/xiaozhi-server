@@ -24,7 +24,13 @@ public final class AiModels {
     public record Complete(String leaseToken, Long lastSequence, String finishReason, Usage usage, String providerRequestId) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Fail(String leaseToken, String errorCode) { }
-    public record ContextMessage(String role, String content) { }
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record MediaRef(String attachmentId, String variant, String mimeType, String kind, Long timeMs) { }
+    public record ContextMessage(String role, String content,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+            List<MediaRef> attachments) {
+        public ContextMessage(String role, String content) { this(role, content, null); }
+    }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Task(String runId, String conversationId, String inputMessageId, String outputMessageId,
             long controlEpoch, int attempt, String leaseToken, int leaseSeconds, String model, List<ContextMessage> messages) { }

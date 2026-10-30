@@ -58,3 +58,13 @@ npx vitest run tests/aiStream.test.mjs tests/conversationClient.test.mjs tests/c
 真实百炼小请求、模拟 provider/控制面、隔离数据库并发测试、Dev 部署和 ESP32 实机验收分别记录；
 不要用 mock 成功代替真实云请求，也不要用新代码测试替代设备麦克风、喇叭、唤醒和打断验收。
 不连接现有业务库执行初始化、重建或清理；隔离数据库验证遵循 B2 数据保护契约。
+
+
+## B3 验证计划（非验收结果）
+
+- 关闭开关时检查原会话功能；Dev 显式 opt-in 使用 `python dev/manage.py media-enable --storage s3 --storage-env <私有配置文件> --vision-model <已验证视觉模型>`，并用 `media-status` 查看、`media-disable` 关闭。配置不写入公开文档；关闭保留对象与行。实际云存储、模型与端到端验收须另行记录。
+- 覆盖 init 幂等和参数冲突、Bearer PUT 的大小/哈希/MIME/扩展名、原件不可变、complete 幂等及存储失败；图片/PDF/文本 20 MiB、视频 100 MiB、音频 50 MiB，检查 24MP/8192 边、PDF 200 页、视频 180 秒/3840×2160、音频 600 秒以及真实解码。
+- 验证发送的顺序、每消息最多 10 附件/1 视频/1 音频、同会话同发送者 ready、幂等重发、并发绑定回滚；Java long 最大值与超出值，以及 32 位小写十六进制 conversation ID。
+- 验证未关联仅上传者、已关联会话授权与离任 cutoff、账号撤权后旧票据拒绝；精确 content 路由可不带 Bearer 但必须票据和动态授权；覆盖过期、变造、跨资源票据、Range 206/416、安全头与私有缓存。
+- 验证任务租约、失效回调、3 次 claim 上限、可重试错误与无活动任务约束，inspect 和转写状态独立；补偿只回收本模块记录且未引用的对象，不改业务数据。检查未关联草稿无公开事件。
+- 验证 AI run 在 ASR queued/running 时不领取，成功后使用真实派生物，失败或缺失明确失败；图片和视频选择显式视觉模型，未配置或不可用明确失败。对象存储和提供方故障不得降级伪造成功或用量。

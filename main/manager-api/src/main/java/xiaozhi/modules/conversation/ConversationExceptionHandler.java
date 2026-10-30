@@ -15,14 +15,17 @@ import xiaozhi.common.utils.Result;
 /** Actual HTTP error status for new APIs; preserve the legacy APIs' response behavior. */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {ConversationController.class,
-        xiaozhi.modules.ai.AiController.class, xiaozhi.modules.ai.AiWorkerController.class})
+        xiaozhi.modules.ai.AiController.class, xiaozhi.modules.ai.AiWorkerController.class,
+        xiaozhi.modules.attachment.AttachmentController.class, xiaozhi.modules.attachment.MediaWorkerController.class})
 public class ConversationExceptionHandler {
     @ExceptionHandler(ConversationProblem.class)
     public ResponseEntity<Result<Void>> problem(ConversationProblem error) {
         return ResponseEntity.status(error.status()).contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(new Result<Void>().error(error.status(), error.getMessage()));
     }
 
-    @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
+    @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class,
+            org.springframework.web.bind.MissingServletRequestParameterException.class,
+            org.springframework.web.bind.MissingRequestHeaderException.class})
     public ResponseEntity<Result<Void>> invalidRequest(Exception error) {
         return ResponseEntity.badRequest().contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(new Result<Void>().error(400, "INVALID_REQUEST"));
     }

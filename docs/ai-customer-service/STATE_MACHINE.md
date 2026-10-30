@@ -45,3 +45,14 @@ AI 与真人媒体连接分别管理，切换时保留 Conversation ID，开启�
 - 旧历史 bridge 始终只读，不自动迁移进统一会话或进入模型上下文。
 
 默认 AI-text 开关关闭；Dev 显式选择开启不改变其他环境默认值。上述是协议与实现说明，不是部署或真实服务验收结论。
+
+
+## B3 附件与媒体任务现行补充
+
+B3 默认关闭；启用还依赖 conversation 开关。上传初始化固定 conversation 与上传者，原件经 PUT 后为 `uploaded`；complete 幂等排队检查：`pending_upload -> uploaded -> processing -> ready/failed`。未关联附件过保留期变为 `expired`。检查失败且错误可重试、上传者仍可写、原件存在、无活动任务且领取次数少于 3 时可 retry 到 processing；不会覆盖原件。
+
+`inspect_media` 和可选 `audio_transcription` 的任务状态为 `queued -> running -> completed/failed`，claim 最多 3 次，租约失效后的旧回调不能完成。检查成功的音频或带音轨视频即使转写失败，附件仍可 ready，转写任务独立失败。处理失败错误码包括 `INVALID_MEDIA/TYPE_MISMATCH/PIXEL_LIMIT/DURATION_LIMIT/PAGE_LIMIT/PROCESSING_TIMEOUT/PROCESSING_FAILED/STORAGE_UNAVAILABLE/TRANSCRIPTION_NOT_CONFIGURED/PROVIDER_AUTH/PROVIDER_RATE_LIMIT/PROVIDER_TIMEOUT/PROVIDER_ERROR`；仅超时、处理/存储故障、未配置转写及 provider 故障可重试。
+
+已关联附件读取跟随会话授权及离任客服 `linked_seq <= read_through_seq`；未关联仅上传者可读，管理员无跨客户旁路。仅关联后向会话公开附件及媒体事件，避免泄露草稿。发送事务验证附件 ready、同会话、同发送者、未关联或属于同一次幂等消息；一个附件不能跨消息复用。
+
+AI run 的媒体准备发生在 claim 前：转写 queued/running 时等待终态；缺少必要派生物或转写失败为 `MEDIA_INPUT_UNAVAILABLE`。图片使用 display，视频使用带时间点的帧，须显式配置 vision model；未配置或模型能力不可用为 `MODEL_CAPABILITY_UNAVAILABLE`。文件使用提取文本，音频及含音轨视频使用转写；只读取当前输入的派生物。内部协议见 [B3 实施契约](./B3_IMPLEMENTATION_CONTRACT.md) 和 [media worker README](../../main/xiaozhi-server/media_worker/README.md)，内部密钥、租约、存储对象 key 不属于公开响应。

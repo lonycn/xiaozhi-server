@@ -52,7 +52,7 @@ public class ShiroConfig {
     }
 
     public static ShiroFilterFactoryBean shirFilter(WebSecurityManager securityManager, SysParamsService sysParamsService) {
-        return buildShiroFilter(securityManager, sysParamsService, "");
+        return buildShiroFilter(securityManager, sysParamsService, "", "");
     }
 
     @Bean("shiroFilter")
@@ -61,11 +61,11 @@ public class ShiroConfig {
             org.springframework.core.env.Environment environment) {
         // This FactoryBean is itself a BeanPostProcessor and is constructed before @Value's
         // embedded placeholder resolver is ready. Environment is available at that early phase.
-        return buildShiroFilter(securityManager, sysParamsService, environment.getProperty("ai.worker.key", ""));
+        return buildShiroFilter(securityManager, sysParamsService, environment.getProperty("ai.worker.key", ""), environment.getProperty("media.worker.key", ""));
     }
 
     private static ShiroFilterFactoryBean buildShiroFilter(WebSecurityManager securityManager,
-            SysParamsService sysParamsService, String aiWorkerKey) {
+            SysParamsService sysParamsService, String aiWorkerKey, String mediaWorkerKey) {
         ShiroFilterConfiguration config = new ShiroFilterConfiguration();
         config.setFilterOncePerRequest(true);
 
@@ -80,6 +80,7 @@ public class ShiroConfig {
         // 服务密钥过滤
         filters.put("server", new ServerSecretFilter(sysParamsService));
         filters.put("aiWorker", new xiaozhi.modules.ai.AiWorkerKeyFilter(aiWorkerKey));
+        filters.put("mediaWorker", new xiaozhi.modules.attachment.MediaWorkerKeyFilter(mediaWorkerKey));
         shiroFilter.setFilters(filters);
 
         // 添加Shiro的内置过滤器
@@ -115,6 +116,10 @@ public class ShiroConfig {
         filterMap.put("/agent/play/**", "anon");
         filterMap.put("/voiceClone/play/**", "anon");
         filterMap.put("/internal/ai-worker/**", "aiWorker");
+        filterMap.put("/internal/media-worker/**", "mediaWorker");
+        // Only this precise content endpoint accepts a short capability. The controller verifies
+        // its attachment/variant/actor/expiry and current account + resource grant on every GET.
+        filterMap.put("/api/v1/ai/attachments/*/content", "anon");
         filterMap.put("/api/v1/ai/**", "conversation");
         filterMap.put("/api/v1/support/**", "conversation");
         filterMap.put("/**", "oauth2");

@@ -72,3 +72,55 @@ Use unittest directly: device tests' `tests/conftest.py` globally replaces SDKs 
 network clients. Worker tests use isolated HTTP mocks, including the actual async
 SDK streaming parser and cancellation during request headers. They never call a
 cloud model. A real configured-provider request is a separate acceptance step.
+
+## B3 verified media context
+
+Java may add `attachments` to the current user context message. These references
+contain only `attachment_id`, `variant`, `mime_type`, `kind`, and optional `time_ms`.
+Historical turns carry source descriptions and existing text, without replaying
+older media. The worker strips internal reference fields before calling a model.
+Images use private `display` derivatives; video uses at most six sampled JPEG
+frames with their time points. Documents use extracted UTF-8 text, and audio or
+videos with speech use separately completed transcripts. Empty extracted text is
+explicitly labelled unavailable; the worker never invents content for scanned pages.
+
+The manager keeps AI queued while a required transcript is queued/running, without
+consuming a claim attempt. Missing/failed/unconfigured transcription fails with
+`MEDIA_INPUT_UNAVAILABLE`; image/video input without a configured visual model
+fails with `MODEL_CAPABILITY_UNAVAILABLE`. Manual AI retry remains available after
+the underlying capability is corrected.
+
+Configure Java `ai.execution.vision-model` and these optional private worker fields:
+
+```json
+{
+  "vision_model": "YOUR_CONFIGURED_BAILIAN_VISION_MODEL",
+  "vision_base_url": "https://YOUR-WORKSPACE.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+  "vision_api_key": "existing-bailian-key",
+  "vision_workspace_id": ""
+}
+```
+
+`vision_model` must exactly match Java; endpoints have the same Bailian-only HTTPS
+allowlist as text. Empty vision endpoint/key reuse the configured text endpoint/key.
+A distinct model gets a separate SDK client; unknown models never silently route to
+text. If the visual model is the same as the configured text model, its existing
+text client handles both. Provider auto-retry remains disabled. Existing plain-text
+`MODEL_MISMATCH` behavior is retained for B2; configured multi-model failures use
+`MODEL_CAPABILITY_UNAVAILABLE`.
+
+Every derivative GET uses `/internal/ai-worker/runs/{runId}/attachments/{id}/content`
+with `X-AI-Lease`. Java rechecks run lease, account, mode and epoch plus the current
+input's exact allowed reference before opening an object stream, outside its
+lease-authorization transaction. Original files, unrelated attachments and variants
+cannot be requested. No storage URL or long-lived user Bearer reaches the model:
+JPEG bytes become `image_url` data URLs; text remains text. Download limits are
+8MiB per image, 24MiB total image bytes, 256KiB per text artifact, 60,000 total
+extracted characters, and 16 references per input. Preparation is bounded by
+`provider_timeout_seconds` and runs under the existing heartbeat supervision;
+revocation cancels an in-flight download before model generation.
+
+The `test_ai_worker_media.py` suite adds actual SDK multimodal wire assertions,
+strict reference and byte/character bounds, model routing and cancellation tests.
+It uses mocked control/model HTTP responses and does not establish live provider
+or deployed-storage acceptance.

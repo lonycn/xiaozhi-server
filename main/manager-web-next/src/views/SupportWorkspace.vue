@@ -19,8 +19,8 @@
           <template v-if="selected">
             <div class="toolbar"><strong>{{ titles[selected.conversation_id] || $t('support.consultation') }} · {{ $t('support.' + selected.status) }}</strong><el-button :disabled="actionBusy || sending || !active" @click="end('resolve')">{{ $t('support.resolve') }}</el-button><el-button :disabled="actionBusy || sending || !active" @click="end('requeue')">{{ $t('support.requeue') }}</el-button></div>
             <p v-if="historyLoading">{{ $t('support.loading') }}</p>
-            <small :title="selected.request_id">{{ $t('support.request') }} · {{ selected.request_id }}</small><div class="history" aria-live="polite"><article v-for="message in messages" :key="message.id"><small>{{ $t('support.' + senderKey(message.sender_type)) }} · {{ formatDate(message.created_at) }}</small><p v-for="(part, index) in message.parts" :key="index">{{ part.type === 'text' ? part.text : $t('support.nonText') }}</p></article></div>
-            <form @submit.prevent="send"><el-input v-model="draft" type="textarea" :rows="3" maxlength="8000" :disabled="sending || !active" :aria-label="$t('support.reply')" /><el-button native-type="submit" type="primary" :loading="sending" :disabled="!active || !draft.trim() || historyLoading">{{ $t('support.reply') }}</el-button><p>{{ $t('support.retryNote') }}</p></form>
+            <small :title="selected.request_id">{{ $t('support.request') }} · {{ selected.request_id }}</small><div class="history" aria-live="polite"><article v-for="message in messages" :key="message.id"><small>{{ $t('support.' + senderKey(message.sender_type)) }} · {{ formatDate(message.created_at) }}</small><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><AttachmentPart v-else-if="['image', 'video', 'audio', 'file'].includes(part.type) && part.attachment_id" :part="part" :scope-key="attachmentScope" /><p v-else-if="part.type === 'location'">{{ part.latitude }}, {{ part.longitude }} · {{ part.coordinate_system }}</p><p v-else>{{ $t('support.nonText') }}</p></template></article></div>
+            <AttachmentComposer :key="attachmentScope" v-model="attachmentRows" :conversation-id="selected.conversation_id" :identity="attachmentIdentity" :disabled="sending || !active || historyLoading" /><form @submit.prevent="send"><el-input v-model="draft" type="textarea" :rows="3" maxlength="8000" :disabled="sending || !active" :aria-label="$t('support.reply')" @keydown="composerKeydown" /><el-button native-type="submit" type="primary" :loading="sending" :disabled="!active || (!draft.trim() && !attachmentRows.length) || !attachmentsReady || historyLoading">{{ $t('support.reply') }}</el-button><p>{{ $t('support.retryNote') }}</p></form>
           </template><p v-else>{{ $t('support.select') }}</p>
         </section>
       </div>
@@ -33,33 +33,44 @@
   </section>
 </template>
 <script>
+import AttachmentComposer from '../components/AttachmentComposer.vue';
+import AttachmentPart from '../components/AttachmentPart.vue';
+import { mixedMessageParts, attachmentRowsReady, attachmentIdentity } from '../utils/attachments.mjs';
 import supportApi from '../apis/module/support';
 import conversationApi from '../apis/module/conversation';
 import store from '../store';
 import { isSupportAdmin, allPages, senderKey, cursorInteger } from '../utils/support.mjs';
 export default {
   name: 'SupportWorkspace',
-  data: () => ({ profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
+  components: { AttachmentComposer, AttachmentPart },
+  data: () => ({ attachmentDrafts: {}, selectionController: null, profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
   computed: {
+    attachmentIdentity() { return attachmentIdentity(store.state); },
+    attachmentScope() { return `${this.attachmentIdentity}:${this.selected?.conversation_id || ''}:${this.selected?.request_id || ''}`; },
+    attachmentRows: { get() { return this.attachmentDrafts[this.selected?.request_id] || []; }, set(value) { if (this.selected) this.attachmentDrafts[this.selected.request_id] = value; } },
+    attachmentsReady() { return attachmentRowsReady(this.attachmentRows); },
     admin() { return isSupportAdmin(store.state.userInfo); },
     agentName() { return store.state.userInfo?.username || this.profile?.user_id || ''; },
     active() { return !!this.profile && this.selected?.status === 'active'; },
     draft: { get() { return this.drafts[this.selected?.request_id] || ''; }, set(value) { if (this.selected) this.drafts[this.selected.request_id] = value; } },
   },
+  watch: { attachmentIdentity() { this.selectionController?.abort(); this.attachmentDrafts = {}; this.drafts = {}; this.pending = {}; this.agents = []; this.titles = {}; this.revokeStaff(); } },
   async mounted() {
-    try { this.profile = await supportApi.me(); } catch (error) { if (![403, 404].includes(error.status)) this.error = error.message; }
-    if (this.disposed) return;
+    const epoch = this.staffEpoch;
+    try { const profile = await supportApi.me(); if (this.disposed || epoch !== this.staffEpoch) return; this.profile = profile; } catch (error) { if (!this.disposed && epoch === this.staffEpoch && ![403, 404].includes(error.status)) this.error = error.message; }
+    if (this.disposed || epoch !== this.staffEpoch) return;
     if (this.profile) { this.accepting = false; await this.updatePresence(false); if (this.disposed || !this.profile) return; this.heartbeat = setInterval(() => this.updatePresence(this.accepting), 15000); this.poll = setInterval(() => this.refresh(), 4000); }
     await this.refresh(); this.loading = false;
   },
-  beforeUnmount() { this.disposed = true; this.version++; clearInterval(this.heartbeat); clearInterval(this.poll); if (this.profile) supportApi.presence(false).catch(() => {}); },
+  beforeUnmount() { this.disposed = true; this.selectionController?.abort(); this.version++; clearInterval(this.heartbeat); clearInterval(this.poll); if (this.profile) supportApi.presence(false).catch(() => {}); },
   methods: {
     senderKey,
     revokeStaff() {
+      this.selectionController?.abort();
       ++this.staffEpoch; ++this.version;
       clearInterval(this.heartbeat); clearInterval(this.poll); this.heartbeat = null; this.poll = null;
       this.profile = null; this.accepting = false; this.queue = []; this.assigned = []; this.selected = null; this.messages = [];
-      this.loading = false;
+      this.loading = false; this.sending = false;
     },
     async verifyStaffAccess(error) {
       if (error.status !== 403 || this.disposed || !this.profile) return;
@@ -99,7 +110,7 @@ export default {
       finally { this.presenceBusy = false; if (this.disposed) supportApi.presence(false).catch(() => {}); }
     },
     async refresh() {
-      if (this.refreshBusy || this.disposed) return; this.refreshBusy = true;
+      if (this.refreshBusy || this.disposed) return; this.refreshBusy = true; const refreshEpoch = this.staffEpoch;
       try {
         if (this.profile) {
           const epoch = this.staffEpoch;
@@ -113,11 +124,11 @@ export default {
             else if (this.active) this.selected = { ...this.selected, status: 'RELEASED' };
           }
         }
-        if (this.admin) { const agents = await this.listAll(cursor => supportApi.agents(cursor)); if (!this.disposed) this.agents = agents; }
+        if (this.admin) { const agents = await this.listAll(cursor => supportApi.agents(cursor)); if (!this.disposed && refreshEpoch === this.staffEpoch) this.agents = agents; }
       } catch (error) { if (!this.disposed) this.error = error.message; }
       finally { this.refreshBusy = false; }
     },
-    async selectRequest(request, force = false) { if (!this.profile || this.sending || this.historyLoading || (this.actionBusy && !force)) return; this.selected = request; this.messages = []; const version = ++this.version;
+    async selectRequest(request, force = false) { if (!this.profile || this.sending || this.historyLoading || (this.actionBusy && !force)) return; this.selectionController?.abort(); this.selectionController = new AbortController(); this.selected = request; this.messages = []; const version = ++this.version;
       const title = conversationApi.detail(request.conversation_id).then(detail => { if (!this.disposed && version === this.version) this.titles[request.conversation_id] = detail.title; }).catch(error => this.verifyStaffAccess(error));
       await this.loadHistory(true); await title; },
     async loadHistory(reset) {
@@ -141,16 +152,18 @@ export default {
       try { const selected = await supportApi.action(this.selected.request_id, action); if (this.disposed || epoch !== this.staffEpoch) return; this.selected = selected; await this.refresh(); }
       catch (error) { this.error = error.message; await this.verifyStaffAccess(error); } finally { this.actionBusy = false; }
     },
+    composerKeydown(event) { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); this.send(); } },
     async send() {
-      if (!this.active || this.sending || !this.draft.trim() || this.historyLoading) return;
-      const request = this.selected, text = this.draft, previous = this.pending[request.request_id];
-      const clientId = previous?.text === text ? previous.clientId : crypto.randomUUID();
-      this.pending[request.request_id] = { text, clientId }; this.sending = true; this.error = '';
+      if (!this.active || this.sending || (!this.draft.trim() && !this.attachmentRows.length) || !this.attachmentsReady || this.historyLoading) return;
+      const request = this.selected, text = this.draft, previous = this.pending[request.request_id], version = this.version;
+      const rows = [...this.attachmentRows], parts = mixedMessageParts(text, rows), signature = JSON.stringify(parts);
+      const clientId = previous?.signature === signature ? previous.clientId : crypto.randomUUID();
+      this.pending[request.request_id] = { text, signature, clientId }; this.sending = true; this.error = '';
       try {
-        const message = await supportApi.send(request.request_id, { client_message_id: clientId, parts: [{ type: 'text', text }] });
-        if (!this.disposed && this.selected?.request_id === request.request_id) { if (!this.messages.some(item => item.id === message.id)) this.messages.push(message); if (this.draft === text) this.draft = ''; }
-        delete this.pending[request.request_id];
-      } catch (error) { this.error = error.message; await this.verifyStaffAccess(error); } finally { this.sending = false; }
+        const message = await supportApi.send(request.request_id, { client_message_id: clientId, parts }, this.selectionController?.signal);
+        if (!this.disposed && version === this.version && this.selected?.request_id === request.request_id) { if (!this.messages.some(item => item.id === message.id)) this.messages.push(message); if (this.draft === text) this.draft = ''; this.attachmentRows = this.attachmentRows.filter(row => !rows.some(sent => sent.clientUploadId === row.clientUploadId)); }
+        if (version === this.version) delete this.pending[request.request_id];
+      } catch (error) { if (version === this.version && !this.disposed && error.name !== 'AbortError') { this.error = error.message; await this.verifyStaffAccess(error); } } finally { if (version === this.version) this.sending = false; }
     },
     async saveProfile() {
       if (this.saving || !this.admin || !/^\d+$/.test(this.edit.user_id)) return; this.saving = true;

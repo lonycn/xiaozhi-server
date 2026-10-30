@@ -70,6 +70,7 @@ features:
   conversation-enabled: false
   support-handoff-enabled: false
   ai-text-enabled: false
+  attachments-enabled: false
 
 # Worker credential is dedicated to this execution protocol and never a user/server token.
 ai:
@@ -78,3 +79,22 @@ ai:
   execution:
     model: ${AI_EXECUTION_MODEL:qwen-flash}
     lease-seconds: 45
+
+# B3 private evidence namespace. Never point this at a pre-existing upload directory.
+media:
+  worker:
+    key: ${MEDIA_WORKER_KEY:}
+  ticket-key: ${MEDIA_TICKET_KEY:}
+  lease-seconds: 90
+  retention-seconds: 86400
+  transcription-enabled: false
+  storage:
+    type: ${MEDIA_STORAGE_TYPE:filesystem}
+    root: ${MEDIA_STORAGE_ROOT:./data/b3-private-attachments}
+    s3:
+      endpoint: ${MEDIA_S3_ENDPOINT:}
+      region: ${MEDIA_S3_REGION:us-east-1}
+      bucket: ${MEDIA_S3_BUCKET:}
+      prefix: ${MEDIA_S3_PREFIX:b3-private-attachments/}
+      access-key: ${MEDIA_S3_ACCESS_KEY:}
+      secret-key: ${MEDIA_S3_SECRET_KEY:}

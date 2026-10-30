@@ -1,4 +1,5 @@
 import asyncio
+import re
 import httpx
 
 
@@ -48,3 +49,33 @@ class Manager:
     async def callback(self, task, action, **body):
         return await self.post('runs/' + task['run_id'] + '/' + action,
                                {'lease_token': task['lease_token'], **body}, retry=action != 'heartbeat')
+
+    async def media(self, task, ref, maximum):
+        """Only current-run derivative capabilities; never accept a URL from a task."""
+        run_id, attachment_id = str(task.get('run_id', '')), str(ref.get('attachment_id', ''))
+        variant = ref.get('variant')
+        if (not re.fullmatch(r'[a-f0-9]{32}', run_id) or not re.fullmatch(r'[0-9]{1,20}', attachment_id)
+                or variant not in ('display', 'text', 'transcript', *(f'frame_{i}' for i in range(6)))):
+            from .provider import ProviderFailure
+            raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+        path = f'internal/ai-worker/runs/{run_id}/attachments/{attachment_id}/content'
+        try:
+            async with self.client.stream('GET', path, params={'variant': variant},
+                    headers={'X-AI-Lease': task['lease_token'], 'Accept-Encoding': 'identity'}) as response:
+                if response.status_code in (401, 403, 404, 409, 410):
+                    raise LeaseLost()
+                if response.status_code != 200:
+                    raise ControlError()
+                mime = response.headers.get('content-type', '').split(';', 1)[0].strip().lower()
+                if mime != ref.get('mime_type') or response.headers.get('content-encoding', 'identity') != 'identity':
+                    from .provider import ProviderFailure
+                    raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+                result = bytearray()
+                async for chunk in response.aiter_bytes(65536):
+                    result.extend(chunk)
+                    if len(result) > maximum:
+                        from .provider import ProviderFailure
+                        raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+                return bytes(result)
+        except httpx.TransportError:
+            raise ControlError() from None

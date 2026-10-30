@@ -26,8 +26,13 @@ public class AiExecutionService {
     private boolean enabled;
     private String model = "qwen-flash";
     private int leaseSeconds = 45;
+    private String visionModel = "";
+    private AiAttachmentContext attachments;
+    private final java.util.concurrent.atomic.AtomicLong discoveryCursor = new java.util.concurrent.atomic.AtomicLong();
+    static final String DISCOVERY_QUERY = "SELECT id,conversation_id,list_sequence FROM ai_run WHERE list_sequence>? AND (status='queued' OR (status IN ('running','streaming') AND lease_expires_at<=CURRENT_TIMESTAMP(3))) ORDER BY list_sequence LIMIT 32";
     private static final Set<String> ERRORS = Set.of("MODEL_MISMATCH", "PROVIDER_AUTH", "PROVIDER_RATE_LIMIT",
-            "PROVIDER_TIMEOUT", "PROVIDER_UNAVAILABLE", "PROVIDER_ERROR", "WORKER_ERROR");
+            "PROVIDER_TIMEOUT", "PROVIDER_UNAVAILABLE", "PROVIDER_ERROR", "WORKER_ERROR",
+            "MEDIA_INPUT_UNAVAILABLE", "MODEL_CAPABILITY_UNAVAILABLE");
 
     public AiExecutionService(JdbcTemplate jdbc, ObjectMapper json, PlatformTransactionManager manager) {
         this.jdbc = jdbc; this.json = json; this.tx = new TransactionTemplate(manager);
@@ -35,6 +40,9 @@ public class AiExecutionService {
     }
     @Value("${features.ai-text-enabled:false}") public void setEnabled(boolean value) { enabled = value; }
     @Value("${ai.execution.model:qwen-flash}") public void setModel(String value) { model = value; }
+    @Value("${ai.execution.vision-model:}") public void setVisionModel(String value) { visionModel = value == null ? "" : value.trim(); }
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setAttachments(AiAttachmentContext value) { attachments = value; }
     @Value("${ai.execution.lease-seconds:45}") public void setLeaseSeconds(int value) {
         if (value < 1 || value > 300) throw new IllegalArgumentException("Invalid lease seconds");
         leaseSeconds = value;
@@ -55,7 +63,7 @@ public class AiExecutionService {
         jdbc.update("""
                 INSERT INTO ai_run(id,conversation_id,input_message_id,output_message_id,control_epoch,output_text,model)
                 VALUES(?,?,?,?,?,'',?)
-                """, run, conversationId, inputId, output, number(c,"control_epoch"), model);
+                """, run, conversationId, inputId, output, number(c,"control_epoch"), inputNeedsVision(inputId) && !visionModel.isBlank() ? visionModel : model);
         jdbc.update("UPDATE ai_conversation SET last_seq=? WHERE id=?", sequence, conversationId);
         Map<String,Object> r = row(run, true);
         event(r, "ai.run.queued", Map.of());
@@ -126,8 +134,14 @@ public class AiExecutionService {
         requireEnabled();
         if (body == null || body.workerId() == null || !body.workerId().matches("[a-zA-Z0-9_.:-]{1,128}")) throw problem(400,"INVALID_WORKER_ID");
         // Discovery is non-locking; each candidate is rechecked after taking its conversation lock.
-        var candidates = jdbc.queryForList("SELECT id,conversation_id FROM ai_run WHERE status='queued' OR (status IN ('running','streaming') AND lease_expires_at<=CURRENT_TIMESTAMP(3)) ORDER BY list_sequence LIMIT 32");
+        long after=discoveryCursor.get();
+        var candidates = jdbc.queryForList(DISCOVERY_QUERY,after);
+        if(candidates.isEmpty() && after!=0) {
+            discoveryCursor.set(0);candidates=jdbc.queryForList(DISCOVERY_QUERY,0L);
+        }
         for (var candidate : candidates) {
+            // Waiting transcript jobs must not pin discovery to the first 32 rows forever.
+            discoveryCursor.set(number(candidate,"list_sequence"));
             Task task = tx.execute(t -> {
                 var c = conversation((String) candidate.get("conversation_id"));
                 var r = row((String) candidate.get("id"), true);
@@ -137,6 +151,14 @@ public class AiExecutionService {
                 }
                 if (!"queued".equals(r.get("status")) && leaseLive(r)) return null;
                 if (number(r,"attempt") >= 3) { terminal(r,"failed","RETRY_EXHAUSTED","ai.run.failed"); return null; }
+                var plan = attachmentPlan(r);
+                if (plan.waiting()) return null;
+                if (plan.error() != null) { terminal(r,"failed",plan.error(),"ai.run.failed"); return null; }
+                if (plan.vision() && visionModel.isBlank()) {
+                    terminal(r,"failed","MODEL_CAPABILITY_UNAVAILABLE","ai.run.failed"); return null;
+                }
+                String selectedModel = plan.vision() ? visionModel : model;
+                jdbc.update("UPDATE ai_run SET model=? WHERE id=?", selectedModel,r.get("id"));
                 int attempt = (int) number(r,"attempt") + 1;
                 String token = id() + id();
                 jdbc.update("""
@@ -151,7 +173,7 @@ public class AiExecutionService {
                 event(r,"ai.run.started",Map.of());
                 return new Task((String)r.get("id"),(String)r.get("conversation_id"),(String)r.get("input_message_id"),
                         (String)r.get("output_message_id"),number(r,"control_epoch"),attempt,token,leaseSeconds,
-                        (String)r.get("model"),context(r));
+                        (String)r.get("model"),context(r, plan.refs()));
             });
             if (task != null) return task;
         }
@@ -221,22 +243,57 @@ public class AiExecutionService {
     private boolean leaseLive(Map<String,Object> r) {
         return Boolean.TRUE.equals(jdbc.queryForObject("SELECT lease_expires_at>CURRENT_TIMESTAMP(3) FROM ai_run WHERE id=?",Boolean.class,r.get("id")));
     }
-    private List<ContextMessage> context(Map<String,Object> r) {
+    private boolean inputNeedsVision(String inputId) {
+        String parts=jdbc.queryForObject("SELECT parts_json FROM ai_message WHERE id=?",String.class,inputId);
+        for (JsonNode part:decode(parts))
+            if (part.hasNonNull("attachment_id") && Set.of("image","video").contains(part.path("type").asText())) return true;
+        return false;
+    }
+    private AiAttachmentContext.Plan attachmentPlan(Map<String,Object> r) {
+        var input=jdbc.queryForMap("SELECT seq,parts_json FROM ai_message WHERE id=?",r.get("input_message_id"));
+        JsonNode parts=decode((String)input.get("parts_json"));
+        boolean hasMedia=false;
+        for(JsonNode part:parts) if(part.hasNonNull("attachment_id")) {hasMedia=true;break;}
+        if(!hasMedia) return new AiAttachmentContext.Plan(List.of(),false,false,null);
+        if(attachments==null) return new AiAttachmentContext.Plan(List.of(),false,false,"MEDIA_INPUT_UNAVAILABLE");
+        return attachments.plan((String)r.get("conversation_id"),number(input,"seq"),parts);
+    }
+    public xiaozhi.modules.attachment.AttachmentService.Content media(String runId,String attachmentId,String variant,String token) {
+        record Authorized(String conversationId,long sequence) { }
+        Authorized authorized=callback(runId,token,r->{
+            if(attachments==null) throw problem(404,"MEDIA_INPUT_UNAVAILABLE");
+            var plan=attachmentPlan(r);
+            if(plan.waiting() || plan.error()!=null || plan.refs().stream().noneMatch(ref ->
+                    ref.attachmentId().equals(attachmentId) && ref.variant().equals(variant)))
+                throw problem(404,"MEDIA_INPUT_UNAVAILABLE");
+            long seq=jdbc.queryForObject("SELECT seq FROM ai_message WHERE id=?",Long.class,r.get("input_message_id"));
+            return new Authorized((String)r.get("conversation_id"),seq);
+        });
+        // Authorized transaction is finished before any object-store stream is opened.
+        return attachments.content(attachmentId,authorized.conversationId(),authorized.sequence(),variant);
+    }
+    private List<ContextMessage> context(Map<String,Object> r,List<MediaRef> currentRefs) {
         long input = jdbc.queryForObject("SELECT seq FROM ai_message WHERE id=?",Long.class,r.get("input_message_id"));
-        var rows = jdbc.queryForList("SELECT sender_type,parts_json FROM ai_message WHERE conversation_id=? AND seq<=? AND (sender_type='user' OR (sender_type IN ('assistant','support_agent','expert') AND status='completed')) ORDER BY seq DESC LIMIT 40",r.get("conversation_id"),input);
+        var rows = jdbc.queryForList("SELECT id,sender_type,parts_json FROM ai_message WHERE conversation_id=? AND seq<=? AND (sender_type='user' OR (sender_type IN ('assistant','support_agent','expert') AND status='completed')) ORDER BY seq DESC LIMIT 40",r.get("conversation_id"),input);
         List<ContextMessage> result = new ArrayList<>(); int budget=64000;
         for (var row:rows) {
             StringBuilder text = new StringBuilder();
             String sender = (String)row.get("sender_type");
+            boolean current = r.get("input_message_id").equals(row.get("id"));
             if ("support_agent".equals(sender) || "expert".equals(sender))
                 text.append("[Previous human ").append(sender).append(" reply]\n");
             for (JsonNode part:decode((String)row.get("parts_json"))) {
                 if ("text".equals(part.path("type").asText())) text.append(part.path("text").asText()).append('\n');
                 else if ("location".equals(part.path("type").asText())) text.append("User shared location: ").append(part).append('\n');
+                else if (part.hasNonNull("attachment_id")) {
+                    text.append(current ? "[Current attachment " : "[Previous attachment ")
+                        .append(part.path("type").asText()).append(" id=").append(part.path("attachment_id").asText())
+                        .append(current ? "; content follows from verified derivatives]\n" : "; original content omitted]\n");
+                }
             }
             if (text.isEmpty()) continue;
             String content = text.substring(0,Math.min(text.length(),budget));
-            result.add(new ContextMessage("user".equals(sender)?"user":"assistant",content));
+            result.add(new ContextMessage("user".equals(sender)?"user":"assistant",content,current ? currentRefs : null));
             budget-=content.length(); if (budget<=0) break;
         }
         Collections.reverse(result); return result;

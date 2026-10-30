@@ -14,6 +14,10 @@ class Config:
     api_key: str
     model: str
     workspace_id: str = ""
+    vision_model: str = ""
+    vision_base_url: str = ""
+    vision_api_key: str = ""
+    vision_workspace_id: str = ""
     max_tokens: int = 500
     heartbeat_seconds: float = 12
     poll_seconds: float = 2
@@ -32,6 +36,15 @@ class Config:
                 or not (host in ('dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com')
                         or host.endswith('.maas.aliyuncs.com'))):
             raise ValueError('provider must be the configured Bailian HTTPS endpoint')
+        if self.vision_model:
+            endpoint = urlsplit(self.vision_base_url or self.base_url)
+            host = endpoint.hostname or ''
+            if (endpoint.scheme != 'https' or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+                    or not (host in ('dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com')
+                            or host.endswith('.maas.aliyuncs.com'))):
+                raise ValueError('vision provider must be the configured Bailian HTTPS endpoint')
+        elif self.vision_base_url or self.vision_api_key or self.vision_workspace_id:
+            raise ValueError('vision_model is required for vision configuration')
         if not 10 <= self.heartbeat_seconds <= 15 or self.poll_seconds <= 0 or self.provider_timeout_seconds <= 0:
             raise ValueError('invalid worker timing')
         if isinstance(self.max_tokens, bool) or not isinstance(self.max_tokens, int) or self.max_tokens <= 0:

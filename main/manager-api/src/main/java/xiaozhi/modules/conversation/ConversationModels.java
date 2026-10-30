@@ -21,7 +21,13 @@ public final class ConversationModels {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record MessagePart(String type, String text, Double latitude, Double longitude,
-            String coordinateSystem, Double accuracyM, String source, Instant authorizedAt) { }
+            String coordinateSystem, Double accuracyM, String source, Instant authorizedAt, String attachmentId) {
+        /** Existing consumers keep their text/location constructor and canonical serialization. */
+        public MessagePart(String type, String text, Double latitude, Double longitude,
+                String coordinateSystem, Double accuracyM, String source, Instant authorizedAt) {
+            this(type,text,latitude,longitude,coordinateSystem,accuracyM,source,authorizedAt,null);
+        }
+    }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Conversation(String id, long listSequence, String agentId, String title,

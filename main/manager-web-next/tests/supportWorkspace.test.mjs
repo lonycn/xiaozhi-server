@@ -89,3 +89,23 @@ describe('support desk', () => {
   });
 
 });
+
+describe('B3 support mixed messages', () => {
+  const evidence = (status = 'ready') => ({ kind: 'audio', clientUploadId: 'stable-upload', status, file: { name: '录音.m4a' }, attachment: { id: '9223372036854775806', status } });
+  it('sends text and media in one staff message, preserving both on failure and the message key on retry', async () => {
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest({ request_id: 'r', conversation_id: 'c', status: 'active' }); wrapper.vm.draft = '处理建议'; wrapper.vm.attachmentRows = [evidence()];
+    api.send.mockRejectedValueOnce(new Error('断开')).mockResolvedValueOnce({ id: 'm', parts: [] });
+    await wrapper.vm.send(); const payload = api.send.mock.calls[0][1]; expect(payload.parts).toEqual([{ type: 'text', text: '处理建议' }, { type: 'audio', attachment_id: '9223372036854775806' }]);
+    expect(wrapper.vm.draft).toBe('处理建议'); expect(wrapper.vm.attachmentRows).toHaveLength(1); await wrapper.vm.send(); expect(api.send.mock.calls[1][1]).toEqual(payload); expect(wrapper.vm.attachmentRows).toEqual([]);
+  });
+  it('blocks the whole mixed message until every attachment is ready and preserves Chinese IME composition', async () => {
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest({ request_id: 'r', conversation_id: 'c', status: 'active' }); wrapper.vm.draft = '输入中'; wrapper.vm.attachmentRows = [evidence('processing')];
+    await wrapper.vm.send(); expect(api.send).not.toHaveBeenCalled(); wrapper.vm.attachmentRows = [evidence()];
+    wrapper.vm.composerKeydown({ key: 'Enter', isComposing: true, preventDefault: vi.fn() }); expect(api.send).not.toHaveBeenCalled(); expect(wrapper.vm.draft).toBe('输入中');
+  });
+  it('aborts pending sends on teardown and never consumes its attachment draft from a late response', async () => {
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest({ request_id: 'r', conversation_id: 'c', status: 'active' }); wrapper.vm.attachmentRows = [evidence()];
+    let finish; api.send.mockReturnValue(new Promise(resolve => { finish = resolve; })); const vm = wrapper.vm, sending = vm.send(), signal = api.send.mock.calls[0][2];
+    wrapper.unmount(); wrapper = null; expect(signal.aborted).toBe(true); finish({ id: 'late', parts: [] }); await sending; expect(vm.messages).toEqual([]); expect(vm.attachmentDrafts.r).toHaveLength(1);
+  });
+});

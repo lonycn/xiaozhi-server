@@ -1,0 +1,17 @@
+{
+  "manager_url": "http://127.0.0.1:8002",
+  "worker_key": "REPLACE_WITH_DEDICATED_MEDIA_WORKER_KEY",
+  "worker_id": "local-media-1",
+  "heartbeat_seconds": 12,
+  "poll_seconds": 2,
+  "process_timeout_seconds": 60,
+  "request_timeout_seconds": 5,
+  "temp_root": "",
+  "ffmpeg": "ffmpeg",
+  "ffprobe": "ffprobe",
+  "asr_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "asr_api_key": "",
+  "asr_model": "qwen3-asr-flash",
+  "asr_workspace_id": "",
+  "asr_timeout_seconds": 90
+}

@@ -26,6 +26,7 @@ import xiaozhi.common.utils.ConvertUtils;
 import xiaozhi.common.utils.MessageUtils;
 import xiaozhi.modules.security.entity.SysUserTokenEntity;
 import xiaozhi.modules.security.service.ShiroService;
+import xiaozhi.modules.security.service.SupportPermissionResolver;
 import xiaozhi.modules.sys.entity.SysUserEntity;
 import xiaozhi.modules.sys.enums.SuperAdminEnum;
 
@@ -39,6 +40,13 @@ public class Oauth2Realm extends AuthorizingRealm {
     @Lazy
     @Resource
     private ShiroService shiroService;
+
+    @Resource
+    private SupportPermissionResolver supportPermissionResolver;
+
+    public Oauth2Realm() {
+        setAuthorizationCachingEnabled(false);
+    }
 
     private static final Logger logger = LoggerFactory.getLogger(Oauth2Realm.class);
 
@@ -63,6 +71,8 @@ public class Oauth2Realm extends AuthorizingRealm {
         } else {
             permsSet.add("sys:role:normal");
         }
+
+        permsSet.addAll(supportPermissionResolver.resolve(user.getId()));
 
         SimpleAuthorizationInfo info = new SimpleAuthorizationInfo();
         info.setStringPermissions(permsSet);

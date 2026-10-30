@@ -19,6 +19,7 @@ mvn -B -DskipTests package
 ```yaml
 features:
   conversation-enabled: true
+  support-handoff-enabled: true
 ```
 
 沿用已有登录的 Bearer Token。默认 context path 为 `/xiaozhi`，所以本模块完整路径为 `/xiaozhi/api/v1/ai/conversations`。反向代理可能再映射路径，客户端以实际部署为准。
@@ -39,10 +40,10 @@ curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 
 ## 数据迁移与回退
 
-原 Liquibase master 引入新增 changelog，首次启动创建三张新表。即使新入口关闭，标准数据库升级仍会应用增量表结构；关闭开关不会删除数据。旧数据库迁移和历史不修改。上线前备份自己的数据库，并在副本验证完整迁移。
+原 Liquibase master 包含统一对话账本及 B1 人工文字 changelog。B1 为 `ai_conversation` 增加 `control_epoch`，新增客服档案、人工请求、指派历史及请求幂等键四张表。即使新入口关闭，标准数据库升级仍会应用增量结构；关闭开关不会删除数据。旧数据库迁移和历史不修改。上线前备份自己的数据库，并在副本验证完整迁移。
 
-回退时关闭开关并回退应用版本，保留三张新表，禁止 DROP 或清空历史。
+回退时关闭两个开关并回退应用版本，保留新增结构及历史。`support-handoff-enabled=false` 禁用人工生命周期入口与客服菜单权限；已有指派授权的账本读取仍可用，避免关闭入口后丢失历史访问。若统一对话开关也关闭，则账本 HTTP 入口一并关闭。
 
 ## 当前本机部署边界
 
-此 Git checkout 与本机正在运行的源码快照分离。本批不切换当前服务。部署前要合并本地 Workspace ASR、TTS 配置与 OTA 兼容补丁，核对配置及服务间鉴权，备份后再构建和发布。HTTP 本机开发验收不能替代公网 HTTPS/WSS、ESP32 实机或 Android 验收。
+此 Git checkout 使用独立的 Dev Compose 服务（API 18893、Vue 3 预览 18894），启停方式见 [Dev 说明](../../dev/README.md)。原智控台与 ESP32 运行服务保持独立。部署到设备实际使用的服务前，要合并本地 Workspace ASR、TTS 配置与 OTA 兼容补丁，核对配置及服务间鉴权，备份后再构建和发布。HTTP 本机开发验收不能替代公网 HTTPS/WSS、ESP32 实机或 Android 验收。

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:xiaozhi:conversation:send-message:v1",
-  "title": "P1 SendMessage",
+  "title": "P1/B1 user SendMessage wire schema",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -95,5 +95,5 @@
       }
     }
   },
-  "description": "Implemented ledger request. Total text <=32000 UTF-16 code units. Nonblank text. authorized_at cannot exceed server time by >5 minutes. Media types await the authenticated upload stage."
+  "description": "Implemented user message request supports text and location. B1 support messages accept text only; media remains planned."
 }

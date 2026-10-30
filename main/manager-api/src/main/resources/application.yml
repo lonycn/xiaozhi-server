@@ -68,3 +68,4 @@ mybatis-plus:
 # Persistent conversation ledger (P1 foundation); opt in explicitly.
 features:
   conversation-enabled: false
+  support-handoff-enabled: false

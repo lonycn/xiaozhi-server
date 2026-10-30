@@ -1,12 +1,15 @@
 openapi: 3.1.0
 info:
   title: Xiaozhi persistent conversation ledger
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Implemented P1 foundation only, enabled by features.conversation-enabled=true.
-    Stores user messages, without model execution. Media/support/realtime components are target contracts only.
+    P1 conversation ledger and B1 human text support are implemented. Conversation requires
+    features.conversation-enabled=true; support additionally requires features.support-handoff-enabled=true.
+    Both flags default to false. AI execution, media and realtime streaming remain planned.
     All success bodies use {code: 0, msg: success, data: ...}. Errors use actual HTTP status and a Result body.
     Unknown request fields are rejected; identities are supplied by the authenticated server session.
+    Response long IDs, sequences and cursors are decimal strings (for example last_seq: "3");
+    preserve them as strings in JavaScript and never convert long IDs to Number. Null values remain null.
 servers:
   - url: /xiaozhi
 security:
@@ -151,6 +154,274 @@ paths:
         '400': {$ref: '#/components/responses/Invalid'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/ai/conversations/{id}/handoff:
+    post:
+      operationId: handoffConversation
+      parameters:
+        - {$ref: '#/components/parameters/ConversationId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Handoff'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/SupportRequest'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/ai/conversations/{id}/resume-ai:
+    post:
+      operationId: resumeAi
+      parameters:
+        - {$ref: '#/components/parameters/ConversationId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmptyRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/Conversation'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/agents/{userId}:
+    put:
+      operationId: updateSupportAgent
+      parameters:
+        - {$ref: '#/components/parameters/UserId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentUpdate'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/SupportAgent'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/presence:
+    post:
+      operationId: updateSupportPresence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PresenceUpdate'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/SupportAgent'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/queue:
+    get:
+      operationId: listSupportQueue
+      parameters:
+        - {name: before, in: query, schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/SupportRequest'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/requests/{id}:
+    get:
+      operationId: getSupportRequest
+      parameters:
+        - {$ref: '#/components/parameters/ConversationId'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/SupportRequest'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/requests/{id}/claim:
+    post:
+      operationId: claimSupportRequest
+      parameters:
+        - {$ref: '#/components/parameters/ConversationId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmptyRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/SupportRequest'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/requests/{id}/messages:
+    post:
+      operationId: sendSupportMessage
+      parameters:
+        - {$ref: '#/components/parameters/ConversationId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SupportSendMessage'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/Message'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/requests/{id}/resolve:
+    post:
+      operationId: resolveSupportRequest
+      parameters:
+        - {$ref: '#/components/parameters/ConversationId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EndRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/SupportRequest'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/requests/{id}/cancel:
+    post:
+      operationId: cancelSupportRequest
+      parameters:
+        - {$ref: '#/components/parameters/ConversationId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EndRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/SupportRequest'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/support/requests/{id}/requeue:
+    post:
+      operationId: requeueSupportRequest
+      parameters:
+        - {$ref: '#/components/parameters/ConversationId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EndRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/SupportRequest'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer}
@@ -160,6 +431,11 @@ components:
       in: path
       required: true
       schema: {type: string, pattern: '^[a-f0-9]{32}$'}
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
     After:
       name: after
       in: query
@@ -177,13 +453,13 @@ components:
       description: Authentication required (existing localized Result body)
       content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
     Forbidden:
-      description: Agent access denied
+      description: Permission or resource access denied
       content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
     NotFound:
       description: Conversation missing or inaccessible; same response for both
       content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
     Conflict:
-      description: CLIENT_MESSAGE_ID_REUSED with different content
+      description: State, capacity, or idempotency conflict
       content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
     Unsupported:
       description: MESSAGE_PART_NOT_SUPPORTED (media pipeline not enabled)
@@ -201,7 +477,7 @@ components:
       required: [items, next_cursor, has_more]
       properties:
         items: {type: array, items: {}}
-        next_cursor: {type: integer, format: int64, minimum: 0}
+        next_cursor: {type: string, pattern: '^[0-9]+$'}
         has_more: {type: boolean}
     CreateConversation:
       type: object
@@ -215,12 +491,12 @@ components:
       required: [id, list_sequence, title, state, last_seq, last_event_seq, created_at, updated_at]
       properties:
         id: {type: string}
-        list_sequence: {type: integer, format: int64}
+        list_sequence: {type: string, pattern: '^[0-9]+$'}
         agent_id: {type: [string, 'null']}
         title: {type: string}
-        state: {const: AI_ACTIVE}
-        last_seq: {type: integer, format: int64}
-        last_event_seq: {type: integer, format: int64}
+        state: {enum: [AI_ACTIVE, HUMAN_QUEUED, HUMAN_ACTIVE, RESOLVED]}
+        last_seq: {type: string, pattern: '^[0-9]+$'}
+        last_event_seq: {type: string, pattern: '^[0-9]+$'}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     MessagePart:
@@ -233,12 +509,12 @@ components:
       properties:
         id: {type: string}
         conversation_id: {type: string}
-        seq: {type: integer, format: int64}
+        seq: {type: string, pattern: '^[0-9]+$'}
         client_message_id: {type: string}
-        sender_type: {const: user}
+        sender_type: {enum: [user, support_agent, expert]}
         sender_id: {type: string}
         parts: {type: array, items: {$ref: '#/components/schemas/MessagePart'}}
-        status: {const: accepted}
+        status: {enum: [accepted, completed]}
         created_at: {type: string, format: date-time}
     ConversationEvent:
       type: object
@@ -246,8 +522,8 @@ components:
       properties:
         event_id: {type: string}
         conversation_id: {type: string}
-        sequence: {type: integer, format: int64}
-        type: {enum: [conversation.created, message.accepted]}
+        sequence: {type: string, pattern: '^[0-9]+$'}
+        type: {enum: [conversation.created, message.accepted, support.requested, support.queued, support.taken_over, support.message.created, support.resolved, support.canceled, support.requeued, ai.resumed]}
         data: {type: object}
         timestamp: {type: string, format: date-time}
     Attachment:
@@ -272,25 +548,86 @@ components:
         provider: {enum: [qwen_omni_realtime, livekit]}
         status: {enum: [created, connecting, active, ended, failed]}
     SupportRequest:
-      x-implementation: planned-P4
       type: object
-      required: [id, conversation_id, requested_mode, status]
+      required: [request_id, list_sequence, conversation_id, client_request_id, status, requested_mode]
       properties:
-        id: {type: string}
+        request_id: {type: string}
+        list_sequence: {type: string, pattern: '^[0-9]+$'}
         conversation_id: {type: string}
-        requested_mode: {enum: [text, audio, video]}
-        status: {enum: [requested, queued, assigned, active, waiting_user, expert_pending, resolved, canceled, offline_message]}
-    SupportAssignment:
-      x-implementation: planned-P4
+        client_request_id: {type: string}
+        status: {enum: [queued, active, resolved, canceled]}
+        requested_mode: {const: text}
+        target_agent_user_id: {type: [string, 'null'], pattern: '^[0-9]+$'}
+        assigned_agent_user_id: {type: [string, 'null'], pattern: '^[0-9]+$'}
+        requested_at: {type: string, format: date-time}
+        assigned_at: {type: [string, 'null'], format: date-time}
+        first_response_at: {type: [string, 'null'], format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        end_reason: {type: [string, 'null']}
+    SupportAgent:
       type: object
-      required: [id, support_request_id, agent_user_id, assigned_at]
+      properties:
+        user_id: {type: string, pattern: '^[0-9]+$'}
+        role: {enum: [support_agent, expert]}
+        enabled: {type: boolean}
+        capacity_text: {type: integer, minimum: 1, maximum: 20}
+        accepting: {type: boolean}
+        presence_expires_at: {type: [string, 'null'], format: date-time}
+    Handoff:
+      type: object
+      additionalProperties: false
+      required: [client_request_id, requested_mode]
+      properties:
+        client_request_id: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$'}
+        requested_mode: {const: text}
+        target_agent_user_id:
+          oneOf:
+            - {type: integer, format: int64, minimum: 1}
+            - {type: string, pattern: '^[0-9]+$'}
+            - {type: 'null'}
+          description: Decimal strings are accepted; avoid JavaScript Number for long IDs.
+    AgentUpdate:
+      type: object
+      additionalProperties: false
+      required: [role, enabled, capacity_text]
+      properties:
+        role: {enum: [support_agent, expert]}
+        enabled: {type: boolean}
+        capacity_text: {type: integer, minimum: 1, maximum: 20}
+    PresenceUpdate:
+      type: object
+      additionalProperties: false
+      required: [accepting]
+      properties:
+        accepting: {type: boolean}
+    EndRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: {type: [string, 'null'], maxLength: 500}
+    EmptyRequest:
+      type: object
+      additionalProperties: false
+    SupportSendMessage:
+      type: object
+      additionalProperties: false
+      required: [client_message_id, parts]
+      properties:
+        client_message_id: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$'}
+        parts: {type: array, minItems: 1, maxItems: 16, items: {$ref: './MESSAGE_SCHEMA.json#/$defs/TextPart'}}
+    SupportAssignment:
+      x-implementation: internal-persistence
+      description: Internal assignment history; no public assignment CRUD API.
+      type: object
       properties:
         id: {type: string}
-        support_request_id: {type: string}
-        agent_user_id: {type: string}
+        request_id: {type: string}
+        conversation_id: {type: string}
+        agent_user_id: {type: string, pattern: '^[0-9]+$'}
         assigned_at: {type: string, format: date-time}
         released_at: {type: [string, 'null'], format: date-time}
-      description: One active primary assignee; transfers retain assignment history.
+        read_through_seq: {type: [string, 'null'], pattern: '^[0-9]+$'}
+        read_through_event_seq: {type: [string, 'null'], pattern: '^[0-9]+$'}
     Annotation:
       x-implementation: planned-P5
       type: object

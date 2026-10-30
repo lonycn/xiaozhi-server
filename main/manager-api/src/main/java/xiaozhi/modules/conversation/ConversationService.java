@@ -25,11 +25,13 @@ import xiaozhi.modules.conversation.ConversationModels.*;
 @Service
 public class ConversationService {
     private final ConversationDao dao;
+    private final ConversationAccessService access;
     private final ObjectMapper json;
     private final TransactionTemplate transactions;
 
     public ConversationService(ConversationDao dao, ObjectMapper json, PlatformTransactionManager manager) {
         this.dao = dao;
+        this.access = new ConversationAccessService(dao);
         this.json = json;
         this.transactions = new TransactionTemplate(manager);
     }
@@ -77,7 +79,9 @@ public class ConversationService {
     }
 
     public Conversation get(Long userId, String id) {
-        return dao.owned(conversationId(id), authenticated(userId), false);
+        long actor = authenticated(userId);
+        String validId = conversationId(id);
+        return transactions.execute(tx -> access.detail(actor, validId, true));
     }
 
     public Message send(Long userId, String conversationId, SendMessage request) {
@@ -95,7 +99,8 @@ public class ConversationService {
             Conversation conversation = dao.owned(id, owner, true);
             StoredMessage previous = dao.duplicate(id, request.clientMessageId());
             if (previous != null) {
-                if (!previous.requestHash().equals(hash)) {
+                if (!previous.requestHash().equals(hash) || !Long.toString(owner).equals(previous.senderId())
+                        || !"user".equals(previous.senderType())) {
                     throw new ConversationProblem(409, "CLIENT_MESSAGE_ID_REUSED");
                 }
                 return view(previous);
@@ -110,28 +115,70 @@ public class ConversationService {
         });
     }
 
+    /** The caller's type must agree with the locked, server-managed profile; it never selects identity. */
+    public Message sendSupport(Long userId, String conversationId, SendMessage request, String senderType) {
+        long actor = authenticated(userId);
+        String id = conversationId(conversationId);
+        if (request == null || request.clientMessageId() == null
+                || !request.clientMessageId().matches("[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}")) {
+            throw badRequest("INVALID_CLIENT_MESSAGE_ID");
+        }
+        validateParts(request.parts());
+        String parts = encode(request.parts());
+        String hash = hash(parts);
+        return transactions.execute(tx -> {
+            String role = access.lockSenderRole(actor);
+            if (!role.equals(senderType)) throw new ConversationProblem(403, "SUPPORT_SENDER_ROLE_MISMATCH");
+            Conversation conversation = access.requireCurrentStaff(actor, id);
+            StoredMessage previous = dao.duplicate(id, request.clientMessageId());
+            if (previous != null) {
+                if (!hash.equals(previous.requestHash()) || !Long.toString(actor).equals(previous.senderId())
+                        || !role.equals(previous.senderType())) {
+                    throw new ConversationProblem(409, "CLIENT_MESSAGE_ID_REUSED");
+                }
+                return view(previous);
+            }
+            long seq = conversation.lastSeq() + 1;
+            long eventSeq = conversation.lastEventSeq() + 1;
+            String messageId = id();
+            dao.insertMessage(messageId, id, seq, request.clientMessageId(), actor, parts, hash, role, "completed");
+            dao.insertEvent(id(), id, eventSeq, "support.message.created",
+                    encode(Map.of("message_id", messageId, "seq", seq, "sender_type", role)));
+            dao.advance(id, seq, eventSeq);
+            return view(dao.duplicate(id, request.clientMessageId()));
+        });
+    }
+
     public CursorPage<Message> messages(Long userId, String id, long after, int limit) {
-        get(userId, id);
+        long actor = authenticated(userId);
+        String validId = conversationId(id);
         page(after, limit);
-        var rows = dao.messages(id, after, limit + 1);
-        var items = rows.stream().limit(limit).map(this::view).toList();
-        return new CursorPage<>(items, items.isEmpty() ? after : items.getLast().seq(), rows.size() > limit);
+        return transactions.execute(tx -> {
+            var grant = access.read(actor, validId, true);
+            var rows = dao.messages(validId, after, limit + 1, grant.messageCutoff());
+            var items = rows.stream().limit(limit).map(this::view).toList();
+            return new CursorPage<>(items, items.isEmpty() ? after : items.getLast().seq(), rows.size() > limit);
+        });
     }
 
     public CursorPage<Event> events(Long userId, String id, long after, int limit) {
-        get(userId, id);
+        long actor = authenticated(userId);
+        String validId = conversationId(id);
         page(after, limit);
-        var rows = dao.events(id, after, limit + 1);
-        var items = rows.stream().limit(limit).map(row -> new Event(row.id(), row.conversationId(),
-                row.seq(), row.type(), decode(row.dataJson(), JsonNode.class), row.createdAt())).toList();
-        return new CursorPage<>(items, items.isEmpty() ? after : items.getLast().sequence(), rows.size() > limit);
+        return transactions.execute(tx -> {
+            var grant = access.read(actor, validId, true);
+            var rows = dao.events(validId, after, limit + 1, grant.eventCutoff());
+            var items = rows.stream().limit(limit).map(row -> new Event(row.id(), row.conversationId(),
+                    row.seq(), row.type(), decode(row.dataJson(), JsonNode.class), row.createdAt())).toList();
+            return new CursorPage<>(items, items.isEmpty() ? after : items.getLast().sequence(), rows.size() > limit);
+        });
     }
 
     private Message view(StoredMessage row) {
         try {
             List<MessagePart> parts = json.readValue(row.partsJson(), new TypeReference<>() { });
-            return new Message(row.id(), row.conversationId(), row.seq(), row.clientMessageId(), "user",
-                    row.senderId(), parts, "accepted", row.createdAt());
+            return new Message(row.id(), row.conversationId(), row.seq(), row.clientMessageId(), row.senderType(),
+                    row.senderId(), parts, row.status(), row.createdAt());
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Invalid persisted message", e);
         }

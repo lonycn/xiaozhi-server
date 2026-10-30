@@ -44,12 +44,20 @@ class ConversationPersistenceTest {
         jdbc.update("INSERT INTO ai_agent_chat_history VALUES (1, 'legacy-sentinel')");
         jdbc.execute("CREATE TABLE ai_agent (id VARCHAR(32) PRIMARY KEY, user_id BIGINT)");
         jdbc.update("INSERT INTO ai_agent VALUES ('owned-agent', 7), ('other-agent', 8)");
+        jdbc.execute("CREATE TABLE sys_user (id BIGINT PRIMARY KEY, status TINYINT NOT NULL)");
+        jdbc.update("INSERT INTO sys_user VALUES (7, 1), (8, 1), (71, 1)");
         try (var connection = source.getConnection(); var migration = new Liquibase(
                 "db/changelog/conversation.changelog.yaml", new ClassLoaderResourceAccessor(), new JdbcConnection(connection))) {
             migration.update(new Contexts());
             migration.update(new Contexts());
         }
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG", Long.class));
+        try (var connection = source.getConnection(); var migration = new Liquibase(
+                "db/changelog/support.changelog.yaml", new ClassLoaderResourceAccessor(), new JdbcConnection(connection))) {
+            migration.update(new Contexts());
+            migration.update(new Contexts());
+        }
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG", Long.class));
         service = service(new ConversationDao(jdbc));
     }
 

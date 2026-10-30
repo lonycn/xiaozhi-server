@@ -757,3 +757,6 @@ databaseChangeLog:
   - include:
       file: conversation.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: support.changelog.yaml
+      relativeToChangelogFile: true

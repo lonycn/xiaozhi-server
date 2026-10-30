@@ -45,6 +45,7 @@ def configure():
         "spring.data.redis.host": "redis",
         "spring.data.redis.port": 6379,
         "features.conversation-enabled": "true",
+        "features.support-handoff-enabled": "true",
         "logging.level.xiaozhi": "INFO",
         "logging.level.liquibase": "WARN",
     }

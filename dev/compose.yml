@@ -1,0 +1,51 @@
+name: xiaozhi-server-dev
+services:
+  mysql:
+    image: docker.1ms.run/library/mysql@sha256:a0225d1ea6631c8bc2385dc4c2faba17bbf1834ecf369e1659a9a382bd8d5dd7
+    mem_limit: 640m
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--innodb-buffer-pool-size=96M", "--max-connections=40", "--performance-schema=OFF"]
+    environment:
+      MYSQL_DATABASE: xiaozhi_esp32_server
+      MYSQL_USER: xiaozhi
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?Run dev/manage.py first}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run dev/manage.py first}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  redis:
+    image: redis@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    mem_limit: 96m
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  api:
+    image: eclipse-temurin@sha256:8cef5fc7bebe421363ab543a2f4db5caf7d119d8db67d56b0f56c485d2de4d55
+    mem_limit: 768m
+    working_dir: /app
+    command: ["java", "-Xms64m", "-Xmx384m", "-Djava.awt.headless=true", "-jar", "/app/manager.jar", "--spring.config.additional-location=file:/app/application-dev.properties"]
+    environment:
+      TZ: Asia/Shanghai
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports:
+      - "127.0.0.1:18893:8002"
+    volumes:
+      - ../main/manager-api/target/xiaozhi-esp32-api.jar:/app/manager.jar:ro
+      - ./.runtime/application-dev.properties:/app/application-dev.properties:ro
+      - ./.runtime/uploadfile:/uploadfile
+      - ./.runtime/logs:/app/logs
+      - ../main/manager-web/public/generator/static/fonts:/usr/share/fonts/truetype/xiaozhi:ro
+volumes:
+  mysql-data:
+  redis-data:

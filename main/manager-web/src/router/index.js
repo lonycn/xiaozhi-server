@@ -4,6 +4,11 @@ import VueRouter from 'vue-router'
 Vue.use(VueRouter)
 
 const routes = [
+  ...(process.env.VUE_APP_CONVERSATION_ENABLED === 'true' ? [{
+    path: '/conversations',
+    name: 'ConversationWorkspace',
+    component: () => import('../views/ConversationWorkspace.vue'),
+  }] : []),
   {
     path: '/',
     name: 'welcome',

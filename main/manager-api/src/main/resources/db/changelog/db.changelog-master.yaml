@@ -753,3 +753,7 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202609172100.sql
+
+  - include:
+      file: conversation.changelog.yaml
+      relativeToChangelogFile: true

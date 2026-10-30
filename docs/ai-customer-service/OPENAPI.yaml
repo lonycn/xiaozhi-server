@@ -1,0 +1,305 @@
+openapi: 3.1.0
+info:
+  title: Xiaozhi persistent conversation ledger
+  version: 0.1.0
+  description: |
+    Implemented P1 foundation only, enabled by features.conversation-enabled=true.
+    Stores user messages, without model execution. Media/support/realtime components are target contracts only.
+    All success bodies use {code: 0, msg: success, data: ...}. Errors use actual HTTP status and a Result body.
+    Unknown request fields are rejected; identities are supplied by the authenticated server session.
+servers:
+  - url: /xiaozhi
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/ai/conversations:
+    post:
+      operationId: createConversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateConversation'}
+      responses:
+        '200':
+          description: Persisted conversation
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/Conversation'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    get:
+      operationId: listConversations
+      parameters:
+        - name: before
+          in: query
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+          description: Exclusive list_sequence cursor; 0 starts at newest creation.
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Owner's conversations in descending list_sequence order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/Conversation'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /api/v1/ai/conversations/{id}:
+    parameters:
+      - {$ref: '#/components/parameters/ConversationId'}
+    get:
+      operationId: getConversation
+      responses:
+        '200':
+          description: Owner's conversation
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/Conversation'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/ai/conversations/{id}/messages:
+    parameters:
+      - {$ref: '#/components/parameters/ConversationId'}
+    post:
+      operationId: appendUserMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: './MESSAGE_SCHEMA.json'}
+            example:
+              client_message_id: phone-uuid-001
+              parts:
+                - {type: text, text: 运行时有异响}
+      responses:
+        '200':
+          description: Saved user message or identical previous message on idempotent retry
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data: {$ref: '#/components/schemas/Message'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '415': {$ref: '#/components/responses/Unsupported'}
+    get:
+      operationId: listMessages
+      parameters:
+        - {$ref: '#/components/parameters/After'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Messages in ascending seq order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/Message'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/ai/conversations/{id}/events:
+    parameters:
+      - {$ref: '#/components/parameters/ConversationId'}
+    get:
+      operationId: replayEvents
+      description: Durable JSON event replay. This release does not offer a live SSE stream.
+      parameters:
+        - {$ref: '#/components/parameters/After'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Events in ascending sequence order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Result'}
+                  - properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/CursorPage'}
+                          - properties:
+                              items: {type: array, items: {$ref: '#/components/schemas/ConversationEvent'}}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+  parameters:
+    ConversationId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[a-f0-9]{32}$'}
+    After:
+      name: after
+      in: query
+      schema: {type: integer, format: int64, minimum: 0, default: 0}
+      description: Exclusive message/event sequence cursor.
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+  responses:
+    Invalid:
+      description: Invalid input, unknown fields, or unavailable project context
+      content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
+    Unauthorized:
+      description: Authentication required (existing localized Result body)
+      content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
+    Forbidden:
+      description: Agent access denied
+      content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
+    NotFound:
+      description: Conversation missing or inaccessible; same response for both
+      content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
+    Conflict:
+      description: CLIENT_MESSAGE_ID_REUSED with different content
+      content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
+    Unsupported:
+      description: MESSAGE_PART_NOT_SUPPORTED (media pipeline not enabled)
+      content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}
+  schemas:
+    Result:
+      type: object
+      required: [code, msg, data]
+      properties:
+        code: {type: integer}
+        msg: {type: string}
+        data: {}
+    CursorPage:
+      type: object
+      required: [items, next_cursor, has_more]
+      properties:
+        items: {type: array, items: {}}
+        next_cursor: {type: integer, format: int64, minimum: 0}
+        has_more: {type: boolean}
+    CreateConversation:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        agent_id: {type: [string, 'null'], pattern: '^[a-zA-Z0-9_-]{1,32}$'}
+    Conversation:
+      type: object
+      required: [id, list_sequence, title, state, last_seq, last_event_seq, created_at, updated_at]
+      properties:
+        id: {type: string}
+        list_sequence: {type: integer, format: int64}
+        agent_id: {type: [string, 'null']}
+        title: {type: string}
+        state: {const: AI_ACTIVE}
+        last_seq: {type: integer, format: int64}
+        last_event_seq: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MessagePart:
+      oneOf:
+        - {$ref: './MESSAGE_SCHEMA.json#/$defs/TextPart'}
+        - {$ref: './MESSAGE_SCHEMA.json#/$defs/LocationPart'}
+    Message:
+      type: object
+      required: [id, conversation_id, seq, client_message_id, sender_type, sender_id, parts, status, created_at]
+      properties:
+        id: {type: string}
+        conversation_id: {type: string}
+        seq: {type: integer, format: int64}
+        client_message_id: {type: string}
+        sender_type: {const: user}
+        sender_id: {type: string}
+        parts: {type: array, items: {$ref: '#/components/schemas/MessagePart'}}
+        status: {const: accepted}
+        created_at: {type: string, format: date-time}
+    ConversationEvent:
+      type: object
+      required: [event_id, conversation_id, sequence, type, data, timestamp]
+      properties:
+        event_id: {type: string}
+        conversation_id: {type: string}
+        sequence: {type: integer, format: int64}
+        type: {enum: [conversation.created, message.accepted]}
+        data: {type: object}
+        timestamp: {type: string, format: date-time}
+    Attachment:
+      x-implementation: planned-P2
+      type: object
+      required: [id, mime, size_bytes, sha256, status]
+      properties:
+        id: {type: string}
+        mime: {type: string}
+        size_bytes: {type: integer, minimum: 0}
+        sha256: {type: string}
+        status: {enum: [pending_upload, validating, ready, failed, expired]}
+      description: Private server-owned storage key; clients receive only short-lived authorized URLs.
+    RealtimeSession:
+      x-implementation: planned-P3
+      type: object
+      required: [id, conversation_id, channel, provider, status]
+      properties:
+        id: {type: string}
+        conversation_id: {type: string}
+        channel: {enum: [audio, video]}
+        provider: {enum: [qwen_omni_realtime, livekit]}
+        status: {enum: [created, connecting, active, ended, failed]}
+    SupportRequest:
+      x-implementation: planned-P4
+      type: object
+      required: [id, conversation_id, requested_mode, status]
+      properties:
+        id: {type: string}
+        conversation_id: {type: string}
+        requested_mode: {enum: [text, audio, video]}
+        status: {enum: [requested, queued, assigned, active, waiting_user, expert_pending, resolved, canceled, offline_message]}
+    SupportAssignment:
+      x-implementation: planned-P4
+      type: object
+      required: [id, support_request_id, agent_user_id, assigned_at]
+      properties:
+        id: {type: string}
+        support_request_id: {type: string}
+        agent_user_id: {type: string}
+        assigned_at: {type: string, format: date-time}
+        released_at: {type: [string, 'null'], format: date-time}
+      description: One active primary assignee; transfers retain assignment history.
+    Annotation:
+      x-implementation: planned-P5
+      type: object
+      required: [id, source_attachment_id, vector_json, preview_attachment_id, author_id]
+      properties:
+        id: {type: string}
+        source_attachment_id: {type: string}
+        video_time_ms: {type: integer, minimum: 0}
+        vector_json: {type: object, description: Shapes in normalized 0..1 coordinates}
+        preview_attachment_id: {type: string}
+        author_id: {type: string}
+      description: Preserve original; source/preview permissions follow the conversation.

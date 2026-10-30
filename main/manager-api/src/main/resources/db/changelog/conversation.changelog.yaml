@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202610300900-conversation-ledger
+      author: lonycn
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202610300900.sql
+            relativeToChangelogFile: true

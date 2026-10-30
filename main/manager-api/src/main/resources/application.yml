@@ -64,3 +64,7 @@ mybatis-plus:
     prefix:
     blobType: BLOB
     boolValue: TRUE
+
+# Persistent conversation ledger (P1 foundation); opt in explicitly.
+features:
+  conversation-enabled: false

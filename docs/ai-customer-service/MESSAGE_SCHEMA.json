@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xiaozhi:conversation:send-message:v1",
+  "title": "P1 SendMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "client_message_id",
+    "parts"
+  ],
+  "properties": {
+    "client_message_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+    },
+    "parts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/TextPart"
+          },
+          {
+            "$ref": "#/$defs/LocationPart"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "TextPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "text"
+      ],
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        }
+      }
+    },
+    "LocationPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "latitude",
+        "longitude",
+        "coordinate_system",
+        "accuracy_m",
+        "source",
+        "authorized_at"
+      ],
+      "properties": {
+        "type": {
+          "const": "location"
+        },
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "coordinate_system": {
+          "enum": [
+            "WGS84",
+            "GCJ02"
+          ]
+        },
+        "accuracy_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "source": {
+          "const": "user_shared"
+        },
+        "authorized_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  },
+  "description": "Implemented ledger request. Total text <=32000 UTF-16 code units. Nonblank text. authorized_at cannot exceed server time by >5 minutes. Media types await the authenticated upload stage."
+}

@@ -20,6 +20,7 @@ import org.springframework.context.annotation.Role;
 
 import jakarta.servlet.Filter;
 import xiaozhi.modules.security.oauth2.Oauth2Filter;
+import xiaozhi.modules.security.oauth2.ConversationOauth2Filter;
 import xiaozhi.modules.security.oauth2.Oauth2Realm;
 import xiaozhi.modules.security.secret.ServerSecretFilter;
 import xiaozhi.modules.sys.service.SysParamsService;
@@ -63,6 +64,7 @@ public class ShiroConfig {
         Map<String, Filter> filters = new HashMap<>();
         // oauth过滤
         filters.put("oauth2", new Oauth2Filter());
+        filters.put("conversation", new ConversationOauth2Filter());
         // 服务密钥过滤
         filters.put("server", new ServerSecretFilter(sysParamsService));
         shiroFilter.setFilters(filters);
@@ -99,6 +101,7 @@ public class ShiroConfig {
         filterMap.put("/agent/chat-title/**", "server");
         filterMap.put("/agent/play/**", "anon");
         filterMap.put("/voiceClone/play/**", "anon");
+        filterMap.put("/api/v1/ai/**", "conversation");
         filterMap.put("/**", "oauth2");
         shiroFilter.setFilterChainDefinitionMap(filterMap);
 

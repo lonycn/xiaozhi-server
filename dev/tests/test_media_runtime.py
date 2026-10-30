@@ -36,6 +36,52 @@ class MediaRuntimeTest(unittest.TestCase):
         db.assert_not_called()
         self.assertNotIn('features.attachments-enabled=true', (self.root / 'application-dev.properties').read_text())
 
+    def test_annotations_require_media_and_do_not_mutate_configuration_on_failure(self):
+        with self.assertRaisesRegex(RuntimeError, 'require enabled media'):
+            manage.set_annotations_enabled(True)
+        self.assertFalse((self.root / 'media-settings.json').exists())
+        manage.private_json('media-settings.json', {'enabled': True, 'storage': 's3'})
+        before = (self.root / 'media-settings.json').read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'worker configuration'):
+            manage.set_annotations_enabled(True)
+        manage.private_json('media-worker.json', {'annotation_font': str(self.root / 'missing.ttf')})
+        with self.assertRaisesRegex(RuntimeError, 'font is missing'):
+            manage.set_annotations_enabled(True)
+        self.assertEqual((self.root / 'media-settings.json').read_bytes(), before)
+
+    def test_annotations_opt_in_reuses_private_media_and_disables_without_data_change(self):
+        with self.mock_db():
+            manage.export_media_config('s3', self.storage_file())
+        font = self.root / 'fixed.ttf'
+        font.write_bytes(b'local-font-placeholder')
+        worker_path = self.root / 'media-worker.json'
+        worker = json.loads(worker_path.read_text())
+        worker['annotation_font'] = str(font)
+        manage.private_json('media-worker.json', worker)
+        storage = (self.root / 'media-storage.json').read_bytes()
+        worker_before = worker_path.read_bytes()
+        manage.configure()
+        self.assertNotIn('features.annotations-enabled=true', (self.root / 'application-dev.properties').read_text())
+        manage.set_annotations_enabled(True)
+        manage.configure()
+        self.assertIn('features.annotations-enabled=true', (self.root / 'application-dev.properties').read_text())
+        self.assertEqual((self.root / 'media-storage.json').read_bytes(), storage)
+        self.assertEqual(worker_path.read_bytes(), worker_before)
+        self.assertEqual((self.root / 'media-settings.json').stat().st_mode & 0o777, 0o600)
+        manage.set_annotations_enabled(False)
+        manage.configure()
+        self.assertNotIn('features.annotations-enabled=true', (self.root / 'application-dev.properties').read_text())
+        self.assertEqual((self.root / 'media-storage.json').read_bytes(), storage)
+
+    def test_annotations_use_worker_default_font_when_not_overridden(self):
+        with self.mock_db():
+            manage.export_media_config()
+        font = self.root / 'default.ttf'
+        font.write_bytes(b'local-font-placeholder')
+        with patch.object(manage, 'ANNOTATION_DEFAULT_FONT', font):
+            manage.set_annotations_enabled(True)
+        self.assertTrue(manage.media_settings()['annotations_enabled'])
+
     def test_existing_asr_credentials_exported_privately_without_db_writes(self):
         with self.mock_db() as db:
             manage.export_media_config(vision_model='qwen3.8-flash')

@@ -38,6 +38,18 @@ public class AttachmentService {
     private final long retention;
     private final String ticketKey;
     private final boolean transcription;
+    private org.springframework.beans.factory.ObjectProvider<GeneratedMediaSupport> generatedProvider;
+    private GeneratedMediaSupport generatedForTests;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setGeneratedProvider(org.springframework.beans.factory.ObjectProvider<GeneratedMediaSupport> provider) {this.generatedProvider=provider;}
+    public void setGeneratedSupportForTests(GeneratedMediaSupport support) {this.generatedForTests=support;}
+    private static boolean generatedType(String type) {return Set.of("capture_frame","annotation_preview").contains(type);}
+    private GeneratedMediaSupport generated() {
+        GeneratedMediaSupport support=generatedForTests!=null?generatedForTests:generatedProvider==null?null:generatedProvider.getIfAvailable();
+        if(support==null)throw problem(404,"ANNOTATIONS_DISABLED");return support;
+    }
+    private boolean generatedAttachment(A a) {return a.clientId().startsWith("_b4_");}
+
     record A(long id,String conversationId,long actor,String clientId,String filename,String mime,String kind,long size,String hash,
              String status,Long original,String message,Long seq,String metadata,String error,Instant created,Instant expires) { }
     record J(long id,long attachment,String type,String status,int attempt,String token,Instant expiry,String error,String metadata) { }
@@ -140,7 +152,7 @@ public class AttachmentService {
     public View get(Long user,String id) {long actor=actor(user);return transaction(()->{A a=attachment(id(id),false);readable(actor,a);return view(attachment(a.id(),true));});}
     public View upload(Long user,String id,String mime,long declaredSize,InputStream input) {
         long actor=actor(user),attachmentId=id(id);
-        A initial=transaction(()->{A a=attachment(attachmentId,false);writable(actor,a);return attachment(attachmentId,true);});
+        A initial=transaction(()->{A a=attachment(attachmentId,false);writable(actor,a);if(generatedAttachment(a))throw problem(409,"GENERATED_ATTACHMENT_IMMUTABLE");return attachment(attachmentId,true);});
         if(!initial.mime().equals(mime))throw problem(415,"TYPE_MISMATCH");if(declaredSize>=0 && declaredSize!=initial.size())throw problem(409,"SIZE_MISMATCH");
         try(Staged staged=stage(input,initial.size())) {
             if(staged.size()!=initial.size() || !staged.sha256().equals(initial.hash()))throw problem(409,"CONTENT_HASH_MISMATCH");
@@ -188,14 +200,23 @@ public class AttachmentService {
     }
     public View retry(Long user,String id) {
         long actor=actor(user);long attachment=id(id);
-        O original=transaction(()->{A a=attachment(attachment,false);writable(actor,a);if(a.original()==null)throw problem(409,"UPLOAD_INCOMPLETE");return object(a.original());});exists(original);
+        O original=transaction(()->{
+            A a=attachment(attachment,false);writable(actor,a);
+            if(generatedAttachment(a)) {
+                var jobs=db.query("SELECT * FROM ai_media_job WHERE attachment_id=?",AttachmentService::mapJ,a.id());
+                if(jobs.size()!=1 || !generatedType(jobs.getFirst().type()))throw problem(409,"INVALID_GENERATED_JOB");
+                generated().validate(a.id(),jobs.getFirst().type(),actor);return input(a,jobs.getFirst());
+            }
+            if(a.original()==null)throw problem(409,"UPLOAD_INCOMPLETE");return object(a.original());
+        });exists(original);
         return transaction(()->{
             A a=attachment(attachment,false);writable(actor,a);a=attachment(attachment,true);
             var jobs=db.query("SELECT * FROM ai_media_job WHERE attachment_id=? FOR UPDATE",AttachmentService::mapJ,a.id());
+            for(J j:jobs)if(generatedType(j.type()))generated().validate(a.id(),j.type(),actor);
             if(jobs.stream().anyMatch(j->Set.of("queued","running").contains(j.status())))throw problem(409,"MEDIA_JOB_ACTIVE");
             var retryable=Set.of("PROCESSING_TIMEOUT","PROCESSING_FAILED","STORAGE_UNAVAILABLE","TRANSCRIPTION_NOT_CONFIGURED","PROVIDER_AUTH","PROVIDER_RATE_LIMIT","PROVIDER_TIMEOUT","PROVIDER_ERROR");
             var failed=jobs.stream().filter(j->j.status().equals("failed") && j.attempt()<3 && retryable.contains(j.error())).toList();if(failed.isEmpty())throw problem(409,"MEDIA_NOT_RETRYABLE");
-            for(J j:failed){db.update("UPDATE ai_media_job SET status='queued',error_code=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND status='failed' AND attempt<3",j.id());event(a,"media.queued");if(j.type().equals("inspect_media"))db.update("UPDATE ai_attachment SET status='processing',error_code=NULL WHERE id=?",a.id());}
+            for(J j:failed){db.update("UPDATE ai_media_job SET status='queued',error_code=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND status='failed' AND attempt<3",j.id());event(a,"media.queued");if(j.type().equals("inspect_media") || generatedType(j.type()))db.update("UPDATE ai_attachment SET status='processing',error_code=NULL WHERE id=?",a.id());}
             return view(attachment(a.id(),false));
         });
     }
@@ -206,6 +227,7 @@ public class AttachmentService {
             if(a.actor()!=actor || !a.conversationId().equals(conversation))throw problem(404,"ATTACHMENT_NOT_FOUND");
             if(!a.status().equals("ready") || (a.message()==null && !a.expires().isAfter(Instant.now())))throw problem(409,"ATTACHMENT_NOT_READY");
             if(!a.kind().equals(part.type()) || (a.message()!=null && !a.message().equals(message)))throw problem(409,"ATTACHMENT_ALREADY_LINKED_OR_TYPE_MISMATCH");
+            if(generatedAttachment(a))generated().bind(actor,conversation,a.id(),message,seq);
             if(a.message()==null && db.update("UPDATE ai_attachment SET linked_message_id=?,linked_seq=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND linked_message_id IS NULL AND status='ready'",message,seq,a.id())!=1)throw problem(409,"ATTACHMENT_ALREADY_LINKED");
         }
     }
@@ -217,7 +239,10 @@ public class AttachmentService {
         conversations.advance(a.conversationId(),conversation.lastSeq(),seq);
     }
     private J lease(long jobId,String token) {
-        J first=job(jobId,false);A a=lock(first.attachment());account(a.actor());J j=job(jobId,true);
+        J first=job(jobId,false);A a=attachment(first.attachment(),false);
+        // Support write lock order is profile -> account -> conversation; validate before locking output.
+        if(generatedType(first.type()))generated().validate(a.id(),first.type(),a.actor());
+        a=lock(first.attachment());account(a.actor());J j=job(jobId,true);
         if(token==null || token.length()>128 || !"running".equals(j.status()) || !token.equals(j.token()) || j.expiry()==null || !j.expiry().isAfter(Instant.now()) || a.status().equals("expired"))throw problem(409,"MEDIA_LEASE_INACTIVE");
         return j;
     }
@@ -227,13 +252,24 @@ public class AttachmentService {
         var candidates=db.queryForList("SELECT j.id FROM ai_media_job j JOIN ai_attachment a ON a.id=j.attachment_id JOIN sys_user u ON u.id=a.uploader_user_id AND u.status=1 WHERE a.status<>'expired' AND (j.status='queued' OR (j.status='running' AND j.lease_expires_at<=CURRENT_TIMESTAMP(3))) ORDER BY j.created_at,j.id LIMIT 30",Long.class);
         for(Long candidate:candidates) {
             Task result=transaction(()->{
-                J hint=job(candidate,false);A a=lock(hint.attachment());account(a.actor());J j=job(candidate,true);
+                J hint=job(candidate,false);A a=attachment(hint.attachment(),false);
+                if(generatedType(hint.type())) {
+                    try {generated().validate(a.id(),hint.type(),a.actor());}
+                    catch(ConversationProblem denied) {
+                        if(denied.status()!=403 && denied.status()!=404 && denied.status()!=409 && denied.status()!=410)throw denied;
+                        a=lock(a.id());J inactive=job(candidate,true);
+                        if(inactive.status().equals("queued") || (inactive.status().equals("running") && inactive.expiry()!=null && !inactive.expiry().isAfter(Instant.now())))failLocked(a,inactive,"PROCESSING_FAILED");
+                        return null;
+                    }
+                }
+                a=lock(hint.attachment());account(a.actor());J j=job(candidate,true);
                 if(a.status().equals("expired") || (!j.status().equals("queued") && !(j.status().equals("running") && j.expiry()!=null && !j.expiry().isAfter(Instant.now()))))return null;
                 if(j.attempt()>=3) {failLocked(a,j,"PROCESSING_TIMEOUT");return null;}
                 String token=UUID.randomUUID().toString().replace("-","")+UUID.randomUUID().toString().replace("-","");
                 db.update("UPDATE ai_media_job SET status='running',attempt=attempt+1,lease_token=?,lease_owner=?,lease_expires_at=?,error_code=NULL,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",token,request.workerId(),timestamp(Instant.now().plusSeconds(leaseSeconds)),j.id());
                 j=job(candidate,false);event(a,"media.started");O input=input(a,j);
-                return new Task(Long.toString(j.id()),Long.toString(a.id()),j.type(),j.attempt(),j.token(),leaseSeconds,j.type().equals("audio_transcription")?"audio.wav":a.filename(),input.mime(),input.size(),input.hash(),metadata(a.metadata()));
+                GeneratedMediaSupport.Input details=generatedType(j.type())?generated().input(a.id(),j.type()):null;
+                return new Task(Long.toString(j.id()),Long.toString(a.id()),j.type(),j.attempt(),j.token(),leaseSeconds,details!=null?details.filename():j.type().equals("audio_transcription")?"audio.wav":a.filename(),input.mime(),input.size(),input.hash(),details!=null?details.metadata():metadata(a.metadata()));
             });if(result!=null)return result;
         }return null;
     }
@@ -241,6 +277,12 @@ public class AttachmentService {
         if(request==null)throw problem(400,"INVALID_REQUEST");return transaction(()->{J j=lease(id(id),request.leaseToken());db.update("UPDATE ai_media_job SET lease_expires_at=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND lease_token=?",timestamp(Instant.now().plusSeconds(leaseSeconds)),j.id(),j.token());return Map.of("active",true);});
     }
     private O input(A a,J j) {
+        if(generatedType(j.type())) {
+            GeneratedMediaSupport.Input input=generated().input(a.id(),j.type());
+            A source=attachment(id(input.attachmentId()),false);
+            if(!source.conversationId().equals(a.conversationId()))throw problem(404,"ATTACHMENT_NOT_FOUND");
+            return variant(source,input.variant());
+        }
         if(j.type().equals("audio_transcription"))return variant(a,"audio");
         if(a.original()==null)throw problem(409,"MEDIA_OBJECT_MISSING");return object(a.original());
     }
@@ -278,14 +320,14 @@ public class AttachmentService {
         }catch(IOException ex){throw problem(503,"STORAGE_UNAVAILABLE");}
     }
     private void allowedArtifact(A a,J j,String variant) {
-        boolean allowed=j.type().equals("audio_transcription")?variant.equals("transcript"):switch(a.kind()) {
+        boolean allowed=generatedType(j.type())?Set.of("display","thumbnail").contains(variant):j.type().equals("audio_transcription")?variant.equals("transcript"):switch(a.kind()) {
             case "image" -> Set.of("display","thumbnail").contains(variant);case "file" -> variant.equals("text");case "audio" -> variant.equals("audio");case "video" -> variant.equals("poster") || variant.equals("audio") || variant.matches("frame_[0-5]");default -> false;};
         if(!allowed)throw problem(400,"INVALID_VARIANT");
     }
     public View completeJob(String id,Complete request) {
         if(request==null)throw problem(400,"INVALID_REQUEST");
         return transaction(()->{
-            J j=lease(id(id),request.leaseToken());A a=attachment(j.attachment(),false);Map<String,Object> meta=validateMetadata(a,j,request.metadata());
+            J j=lease(id(id),request.leaseToken());A a=attachment(j.attachment(),false);Map<String,Object> meta=generatedType(j.type())?generated().complete(a.id(),j.type(),request.metadata()):validateMetadata(a,j,request.metadata());
             Set<String> required=new HashSet<>();if(j.type().equals("audio_transcription"))required.add("transcript");else switch(a.kind()) {
                 case "image" -> required.addAll(Set.of("display","thumbnail"));case "file" -> required.add("text");case "audio" -> required.add("audio");case "video" -> {required.add("poster");if(Boolean.TRUE.equals(meta.get("has_audio")))required.add("audio");for(Object value:(List<?>)meta.get("frames"))required.add((String)((Map<?,?>)value).get("artifact"));}default->throw problem(400,"INVALID_MEDIA");
             }
@@ -293,7 +335,13 @@ public class AttachmentService {
             // Every pointer was committed only after storage success; IO does not hold this transaction.
             db.update("UPDATE ai_media_job SET status='completed',metadata_json=?,error_code=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",encode(meta),j.id());
             Map<String,Object> merged=new LinkedHashMap<>(metadata(a.metadata()));
-            if(j.type().equals("inspect_media")) {merged.putAll(meta);db.update("UPDATE ai_attachment SET status='ready',error_code=NULL,metadata_json=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",encode(merged),a.id());event(a,"attachment.ready");if(transcription && (a.kind().equals("audio") || (a.kind().equals("video") && Boolean.TRUE.equals(meta.get("has_audio")))))queue(a,"audio_transcription");}
+            if(generatedType(j.type())) {
+                O display=db.query("SELECT o.* FROM ai_attachment_artifact f JOIN ai_attachment_object o ON o.id=f.object_id WHERE f.attachment_id=? AND f.variant='display' AND f.job_id=? AND f.attempt=? AND o.status='referenced'",AttachmentService::mapO,a.id(),j.id(),j.attempt()).getFirst();
+                merged.putAll(meta);
+                if(db.update("UPDATE ai_attachment SET status='ready',error_code=NULL,metadata_json=?,original_object_id=?,size=?,sha256=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND original_object_id IS NULL AND status='processing'",encode(merged),display.id(),display.size(),display.hash(),a.id())!=1)throw problem(409,"GENERATED_ATTACHMENT_IMMUTABLE");
+                event(a,"attachment.ready");
+            }
+            else if(j.type().equals("inspect_media")) {merged.putAll(meta);db.update("UPDATE ai_attachment SET status='ready',error_code=NULL,metadata_json=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",encode(merged),a.id());event(a,"attachment.ready");if(transcription && (a.kind().equals("audio") || (a.kind().equals("video") && Boolean.TRUE.equals(meta.get("has_audio")))))queue(a,"audio_transcription");}
             else {merged.put("transcription",meta);db.update("UPDATE ai_attachment SET metadata_json=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",encode(merged),a.id());}
             event(a,"media.completed");return view(attachment(a.id(),false));
         });
@@ -304,7 +352,7 @@ public class AttachmentService {
     }
     private void failLocked(A a,J j,String code) {
         db.update("UPDATE ai_media_job SET status='failed',error_code=?,lease_token=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",code,j.id());
-        if(j.type().equals("inspect_media")){db.update("UPDATE ai_attachment SET status='failed',error_code=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",code,a.id());event(a,"attachment.failed");}event(a,"media.failed");
+        if(j.type().equals("inspect_media") || generatedType(j.type())){db.update("UPDATE ai_attachment SET status='failed',error_code=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",code,a.id());event(a,"attachment.failed");}event(a,"media.failed");
     }
     private Map<String,Object> validateMetadata(A a,J j,Map<String,Object> source) {
         if(source==null || source.size()>12)throw problem(400,"INVALID_MEDIA_METADATA");
@@ -372,6 +420,34 @@ public class AttachmentService {
     private Content content(O o,String filename,boolean inline) {
         try {return new Content(store.read(o.key()),o.size(),o.mime(),filename,inline);}
         catch(IOException e){throw problem(503,"STORAGE_UNAVAILABLE");}
+    }
+    /** Server-only generation bridges. Callers operate in a short existing SQL transaction. */
+    public void serverRequireWrite(long actor,String conversation) {write(actor,conversation);}
+    /** Use current reads after an idempotency-key lock can observe another transaction's new snapshot. */
+    public View serverSnapshot(long actor,String attachmentId,String conversation) {
+        conversations.byId(conversation,true);A a=attachment(id(attachmentId),true);
+        if(!a.conversationId().equals(conversation))throw problem(404,"ATTACHMENT_NOT_FOUND");readable(actor,a);return view(a);
+    }
+    public View serverSource(long actor,String attachmentId,String conversation,boolean mustBeSent) {
+        A a=attachment(id(attachmentId),false);if(!a.conversationId().equals(conversation))throw problem(404,"ATTACHMENT_NOT_FOUND");
+        readable(actor,a);a=attachment(a.id(),true);
+        if(!a.status().equals("ready") || (mustBeSent && a.message()==null))throw problem(409,"ANNOTATION_SOURCE_NOT_READY");
+        return view(a);
+    }
+    public String serverCreateGenerated(long actor,String conversation,long snapshotId,String type) {
+        if(!generatedType(type))throw problem(400,"INVALID_GENERATED_JOB");write(actor,conversation);long id=nextId();
+        db.update("INSERT INTO ai_attachment(id,conversation_id,uploader_user_id,client_upload_id,filename,mime_type,kind,size,sha256,status,metadata_json,expires_at) VALUES(?,?,?,?,?,'image/jpeg','image',0,?,'processing','{}',?)",id,conversation,actor,"_b4_"+type+"_"+snapshotId,"snapshot-"+snapshotId+".jpg","0".repeat(64),timestamp(Instant.now().plusSeconds(retention)));
+        return Long.toString(id);
+    }
+    public void serverQueueGenerated(String outputAttachmentId,String type) {
+        if(!generatedType(type))throw problem(400,"INVALID_GENERATED_JOB");A a=attachment(id(outputAttachmentId),true);
+        generated().validate(a.id(),type,a.actor());queue(a,type);
+    }
+    public void serverBindEvidence(long actor,String conversation,String attachmentId,String message,long seq) {
+        A a=attachment(id(attachmentId),true);
+        if(!a.conversationId().equals(conversation))throw problem(404,"ATTACHMENT_NOT_FOUND");readable(actor,a);
+        if(!a.status().equals("ready"))throw problem(409,"ANNOTATION_SOURCE_NOT_READY");
+        if(a.message()==null && db.update("UPDATE ai_attachment SET linked_message_id=?,linked_seq=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND linked_message_id IS NULL AND status='ready'",message,seq,a.id())!=1)throw problem(409,"ANNOTATION_SOURCE_STATE_CHANGED");
     }
     /** Internal AI bridge. Caller must already have validated the current run lease. No object key escapes. */
     public View aiDescriptor(String id,String conversationId,long inputSeq) {

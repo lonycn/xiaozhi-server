@@ -9,6 +9,7 @@
   "temp_root": "",
   "ffmpeg": "ffmpeg",
   "ffprobe": "ffprobe",
+  "annotation_font": "",
   "asr_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "asr_api_key": "",
   "asr_model": "qwen3-asr-flash",

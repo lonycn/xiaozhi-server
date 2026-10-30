@@ -21,6 +21,7 @@ ROOT = DEV.parent
 RUNTIME = DEV / ".runtime"
 WEB = ROOT / "main/manager-web"
 CANDIDATE = ROOT / "main/manager-web-next"
+ANNOTATION_DEFAULT_FONT = WEB / "public/generator/static/fonts/noto_qwen.ttf"
 CANDIDATE_URL = "http://127.0.0.1:18894"
 API = ROOT / "main/manager-api"
 WEB_URL = "http://127.0.0.1:18892"
@@ -79,6 +80,8 @@ def configure():
                 if not isinstance(value, str) or not value or any(c in value for c in "\r\n"):
                     raise RuntimeError("Invalid private media storage configuration")
                 properties["media.storage.s3." + key] = value
+        if media.get("annotations_enabled") is True:
+            properties["features.annotations-enabled"] = "true"
         if media.get("vision_model"):
             properties["ai.execution.vision-model"] = media["vision_model"]
     (RUNTIME / "application-dev.properties").write_text("\n".join(f"{key}={value}" for key, value in properties.items()) + "\n")
@@ -111,6 +114,25 @@ def media_settings():
     if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
         raise RuntimeError("Invalid media settings")
     return data
+
+
+def set_annotations_enabled(enabled):
+    """Only adjust private Dev flags; reuse the already-configured media worker and storage."""
+    settings = media_settings()
+    if enabled:
+        if settings.get("enabled") is not True:
+            raise RuntimeError("Annotations require enabled media")
+        worker_path = RUNTIME / "media-worker.json"
+        if not worker_path.is_file():
+            raise RuntimeError("Annotations require existing media worker configuration")
+        worker = json.loads(worker_path.read_text())
+        if not isinstance(worker, dict):
+            raise RuntimeError("Invalid media worker configuration")
+        font = Path(worker.get("annotation_font") or ANNOTATION_DEFAULT_FONT)
+        if not font.is_file():
+            raise RuntimeError("Annotation font is missing")
+    settings["annotations_enabled"] = enabled
+    private_json("media-settings.json", settings)
 
 
 def private_json(name, data):
@@ -447,7 +469,7 @@ def stop_process(find_process, filename):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
     parser.add_argument("--storage", choices=["filesystem", "s3"])
@@ -469,7 +491,7 @@ def main():
         print("Private media enabled; Vue 3:", CANDIDATE_URL + "/#/conversations")
     elif args.action == "media-disable":
         stop_process(media_process, "media-worker-process.json")
-        settings = media_settings(); settings["enabled"] = False
+        settings = media_settings(); settings["enabled"] = False; settings["annotations_enabled"] = False
         private_json("media-settings.json", settings)
         configure(); recreate_api()
         print("Media disabled; existing objects and database rows retained")
@@ -480,6 +502,16 @@ def main():
         print("Media storage:", settings.get("storage", "filesystem"))
         print("Transcription enabled:", settings.get("transcription") is True)
         print("Vision model:", settings.get("vision_model", ""))
+    elif args.action in ("annotations-enable", "annotations-disable"):
+        enabled = args.action == "annotations-enable"
+        set_annotations_enabled(enabled)
+        configure()
+        recreate_api()
+        print("Annotations enabled" if enabled else "Annotations disabled; existing data retained")
+    elif args.action == "annotations-status":
+        settings = media_settings()
+        print("Annotations enabled:", settings.get("enabled") is True and settings.get("annotations_enabled") is True)
+        print("Media enabled:", settings.get("enabled") is True)
     elif args.action == "ai-enable":
         model = export_ai_config()
         stop_process(ai_process, "ai-worker-process.json")

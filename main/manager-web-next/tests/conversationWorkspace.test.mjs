@@ -291,3 +291,16 @@ describe('B3 identity isolation', () => {
     pending.resolve({ id: 'private', title: 'old account title' }); await creating; expect(vm.selected).toBeNull(); expect(vm.creating).toBe(false);
   });
 });
+
+describe('B4 annotation reply integration', () => {
+  const generated = { kind:'image',clientUploadId:'annotation-12',status:'ready',progress:100,attachment:{id:'13',conversation_id:'c',filename:'服务端标注.jpg',size:123,status:'ready',metadata:{annotation_id:'12',frame_id:'10'}} };
+  it('stages server media without a local File and preserves text plus annotation with the original send key on retry', async () => {
+    vm.selected={id:'c',state:'AI_ACTIVE'}; vm.draft='请检查圈选位置';vm.stageAnnotation({scopeKey:vm.attachmentScope,row:generated});await wrapper.vm.$nextTick();expect(wrapper.text()).toContain('服务端标注.jpg');
+    api.send.mockRejectedValueOnce(new Error('disconnect')).mockResolvedValueOnce({id:'m',parts:[]});await vm.sendMessage();const first=api.send.mock.calls[0][1];expect(first.parts).toEqual([{type:'text',text:'请检查圈选位置'},{type:'image',attachment_id:'13'}]);expect(vm.attachmentRows).toHaveLength(1);
+    await vm.sendMessage();expect(api.send.mock.calls[1][1]).toEqual(first);expect(vm.attachmentRows).toHaveLength(0);
+  });
+  it('rejects staging into a different conversation or a resolved conversation', () => {
+    vm.selected={id:'c',state:'AI_ACTIVE'};vm.stageAnnotation({scopeKey:'previous-conversation',row:generated});expect(vm.attachmentRows).toEqual([]);
+    vm.selected={id:'c',state:'RESOLVED'};vm.stageAnnotation({scopeKey:vm.attachmentScope,row:generated});expect(vm.attachmentRows).toEqual([]);
+  });
+});

@@ -30,6 +30,9 @@ class Worker:
                 await self.manager.download(task, source)
             if task.get('job_type') == 'inspect_media':
                 metadata, artifacts = await self.processor.inspect(task, source, directory)
+            elif task.get('job_type') in ('capture_frame', 'annotation_preview'):
+                from .annotations import Annotations
+                metadata, artifacts = await Annotations(self.config).process(task, source, directory)
             elif task.get('job_type') == 'audio_transcription':
                 if task.get('mime_type') != 'audio/wav':
                     raise MediaFailure('TYPE_MISMATCH')

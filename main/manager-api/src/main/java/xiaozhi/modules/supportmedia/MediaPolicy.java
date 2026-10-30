@@ -53,7 +53,7 @@ public class MediaPolicy implements RoomOwnership {
             if(operation==Operation.LIST || operation==Operation.GET)return true;
             if(operation==Operation.REMOVE || operation==Operation.DELETE) {
                 String kind=operation==Operation.REMOVE?"remove_participant":"delete_room";
-                return Boolean.TRUE.equals(store.jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM support_media_outbox WHERE room_id=? AND kind=? AND status='running' AND lease_expires_at>CURRENT_TIMESTAMP(3) AND (identity=? OR (identity IS NULL AND ? IS NULL)))",Boolean.class,roomId,kind,identity,identity));
+                return Boolean.TRUE.equals(store.jdbc().queryForObject("SELECT EXISTS(SELECT 1 FROM support_media_outbox WHERE room_id=? AND kind=? AND status='running' AND lease_expires_at>CURRENT_TIMESTAMP(3) AND (identity=? OR (identity IS NULL AND ? IS NULL)))",Boolean.class,roomId,kind,identity,identity));
             }
             if(!Set.of("connecting","active","reconnecting").contains(status))return false;
             var pending=store.pending(number(s,"id"),false);boolean preparation=pending!=null && number(pending,"target_generation")==room.generation() && Set.of("preparing","ready","committing").contains(string(pending,"status")) && pending.get("customer_approved_at")!=null && pending.get("target_accepted_at")!=null;
@@ -65,7 +65,7 @@ public class MediaPolicy implements RoomOwnership {
             if(members.size()!=2 || members.stream().anyMatch(m->m.get("consented_at")==null || string(m,"status").equals("revoked")))return false;
             account(number(member,"user_id"));account(number(s,"customer_user_id"));profile(number(s,"agent_user_id"),false);
             // Read-only ownership checks do not acquire locks around network I/O.
-            boolean assignment=Boolean.TRUE.equals(store.jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM support_assignment a JOIN support_request q ON q.id=a.request_id WHERE a.id=? AND a.released_at IS NULL AND q.status='active' AND q.assigned_agent_user_id=a.agent_user_id AND a.agent_user_id=?)",Boolean.class,s.get("assignment_id"),s.get("agent_user_id")));
+            boolean assignment=Boolean.TRUE.equals(store.jdbc().queryForObject("SELECT EXISTS(SELECT 1 FROM support_assignment a JOIN support_request q ON q.id=a.request_id WHERE a.id=? AND a.released_at IS NULL AND q.status='active' AND q.assigned_agent_user_id=a.agent_user_id AND a.agent_user_id=?)",Boolean.class,s.get("assignment_id"),s.get("agent_user_id")));
             if(!assignment)return false;
             if(preparation)profile(number(pending,"target_agent_user_id"),false);
             return true;

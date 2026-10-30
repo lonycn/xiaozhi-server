@@ -13,9 +13,10 @@ import xiaozhi.common.jdbc.TimestampColumnMapRowMapper;
 
 @Repository
 public class MediaStore {
-    public final JdbcTemplate jdbc;
+    private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     public MediaStore(JdbcTemplate jdbc,PlatformTransactionManager manager){this.jdbc=jdbc;this.transactions=new TransactionTemplate(manager);}
+    public JdbcTemplate jdbc(){return jdbc;}
     public <T> T tx(Supplier<T> work){return transactions.execute(status->work.get());}
     public List<Map<String,Object>> rows(String sql,Object... args){return jdbc.query(sql,new TimestampColumnMapRowMapper(),args);}
     public Map<String,Object> one(String sql,Object... args){var values=rows(sql,args);if(values.size()!=1)throw new org.springframework.dao.IncorrectResultSizeDataAccessException(1,values.size());return values.getFirst();}

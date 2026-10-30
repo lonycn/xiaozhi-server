@@ -92,6 +92,27 @@ describe('support desk', () => {
     await vi.advanceTimersByTimeAsync(15000); expect(wrapper.vm.profile).toBeNull(); expect(wrapper.vm.accepting).toBe(false); expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('adds an explicitly selected internal suggestion to the current draft without sending', async () => {
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest({ request_id:'r', conversation_id:'c', status:'active' });
+    wrapper.vm.draft = '客服已输入的文字';
+    wrapper.findComponent({ name:'SupportSummaryPanel' }).vm.$emit('suggestion', { conversation_id:'c', text:'先核对设备铭牌与报警时间。' });
+    expect(wrapper.vm.draft).toBe('客服已输入的文字\n\n先核对设备铭牌与报警时间。');
+    expect(api.send).not.toHaveBeenCalled();
+  });
+  it('rejects suggestions from another conversation or after assignment loss', async () => {
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest({ request_id:'r', conversation_id:'c', status:'active' });
+    wrapper.vm.draft = '保留';
+    wrapper.vm.appendSuggestion({ conversation_id:'previous', text:'旧会话建议' });
+    wrapper.vm.selected.status = 'resolved';
+    wrapper.vm.appendSuggestion({ conversation_id:'c', text:'已离任客服建议' });
+    expect(wrapper.vm.draft).toBe('保留'); expect(api.send).not.toHaveBeenCalled();
+  });
+  it('keeps an existing full draft when adding a suggestion would exceed the message limit', async () => {
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest({ request_id:'r', conversation_id:'c', status:'active' });
+    wrapper.vm.draft = '字'.repeat(7999);
+    wrapper.vm.appendSuggestion({ conversation_id:'c', text:'新建议' });
+    expect(wrapper.vm.draft).toHaveLength(7999); expect(wrapper.vm.error).toContain('8000'); expect(api.send).not.toHaveBeenCalled();
+  });
 });
 
 describe('B3 support mixed messages', () => {

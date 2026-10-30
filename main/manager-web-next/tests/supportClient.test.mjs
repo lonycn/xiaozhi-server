@@ -18,6 +18,16 @@ describe('support API and precision', () => {
     await expect(allPages(async () => ({ items: [], next_cursor: 9223372036854775807, has_more: true }))).rejects.toThrow('游标异常');
   });
   it('does not treat string zero as an administrator', () => { expect(isSupportAdmin({ superAdmin: '0' })).toBe(false); expect(isSupportAdmin({ superAdmin: '1' })).toBe(true); });
+  it('uses scoped assistance endpoints with precise IDs and abort signals', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ok:true,status:200,json:async()=>({code:0,data:{}})});
+    const client = createSupportClient({baseUrl:'',getToken:()=>'',onUnauthorized:vi.fn(),fetchImpl}); const signal = new AbortController().signal;
+    await client.summaryAssistance('c/1',signal); await client.createSummaryAssistance('c/1',{client_request_id:'id',base_version:'1'},signal);
+    await client.summaryAssistanceJob('c/1','job/1',signal); await client.retrySummaryAssistance('c/1','job/1',signal);
+    expect(fetchImpl.mock.calls.map(call=>[call[0],call[1].method])).toEqual([
+      ['/api/v1/support/conversations/c%2F1/summary/assistance','GET'], ['/api/v1/support/conversations/c%2F1/summary/assistance','POST'],
+      ['/api/v1/support/conversations/c%2F1/summary/assistance/job%2F1','GET'], ['/api/v1/support/conversations/c%2F1/summary/assistance/job%2F1/retry','POST']]);
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual({client_request_id:'id',base_version:'1'}); expect(JSON.parse(fetchImpl.mock.calls[3][1].body)).toEqual({});
+  });
   it('maps capacity, changed state and unknown errors while preserving their codes', async () => {
     const client = createSupportClient({ baseUrl: '', getToken: () => '', onUnauthorized: vi.fn(), errorMessage: supportErrorKey,
       fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ code: 409, msg: 'AGENT_AT_CAPACITY' }) }) });

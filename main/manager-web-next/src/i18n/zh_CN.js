@@ -1940,7 +1940,7 @@ export default {
   "realtime.interrupt": "打断当前回复",
   "realtime.end": "结束实时会话",
   "realtime.manualNote": "当前为手动录音：点击“开始录音”，说完点击“结束本段”，每段最多 60 秒；暂不提供自动语音检测。",
-  "realtime.frameNote": "摄像头仅在录音期间每秒最多采样一张有限大小 JPEG，发送给模型；这不是连续视频，也不代表后端验证了画面来源。",
+  "realtime.frameNote": "录音时每秒最多采样一帧。请在本段录音中询问画面；录音结束后停止采样，追加文字不会发送新画面。",
   "realtime.sampling": "正在发送摄像头采样画面",
   "realtime.stopCamera": "停止本次会话画面采样",
   "realtime.seconds": "秒",

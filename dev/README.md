@@ -4,7 +4,7 @@
 
 本机页面：<http://127.0.0.1:18894/#/conversations>。后台入口：<http://127.0.0.1:18894/#/home>。
 
-2026-10-30 本机 Docker VM 存储 I/O 故障期间，原库和卷保留，临时恢复副本使用 <http://127.0.0.1:18895/#/conversations>（20:39备份，API18901）。副本不是原库最新状态，不能覆盖回原库。实际验证及恢复边界见 [本轮整合记录](../docs/ai-customer-service/INTEGRATION_20261030.md)。
+2026-10-30 本机 Docker VM 存储 I/O 故障已在用户授权后恢复：colima与smartmaster两个profile正常restart，原Dev18894/API18893重新连接原MySQL/Redis，原18333 S3及既有对象恢复；迁移从115正常增加至116。22:47曾生成并核验APFS克隆/恢复快照，当前路径无法找到，仍在排查；原OS/data磁盘及所有原卷目前仍在，20:39 SQL及新建post-recovery一致性SQL备份已验证现存，字节与SHA见恢复记录。未执行清库/删卷，不据此推定无法定位的快照仍可用。故障期间的18895/API18901是20:39备份的隔离恢复副本，其进程及其他本轮备用服务现已正常SIGTERM停止，数据/DB/volumes及manifest/私有配置保留可恢复，不覆盖原库。原Dev18894/18893及AI/Media/realtime worker继续running。恢复后的Omni Dev S3录音/有声视频已通过，浏览器阶段及未完成边界见 [恢复与补充验收](../docs/ai-customer-service/DEV_RECOVERY_VALIDATION_20261030.md)。
 
 ## 启停
 

@@ -11,7 +11,7 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
  const fresh=version=>!disposed&&version===generation&&!controller.signal.aborted;
  function clearTimers(){clearTimeout(readyTimer);clearInterval(turnTimer);clearTimeout(commandTimer);}
  function stopInput(){recording=false;clearInterval(turnTimer);state.cameraSampling=false;const resource=capture;capture=null;resource?.stop().catch(()=>{});}
- function release(){++generation;controller.abort();controller=new AbortController();clearTimers();stopInput();playback?.close().catch(()=>{});playback=null;const old=socket;socket=null;if(old){old.onopen=null;old.onmessage=null;old.onerror=null;old.onclose=null;old.close(1000);}busy=false;}
+ function release({keepTransport=false}={}){++generation;controller.abort();controller=new AbortController();clearTimers();stopInput();playback?.close().catch(()=>{});playback=null;const old=socket;if(!keepTransport)socket=null;if(old){old.onopen=null;old.onmessage=null;old.onerror=null;old.onclose=null;if(!keepTransport)old.close(1000);}busy=false;}
  function fail(error){release();state={...state,status:'failed',error:realtimeErrorKey(error)};emit();}
  function send(frame){if(!socket||socket.readyState!==1)throw new Error('SOCKET_CLOSED');if(socket.bufferedAmount>256000)throw new Error('BACKPRESSURE');socket.send(JSON.stringify(frame));}
  function mergeInjections(items){for(const item of items){const index=state.injections.findIndex(old=>old.id===item.id);if(index<0)state.injections.push(item);else if(!['acknowledged','failed'].includes(state.injections[index].status)||item.status===state.injections[index].status)state.injections[index]={...state.injections[index],...item};}}
@@ -65,7 +65,7 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
    try{
     // Resume playback within this explicit user action; microphone permission is a
     // separate manual-recording action after the real provider ready event.
-    playback=playbackFactory();await playback.resume();
+    playback=playbackFactory();await playback.resume();if(!fresh(version))return;
     const session=await client.create({conversation_id:conversationId,client_session_id:clientId,consent},controller.signal);if(!fresh(version))return;state.session=session;
     if(REALTIME_TERMINAL.has(session.status))throw new Error('SESSION_TERMINAL');
     const ticket=await client.ticket(session.id,{expected_epoch:session.control_epoch},controller.signal);if(!fresh(version))return;
@@ -73,7 +73,7 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
     const ws=socketFactory(url.href);socket=ws;ws.onopen=()=>{if(fresh(version)&&socket===ws){try{send({type:'connect',ticket:ticket.ticket});}catch(error){fail(error);}}};
     ws.onmessage=event=>{if(!fresh(version)||typeof event.data!=='string'||event.data.length>300000){if(fresh(version))fail(new Error('OUTPUT_LIMIT'));return;}let frame;try{frame=JSON.parse(event.data);}catch{fail(new Error('PROTOCOL_ERROR'));return;}onFrame(frame,version);};
     ws.onerror=()=>{if(fresh(version))fail(new Error('SOCKET_ERROR'));};
-    ws.onclose=()=>{if(!fresh(version))return;socket=null;if(state.status==='ending'){release();state.status='ended';emit();}else fail(new Error('CLIENT_DISCONNECTED'));};
+    ws.onclose=()=>{if(!fresh(version))return;socket=null;fail(new Error('CLIENT_DISCONNECTED'));};
     readyTimer=setTimeout(()=>{if(fresh(version)&&state.status==='connecting')fail({code:'PROVIDER_TIMEOUT'});},15000);emit();
    }catch(error){if(fresh(version)&&error.name!=='AbortError')fail(error);}finally{if(fresh(version))busy=false;}
   },
@@ -96,8 +96,17 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
   },
   async refresh(){if(!state.session||disposed||state.status==='ending')return;const version=generation;try{const next=await client.get(state.session.id,controller.signal);if(!fresh(version))return;if(next.control_epoch!==state.session.control_epoch||REALTIME_TERMINAL.has(next.status)){const changedEpoch=next.control_epoch!==state.session.control_epoch;release();state.session=next;state.status=REALTIME_TERMINAL.has(next.status)?next.status:'failed';if(changedEpoch&&!REALTIME_TERMINAL.has(next.status))state.error='realtime.changed';emit();return;}state.session=next;await pollInjections(version);if(fresh(version))emit();}catch(error){if(fresh(version)&&error.name!=='AbortError')fail(error);}},
   async end(){
-   const session=state.session;release();if(!session){state.status='ended';emit();return;}const version=generation;state.status='ending';state.error='';emit();
-   try{const ended=await client.end(session.id,{expected_epoch:session.control_epoch},controller.signal);if(!fresh(version))return;state.session=ended;state.status=REALTIME_TERMINAL.has(ended.status)?ended.status:'ending';history();emit();}catch(error){if(fresh(version)&&error.name!=='AbortError'){state.status='failed';state.error=realtimeErrorKey(error);emit();}}
+   if(disposed||state.status==='ending')return;
+   const session=state.session;
+   // Invalidate all old API/device/socket callbacks and stop local media now.
+   // Keep the worker connection alive until Java has durably ended the session,
+   // otherwise CLIENT_DISCONNECTED can win the canonical terminal-state race.
+   release({keepTransport:!!session});if(!session){state.status='ended';emit();return;}const version=generation;busy=true;state.status='ending';state.error='';emit();
+   try{
+    const ended=await client.end(session.id,{expected_epoch:session.control_epoch},controller.signal);if(!fresh(version))return;
+    if(ended?.id!==session.id||!REALTIME_TERMINAL.has(ended.status))throw new Error('COMMAND_UNCONFIRMED');
+    release();state.session=ended;state.status=ended.status;history();emit();
+   }catch(error){if(fresh(version)){release();state.status='failed';state.error=realtimeErrorKey(error);emit();}}
   },
   dispose(){disposed=true;release();},
  };

@@ -1,6 +1,6 @@
 # B5 Native SDK 技术联调记录（R3）
 
-日期：2026-10-30。结论：本轮独立环境的真实 LiveKit/native SDK、HTTP、媒体 worker 与只读 SQL 链路通过；**不等于浏览器、真人通话或现场设备验收**。
+日期：2026-10-30。下述R3记录限于独立环境的真实 LiveKit/native SDK、HTTP、媒体 worker与只读SQL链路；**不等于真人通话或现场设备验收**。原Dev恢复后的浏览器技术媒体进度另列文末，不用后续结果改写R3当时边界。
 
 ## 环境与证据边界
 
@@ -65,4 +65,10 @@ ACL 实测：发送前客户读取未发送 frame 返回 404；发送后客户�
 
 本轮没有 DELETE、DROP、RESET 或清空业务数据。只读 SQL 确认 R2、R3 音频、两次失败视频和成功视频共 5 个 media session 行仍保留，并通过正常 end 收口；所有 proof、失败日志和媒体证据保留。只启动并停止本轮面向 19897 的测试媒体 worker，未修改原服务配置或停止原媒体 worker。本文不把临时测试进程/前端的后续启停写成持续在线承诺。
 
-以下仍未验收：浏览器权限与 UI/浏览器 WebRTC 链路、两名真人的麦克风/摄像头/扬声器、移动端及现场终端、30 分钟持续通话、Wi-Fi/蜂窝切换、弱网与断线恢复。本记录也不证明浏览器双房切换时的扬声器防回声、权限提示或前端草稿交互；这些需独立浏览器与设备证据。
+截至R3当时，浏览器权限与UI/WebRTC链路未验收；恢复后的部分浏览器结果见下节。两名真人的麦克风/摄像头/扬声器、移动端及现场终端、30分钟持续通话、Wi-Fi/蜂窝切换、弱网与断线恢复仍未验收。本记录也不证明浏览器双房切换时的扬声器防回声、权限提示或前端草稿交互；这些需独立浏览器与设备证据。
+
+## 原 Dev 恢复后的双浏览器补验
+
+原Dev18894/API18893及原S3恢复后，独立浏览器身份已完成首轮实际双端WebRTC音视频接收（视频192帧），实际截图上传S3并生成B5 frame。媒体为明确的本地合成语音与canvas技术画面，经实际MediaStream/RTP传输；没有物理麦克风、摄像头或扬声器。浏览器证据 `work/browser-dual-media-proof.json`。
+
+抓帧后的标注编辑器被工作台后台poll关闭，不能记作浏览器编辑发送成功。对应poll/invite修复已完成定向检查；第二通实际active，frame `2116191817604976642` 后p2正常挂断complete且人工仍active；编辑器跨多轮poll/挂断保持，箭头和circle共2元素保存annotation `2116191926321336322` 为ready，可视预览及加入回复草稿通过，客服文字草稿保留。实际发送已完成，staff消息 `e0cb32f2e6ca491084e1f518f51bf2ae` 的文字和image附件在客户UI可见；source/frame/render三引用同条消息，scene2元素，三个实际S3 GET SHA匹配，证据 `work/browser-backend-proof.json`。浏览器换房转接现已完成：客户同意、目标B接听后独立新房generation2达服务端active；B实收audio409773bytes/1659packets、video100392bytes/147packets/105frames，客户audio408378bytes/1653packets。原A旧PC断开、UI禁用回复，原身份POST写403 CURRENT_ASSIGNMENT_REQUIRED；B采纳原request并可见AI/标注历史，UI回复客户可见。证据 `work/browser-transfer-proof.json`、`work/browser-stale-expert-proof.json`。45秒旧邀请过期的尝试保留；最终媒体 `2116193127137988610` ended/complete、gen2，transfer `2116193234969350145` completed；gen1/2均cleaned、12member reservation released且busy_slot为空。request仍active/HUMAN_ACTIVE、assignmentB，B消息 `a4fe6ed8394549229aab3bc193cfcc41` completed。5项delete_room queued无running lease，是cleaned墓碑15分钟补偿窗口，不代表房间未清理，也不声称全部outbox done。空video最小修复定向6/6和build通过，实际新通话active时仅1个video（320/ready4），挂断complete后video/audio均0且所有技术track ended，证据 `work/browser-dom-cleanup-proof.json`。390×844手机历史最小200px、纵向滚动后发送可达、无横向溢出；移动CSS改动build通过。这里媒体挂断后人工仍active，不把另一AI会话的文字恢复结果当成人工服务已结束。详见 [恢复与补充验收](./DEV_RECOVERY_VALIDATION_20261030.md)。

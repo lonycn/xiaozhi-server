@@ -22,12 +22,18 @@ mvn -f main/manager-api/pom.xml -DskipTests=false -Dtest='xiaozhi.modules.ai.*Te
 
 本地证据位于根workspace的 `work/omni-java-tests.log`、`work/omni-worker-tests.log`、`work/omni-dev-config-tests.log`。这些文件不含provider key或音频base64。
 
-待父代理执行：真实Dev私有上传→检查/规范化→无ASR依赖的Omni音轨+视频frame→持久回复和真实usage；模型权限、限流、真实用户重试与UI可理解的错误；取得授权的真实环境/机械声与人工专家对照。普通TTS或静音PCM通过不代表压缩机异响能力验收，非实时Omni成功也不代表Realtime可用。超出inline字节上限的长录音目前明确失败，不支持后台分段或自动摘要。
+下述原始实现验证之后，真实Dev私有上传→检查/规范化→无ASR依赖的Omni音轨+视频frame→持久回复和usage已完成，见文末恢复后r3。模型权限、限流、真实用户重试与UI可理解的错误、取得授权的真实环境/机械声与人工专家对照仍须验收。普通TTS或静音PCM通过不代表压缩机异响能力验收，非实时Omni成功也不代表Realtime可用。超出inline字节上限的长录音目前明确失败，不支持后台分段或自动摘要。
 
 ## 父任务真实链路补验
 
-主工作树已整合。原Dev实际S3录音上传→派生音轨→Omni→SSE/持久回复通过，actual usage183/175/358，input_audio_tokens44。随后Docker VM存储I/O错误中断Dev连接；备份恢复副本的新S3上传也返回STORAGE_UNAVAILABLE，因此不将后续文件系统结果称作S3验证。
+主工作树已整合。原Dev实际S3录音上传→派生音轨→Omni→SSE/持久回复通过，actual usage183/175/358，input_audio_tokens44。随后Docker VM存储I/O错误中断Dev连接；当时备份恢复副本的新S3上传也返回STORAGE_UNAVAILABLE，因此该阶段文件系统结果不称作S3验证。此故障现已恢复，当前S3结论见下节。
 
 独立API19897的私有文件系统真实链路完成录音和有声视频：录音usage183/118/301、audio44；视频含采样帧与原音轨，usage865/217/1082、audio16。两例均使用实际百炼qwen3.8-omni-flash，持久回复和SSE通过；样本为仓库音频及技术视频，不是客户/机械现场。证明work/omni-filesystem-e2e-proof.json；原Dev录音及中断记录work/omni-dev-e2e-proof.json和日志均保留。
 
 当前整合Java全量457项、AI worker39项、Dev37项通过。长音轨inline限制和现场机械声对照仍为上述明确边界。
+
+## 原 Dev/S3 恢复后 r3
+
+用户授权Docker恢复后，原Dev18894/API18893、原MySQL/Redis与18333原S3 bucket恢复，2个旧对象HEAD/GET200且字节/SHA匹配。原Dev重新完成真实上传、派生、实际Omni、SSE及持久回复：录音usage183/81/264（input_audio_tokens44），有声视频usage830/79/909（input_audio_tokens16），两例run均completed。证据 `/Users/lengwang/code/esp32/work/omni-dev-e2e-proof-r3.json`。
+
+恢复早期旧视频run重试耗尽；新r2曾因时钟回退约68ms失败，其proof及 `work/omni-dev-e2e-proof-r2-clock-failure.json` 保留，未改写为成功。r3才是恢复后Dev S3全链通过依据，见 [恢复记录](./DEV_RECOVERY_VALIDATION_20261030.md)。技术录音/视频、长音轨inline上限与真实机械声对照的边界保持。

@@ -17,3 +17,9 @@ python3 dev/manage.py realtime-disable
 `up` 在标志已启用时启动本 checkout worker，`stop` 只通过 PID 启动时间、命令和本 checkout 配置路径核验后停止它。`realtime-disable` 先发送 SIGTERM 并等待 worker 关闭，随后关 API 开关并重建 API；已有 session 和转写行保留，残留租约由 Java maintenance 异步失效，不声称关闭命令完成时所有租约已即时撤销。worker 不恢复已消费的旧会话；中断后须显式新建会话。
 
 当前交互是手动“开始录音 / 结束本段”：不是自动 VAD 或 WebRTC；摄像头仅在用户同意时发送受限 JPEG 采样帧，不是连续视频。提供方已完成一次真实音频问答，真实用量 547 tokens；这不是本 Dev 管理命令或完整浏览器链路的验收。真实浏览器麦克风、摄像头和权限、设备声音、TLS 代理、弱网与现场行为仍须单独验证；声音或图片不能单独证明设备故障或安全状态。
+
+## 2026-10-30 恢复与浏览器注意事项
+
+原Dev18894/API18893及原MySQL/Redis、S3已经恢复，当前恢复与技术媒体证据见 [恢复记录](./DEV_RECOVERY_VALIDATION_20261030.md)。麦克风权限prompt保持不限时并持续原有授权重验；权限返回后的Worklet/AudioContext/video启动各有10秒期限，取消/失败释放资源。结束先停止本地媒体，等待HTTP明确终态再关WebSocket，网络失败不显示为成功。真实浏览器39秒录音与技术画面问答、持久历史及文字草稿保持已通过；正常结束已到ended、8条技术track全停且17字草稿保留；结束后正常UI恢复B2文字实际回答“文字恢复正常”通过；已恢复原生输入，物理输入/输出仍须独立验收。
+
+若仅在Ego agent页面出现AudioWorklet加载永不返回，同页无import最小probe可区别工具暂停与产品加载失败；已知 [ego-lite #468](https://github.com/citrolabs/ego-lite/issues/468) 涉及auto-attach filter。该诊断不改变产品鉴权、权限、ready规则或媒体输入，不把工具调整写成真实麦克风/摄像头验收。

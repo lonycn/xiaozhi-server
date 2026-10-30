@@ -23,6 +23,12 @@ R2/R4保留了原ID相等规则导致的真实注入超时证据；R3遇磁盘�
 
 ## 主工作树最终补验
 
-ACK五个源码文件与验证工作树逐一SHA一致，主工作树Java全量457、Vue368+10契约、实时网络31通过。恢复副本运行最终整合JAR、独立worker18902。真实采样图问答补验见 INTEGRATION_20261030.md：同轮语音提问可正确描述技术图标；后续纯文字对旧帧的追问没有可靠视觉结果，不宣传该能力。
+ACK五个源码文件与验证工作树逐一SHA一致，主工作树Java全量457、Vue368+10契约、实时网络31通过。恢复副本当时运行最终整合JAR、独立worker18902，现备用进程已正常停止而数据/配置/manifest保留，原Dev及其worker继续运行，详见恢复记录。真实采样图问答补验见 INTEGRATION_20261030.md：同轮语音提问可正确描述技术图标；后续纯文字对旧帧的追问没有可靠视觉结果，不宣传该能力。
 
 交付的可重复E2E脚本在R6后将运行JAR由硬链接改为独立复制，先检查磁盘余量，以避免并行构建修改正在运行的文件；该小运行隔离调整通过语法检查，未重复调用provider。R6当时的JAR hash及实际成功证据保持原样。
+
+## 原 Dev 恢复后的浏览器启动与结束边界
+
+原Docker Dev18894/API18893和原MySQL/Redis、S3已恢复，见 [恢复记录](./DEV_RECOVERY_VALIDATION_20261030.md)。同一浏览器页面的无import最小Worklet probe已定位Ego工具auto-attach filter暂停worklet的问题；调整该工具filter后probe ready，未因此修改Vite/worklet导入。实际Vite dev响应是module，无importScripts，不能以classic worker错误解释本次挂起。
+
+浏览器媒体非权限启动阶段的10秒超时/取消释放、HTTP明确结束前保留WebSocket、socket-close不冒充成功及身份异步fencing已修复，5个realtime定向套件47项和build通过。权限prompt仍不限时，原有授权重验保留。23:33真实浏览器39秒录音与技术画面采样问答通过，模型正确描述青绿色正方形和深蓝背景，转写及回复持久历史可见，17字文字草稿保留。随后会话正常ended，UI确认保存并关闭本机设备，8条技术track全ended，17字草稿保留；之后reload恢复原生输入（无qaHook/captureHook），正常UI发送恢复验证文字，实际B2答“文字恢复正常”。移动overlay右边378<390，无横向溢出。技术输入不是物理麦克风、摄像头或现场声音。

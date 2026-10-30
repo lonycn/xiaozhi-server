@@ -49,7 +49,7 @@ import { isSupportAdmin, allPages, senderKey, cursorInteger } from '../utils/sup
 export default {
   name: 'SupportWorkspace',
   components: { SupportSummaryPanel, AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay },
-  data: () => ({ attachmentDrafts: {}, mediaAdopting: false, selectionController: null, profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
+  data: () => ({ attachmentDrafts: {}, mediaAdopting: false, selectionController: null, profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, historyPolling: false, historyFetchVersion: 0, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
   computed: {
     mediaUserId() { return String(store.state.userInfo?.id || store.state.userInfo?.user_id || store.state.userInfo?.userId || ''); },
     attachmentIdentity() { return attachmentIdentity(store.state); },
@@ -85,7 +85,7 @@ export default {
     senderKey,
     revokeStaff() {
       this.selectionController?.abort();
-      ++this.staffEpoch; ++this.version;
+      ++this.staffEpoch; ++this.version; ++this.historyFetchVersion; this.historyLoading = false; this.historyPolling = false;
       clearInterval(this.heartbeat); clearInterval(this.poll); this.heartbeat = null; this.poll = null;
       this.profile = null; this.accepting = false; this.queue = []; this.assigned = []; this.selected = null; this.messages = [];
       this.loading = false; this.sending = false;
@@ -146,19 +146,20 @@ export default {
       } catch (error) { if (!this.disposed) this.error = error.message; }
       finally { this.refreshBusy = false; }
     },
-    async selectRequest(request, force = false) { if (!this.profile || this.sending || this.historyLoading || (this.actionBusy && !force)) return; this.selectionController?.abort(); this.selectionController = new AbortController(); this.selected = request; this.messages = []; const version = ++this.version;
+    async selectRequest(request, force = false) { if (!this.profile || this.sending || this.historyLoading || (this.actionBusy && !force)) return; this.selectionController?.abort(); this.selectionController = new AbortController(); this.selected = request; this.messages = []; ++this.historyFetchVersion; this.historyPolling = false; const version = ++this.version;
       const title = conversationApi.detail(request.conversation_id).then(detail => { if (!this.disposed && version === this.version) this.titles[request.conversation_id] = detail.title; }).catch(error => this.verifyStaffAccess(error));
       await this.loadHistory(true); await title; },
     async loadHistory(reset) {
-      if (!this.selected || this.historyLoading) return;
-      const version = this.version, request = this.selected; this.historyLoading = true;
+      if (!this.selected || this.historyLoading || (!reset && this.historyPolling)) return;
+      const version = this.version, request = this.selected, fetchVersion = ++this.historyFetchVersion;
+      if (reset) this.historyLoading = true; else this.historyPolling = true;
       try {
         const after = reset ? '0' : (this.messages.at(-1)?.seq || '0');
         const page = await allPages(cursor => conversationApi.messages(request.conversation_id, cursor), after);
         if (version !== this.version || this.disposed) return;
         for (const message of page.items) if (!this.messages.some(item => item.id === message.id)) this.messages.push(message);
       } catch (error) { if (version === this.version) this.error = error.message; await this.verifyStaffAccess(error); }
-      finally { this.historyLoading = false; }
+      finally { if (fetchVersion === this.historyFetchVersion) { if (reset) this.historyLoading = false; else this.historyPolling = false; } }
     },
     async claim(request) {
       if (this.actionBusy || this.historyLoading || !this.profile || !this.accepting) return; this.actionBusy = true; this.error = ''; const epoch = this.staffEpoch;

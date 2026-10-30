@@ -55,7 +55,7 @@ export default {
   name:'MediaSessionOverlay', components:{ ConsentChoices },
   props:{ conversationId:{type:String,default:''}, requestId:{type:String,default:''}, identity:{type:String,default:''}, userId:{type:String,default:''}, staff:Boolean, writable:Boolean },
   emits:['changed','frame'],
-  data:() => ({ state:{session:null,joined:false,busy:false,error:'',localState:'disconnected'}, controller:null, io:null, timer:null, epoch:0, disposed:false, pollBusy:false, available:false, unavailable:false, invitations:[], lastTransfer:null, inviting:false, hidden:false, minimized:false, hasVideo:false, choice:emptyChoice(), targetId:'', experts:[], localError:'', captureBusy:false, captureController:null, createId:'', createSignature:'', transferId:'', transferSignature:'', capturePending:null }),
+  data:() => ({ state:{session:null,joined:false,busy:false,error:'',localState:'disconnected'}, controller:null, io:null, timer:null, epoch:0, disposed:false, pollBusy:false, available:false, unavailable:false, invitations:[], lastTransfer:null, inviting:false, hidden:false, minimized:false, hasVideo:false, choice:emptyChoice(), targetId:'', experts:[], localError:'', captureBusy:false, captureController:null, createId:'', createSignature:'', createTerminalId:'', transferId:'', transferSignature:'', capturePending:null }),
   computed:{
     terminal() { return MEDIA_TERMINAL.has(this.state.session?.status); }, liveSession() { return this.state.session && !this.terminal; },
     own() { return this.state.session?.participants?.find(p => String(p.user_id) === this.userId && p.room_generation === this.state.session.current_generation); },
@@ -76,7 +76,7 @@ export default {
   beforeUnmount(){this.disposed=true;clearInterval(this.timer);this.io?.abort();this.captureController?.abort();this.controller?.dispose();},
   methods:{
     reset(){
-      ++this.epoch;this.io?.abort();this.captureController?.abort();this.io=markRaw(new AbortController());this.controller?.dispose();this.pollBusy=false;this.captureBusy=false;this.capturePending=null;this.invitations=[];this.lastTransfer=null;this.choice=emptyChoice();this.createId='';this.createSignature='';this.transferId='';this.transferSignature='';this.inviting=false;this.hidden=false;this.hasVideo=false;this.localError='';
+      ++this.epoch;this.io?.abort();this.captureController?.abort();this.io=markRaw(new AbortController());this.controller?.dispose();this.pollBusy=false;this.captureBusy=false;this.capturePending=null;this.invitations=[];this.lastTransfer=null;this.choice=emptyChoice();this.createId='';this.createSignature='';this.createTerminalId='';this.transferId='';this.transferSignature='';this.inviting=false;this.hidden=false;this.hasVideo=false;this.localError='';
       this.controller=markRaw(createMediaSession({client:mediaApi,userId:()=>this.userId,changed:state=>{const previous=this.state.session,next=state.session;if(previous?.pending_transfer&&!next?.pending_transfer)this.refreshTransfer(previous.pending_transfer.id);if(next?.pending_transfer)this.lastTransfer=null;if(previous&&(!next||previous.id!==next.id||previous.current_generation!==next.current_generation||previous.control_epoch!==next.control_epoch||MEDIA_TERMINAL.has(next.status)||state.error==='media.denied'||(this.state.joined&&!state.joined))){this.captureController?.abort();this.capturePending=null;this.captureBusy=false;}this.state=state;this.hasVideo=state.hasVideo;this.$emit('changed',state.session);},onTrack:(element,track)=>{this.$refs.mediaHost?.appendChild(element);if(track.kind==='video')this.hasVideo=true;}}));
       this.state=this.controller.snapshot();clearInterval(this.timer);this.timer=this.userId?setInterval(() => this.poll(),2500):null;this.poll();
     },
@@ -92,7 +92,17 @@ export default {
       finally{if(epoch===this.epoch)this.pollBusy=false;}
     },
     async openInvitation(invite){const epoch=this.epoch;try{const session=await mediaApi.get(invite.session_id,this.io.signal);if(epoch!==this.epoch)return;await this.controller.load(session);this.choice=emptyChoice();this.hidden=false;this.minimized=false;}catch(error){if(epoch===this.epoch)this.localError=mediaErrorKey(error);}},
-    async invite(){if(!this.choice.microphone||!this.requestId)return;const signature=JSON.stringify([this.requestId,this.choice]);if(this.createSignature!==signature){this.createId=crypto.randomUUID();this.createSignature=signature;}await this.controller.create(this.requestId,this.choice,this.createId);if(!this.state.error){this.inviting=false;this.hidden=false;}},
+    async invite(){
+      if(!this.choice.microphone||!this.requestId)return;
+      // The controller clears a terminal session before creating. Retain its ID
+      // across an uncertain response so a retry remains the same create intent.
+      const terminalId=this.terminal ? this.state.session.id : (!this.state.session ? this.createTerminalId : '');
+      const signature=JSON.stringify([this.requestId,this.choice,terminalId]);
+      if(this.createSignature!==signature){this.createId=crypto.randomUUID();this.createSignature=signature;this.createTerminalId=terminalId;}
+      const epoch=this.epoch,controller=this.controller;
+      await controller.create(this.requestId,this.choice,this.createId);
+      if(epoch===this.epoch && controller===this.controller && !this.state.error){this.inviting=false;this.hidden=false;}
+    },
     async accept(){await this.controller.accept(this.choice);},
     async refreshTransfer(id){const epoch=this.epoch;try{const transfer=await mediaApi.transferGet(id,this.io.signal);if(epoch===this.epoch)this.lastTransfer=transfer;}catch(error){if(epoch===this.epoch&&error.name!=='AbortError')this.localError=mediaErrorKey(error);}},
     async loadExperts(){const epoch=this.epoch;try{const items=[];let after='0',more=true;while(more){const page=await mediaApi.experts(after,this.io.signal);if(epoch!==this.epoch)return;items.push(...page.items);more=page.has_more;if(more&&(!/^\d+$/.test(String(page.next_cursor))||BigInt(page.next_cursor)<=BigInt(after)))throw new Error('INVALID_CURSOR');after=String(page.next_cursor);}this.experts=items;}catch(error){if(epoch===this.epoch&&error.name!=='AbortError')this.localError=mediaErrorKey(error);}},

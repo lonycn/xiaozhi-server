@@ -386,7 +386,8 @@ textarea::placeholder { color: #a1aabc; }
   .workspace-header { padding: 0 16px; height: 58px; flex-basis: 58px; }
   .workspace-brand { gap: 8px; font-size: 16px; }
   .brand-icon { width: 28px; height: 28px; font-size: 19px; }
-  .workspace-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: 160px minmax(0, 1fr); }
+  .workspace-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: 160px minmax(min-content, 1fr); overflow-y: auto; overflow-x: hidden; }
+  .conversation-panel { min-height: min-content; }
   .conversation-sidebar { position: relative; border-right: 0; border-bottom: 1px solid #e6ebf3; padding: 10px 16px; }
   .sidebar-heading { padding: 0 0 5px; }
   .new-conversation { position: absolute; right: 16px; top: 9px; padding: 6px 12px; font-size: 12px; }
@@ -397,9 +398,9 @@ textarea::placeholder { color: #a1aabc; }
   .panel-heading { padding: 13px 18px; }
   h1 { font-size: 15px; }
   .panel-heading p { font-size: 11px; }
-  .message-list { padding: 18px 15px; }
+  .message-list { flex: 1 0 200px; min-height: 200px; box-sizing: border-box; padding: 18px 15px; }
   .message-content { max-width: 85%; }
-  .composer-area { padding: 0 14px 14px; }
+  .composer-area { flex-shrink: 0; padding: 0 14px 14px; }
   .keyboard-hint { display: none; }
   .workspace-error { margin: 10px 14px 0; }
   .welcome-state { padding: 10px; }

@@ -105,6 +105,18 @@ export default {
       if (this.current(op) && this.source?.kind === 'image' && !this.frame) await this.capture();
       this.$nextTick(() => this.$refs.dialog?.focus());
     },
+    async openFrame(frameId) {
+      if (!this.canWrite || !this.conversationId) return;
+      this.remember(); this.releaseImages(); this.activeContext = this.context; this.draftKey = `${this.context}:live-frame:${frameId}`;
+      const op = this.begin(); this.visible = true; this.source = null; this.frame = null; this.scene = null; this.saved = null; this.history = null; this.framePending = null; this.annotationPending = null; this.savedSignature = ''; this.requiresCopy = false; this.label = this.$t('annotations.defaultLabel');
+      await this.finish(op, async () => {
+        const frame = await annotationApi.frame(frameId, op.controller.signal); if (!this.current(op)) return;
+        if (frame.conversation_id !== this.conversationId) throw new Error('INVALID_SOURCE');
+        this.frame = frame; await this.pollFrame(op); if (!this.current(op) || this.frame.status !== 'ready') return;
+        this.installScene(emptyScene(this.frame)); await this.loadBackground(op);
+      });
+      this.$nextTick(() => this.$refs.dialog?.focus());
+    },
     async capture() {
       if (!this.canWrite || !this.source || this.busy) return;
       if (this.source.kind === 'video' && (!Number.isInteger(this.requestedTimeMs) || this.requestedTimeMs < 0 || this.requestedTimeMs >= this.source.metadata?.duration_ms)) { this.error = 'annotations.invalidTime'; return; }

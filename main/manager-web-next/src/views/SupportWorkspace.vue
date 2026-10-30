@@ -1,6 +1,7 @@
 <template>
   <section class="support-workspace">
     <header><h1>{{ $t('support.workspace') }}</h1></header>
+    <MediaSessionOverlay v-if="profile" :conversation-id="selected?.conversation_id || ''" :request-id="active ? selected.request_id : ''" :identity="attachmentIdentity" :user-id="mediaUserId" staff :writable="active" @changed="mediaChanged" @frame="openLiveFrame" />
     <AnnotationEditor ref="annotationEditor" :conversation-id="selected?.conversation_id || ''" :scope-key="attachmentScope" :identity="attachmentIdentity" :writable="active" :disabled="sending || actionBusy || historyLoading" @ready="stageAnnotation" />
     <el-alert v-if="error" :title="error" type="error" show-icon @close="error = ''" />
     <p v-if="loading" role="status">{{ $t('support.loading') }}</p>
@@ -34,6 +35,7 @@
   </section>
 </template>
 <script>
+import MediaSessionOverlay from '../components/MediaSessionOverlay.vue';
 import AnnotationEditor from '../components/AnnotationEditor.vue';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
 import AttachmentPart from '../components/AttachmentPart.vue';
@@ -44,9 +46,10 @@ import store from '../store';
 import { isSupportAdmin, allPages, senderKey, cursorInteger } from '../utils/support.mjs';
 export default {
   name: 'SupportWorkspace',
-  components: { AttachmentComposer, AttachmentPart, AnnotationEditor },
-  data: () => ({ attachmentDrafts: {}, selectionController: null, profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
+  components: { AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay },
+  data: () => ({ attachmentDrafts: {}, mediaAdopting: false, selectionController: null, profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
   computed: {
+    mediaUserId() { return String(store.state.userInfo?.id || store.state.userInfo?.user_id || store.state.userInfo?.userId || ''); },
     attachmentIdentity() { return attachmentIdentity(store.state); },
     attachmentScope() { return `${this.attachmentIdentity}:${this.selected?.conversation_id || ''}:${this.selected?.request_id || ''}`; },
     attachmentRows: { get() { return this.attachmentDrafts[this.selected?.request_id] || []; }, set(value) { if (this.selected) this.attachmentDrafts[this.selected.request_id] = value; } },
@@ -66,6 +69,8 @@ export default {
   },
   beforeUnmount() { this.disposed = true; this.selectionController?.abort(); this.version++; clearInterval(this.heartbeat); clearInterval(this.poll); if (this.profile) supportApi.presence(false).catch(() => {}); },
   methods: {
+    async mediaChanged(session) { if (!session || session.agent_user_id !== this.mediaUserId || this.selected?.request_id === session.request_id || !this.profile || this.mediaAdopting) return; this.mediaAdopting = true; try { await this.refresh(); const request = this.assigned.find(item => item.request_id === session.request_id); if (request) await this.selectRequest(request); } finally { this.mediaAdopting = false; } },
+    openLiveFrame({ frame, conversationId }) { if (conversationId === this.selected?.conversation_id) this.$refs.annotationEditor?.openFrame(frame.id); },
     openAnnotation(source) { this.$refs.annotationEditor?.openSource(source); },
     openAnnotationSnapshot(id) { this.$refs.annotationEditor?.openSnapshot(id); },
     stageAnnotation({ scopeKey, row }) {

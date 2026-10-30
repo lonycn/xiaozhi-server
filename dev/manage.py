@@ -14,6 +14,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from urllib.parse import urlsplit
 
 DEV = Path(__file__).resolve().parent
@@ -89,6 +90,15 @@ def configure():
             properties["features.annotations-enabled"] = "true"
         if media.get("vision_model"):
             properties["ai.execution.vision-model"] = media["vision_model"]
+    rtc = rtc_settings()
+    if rtc.get("room-prefix"):
+        validate_rtc(rtc)
+        for name in ("internal-url", "public-url", "api-key", "api-secret", "room-prefix"):
+            properties["support-media.livekit." + name] = rtc[name]
+    if rtc.get("enabled") is True:
+        if not rtc.get("room-prefix"):
+            raise RuntimeError("RTC enabled without private configuration")
+        properties["features.support-media-enabled"] = "true"
     (RUNTIME / "application-dev.properties").write_text("\n".join(f"{key}={value}" for key, value in properties.items()) + "\n")
     for name in ("credentials.json", "compose.env", "application-dev.properties"):
         (RUNTIME / name).chmod(0o600)
@@ -119,6 +129,101 @@ def media_settings():
     if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
         raise RuntimeError("Invalid media settings")
     return data
+
+
+def rtc_settings():
+    path = RUNTIME / "rtc-settings.json"
+    if not path.exists():
+        return {"enabled": False}
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
+        raise RuntimeError("Invalid RTC settings")
+    return data
+
+
+def rtc_endpoint(value, schemes, docker_loopback=False):
+    if not isinstance(value, str) or not value or any(ord(c) < 33 or ord(c) == 127 or c == "\\" for c in value):
+        raise RuntimeError("Invalid RTC endpoint")
+    try:
+        parsed = urlsplit(value)
+        if (parsed.scheme not in schemes or not parsed.hostname or parsed.username or parsed.password
+                or parsed.query or parsed.fragment or ".." in parsed.path):
+            raise ValueError()
+        port = parsed.port
+        if docker_loopback and parsed.hostname in ("127.0.0.1", "localhost", "::1"):
+            parsed = parsed._replace(netloc="host.docker.internal" + (":" + str(port) if port else ""))
+        return parsed.geturl()
+    except ValueError:
+        raise RuntimeError("Invalid RTC endpoint") from None
+
+
+def validate_rtc(settings):
+    rtc_endpoint(settings.get("internal-url"), {"http", "https"})
+    rtc_endpoint(settings.get("public-url"), {"ws", "wss"})
+    for name, maximum in (("api-key", 256), ("api-secret", 2048)):
+        value = settings.get(name)
+        if (not isinstance(value, str) or not value or len(value) > maximum
+                or any(ord(c) < 33 or ord(c) == 127 or c == "\\" for c in value)):
+            raise RuntimeError("Invalid RTC credentials")
+    import re
+    if not isinstance(settings.get("room-prefix"), str) or not re.fullmatch(r"[A-Za-z0-9_-]{2,47}-", settings["room-prefix"]):
+        raise RuntimeError("Invalid RTC room prefix")
+
+
+def enable_rtc(env_path=None, public_url=None):
+    previous = rtc_settings()
+    if env_path:
+        values = {}
+        for line in Path(env_path).read_text().splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            key, sep, value = stripped.partition("=")
+            if sep and key in ("LIVEKIT_INTERNAL_URL", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"):
+                if key in values:
+                    raise RuntimeError("Duplicate RTC configuration field")
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                    value = value[1:-1]
+                if value.startswith(("\"", "'")) or value.endswith(("\"", "'")):
+                    raise RuntimeError("Invalid RTC configuration field")
+                values[key] = value
+        internal = rtc_endpoint(values.get("LIVEKIT_INTERNAL_URL"), {"http", "https"}, True)
+        source_public = values.get("LIVEKIT_URL")
+        key, secret = values.get("LIVEKIT_API_KEY"), values.get("LIVEKIT_API_SECRET")
+    elif all(previous.get(k) for k in ("internal-url", "public-url", "api-key", "api-secret")):
+        internal, source_public = previous["internal-url"], previous["public-url"]
+        key, secret = previous["api-key"], previous["api-secret"]
+    else:
+        raise RuntimeError("RTC requires --rtc-env with private LiveKit configuration")
+    public = rtc_endpoint(public_url or source_public, {"ws", "wss", "http", "https"})
+    parsed = urlsplit(public)
+    public = parsed._replace(scheme={"http": "ws", "https": "wss"}.get(parsed.scheme, parsed.scheme)).geturl()
+    if previous.get("room-prefix") and any(previous.get(k) != v for k, v in (("internal-url", internal), ("api-key", key), ("api-secret", secret))):
+        raise RuntimeError("Refusing to redirect existing RTC rooms or credentials")
+    config = {"enabled": True, "internal-url": internal, "public-url": public,
+              "api-key": key, "api-secret": secret,
+              "room-prefix": previous.get("room-prefix") or "xz-b5-" + secrets.token_hex(12) + "-"}
+    validate_rtc(config)
+    private_json("rtc-settings.json", config)
+
+
+def disable_rtc():
+    settings = rtc_settings()
+    if settings.get("enabled") is True:
+        # The next API must contain the independently gated drain controller; an old
+        # JAR would disable maintenance along with the public endpoints.
+        jar = API / "target/xiaozhi-esp32-api.jar"
+        marker = "BOOT-INF/classes/xiaozhi/modules/supportmedia/MediaDrainController.class"
+        try:
+            with zipfile.ZipFile(jar) as archive:
+                if marker not in archive.namelist():
+                    raise RuntimeError("RTC disable requires a built API with drain support")
+        except (OSError, zipfile.BadZipFile):
+            raise RuntimeError("RTC disable requires a built API with drain support") from None
+        validate_rtc(settings)
+        settings["enabled"] = False
+        private_json("rtc-settings.json", settings)
 
 
 def set_annotations_enabled(enabled):
@@ -480,13 +585,15 @@ def stop_process(find_process, filename):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
     parser.add_argument("--storage", choices=["filesystem", "s3"])
     parser.add_argument("--storage-env", help="Existing private S3 configuration file; no bucket creation")
     parser.add_argument("--vision-model", help="Previously verified Bailian vision model for this Dev workspace")
     parser.add_argument("--omni-model", help="Explicit non-realtime qwen3.8-omni-flash; empty disables raw sound analysis")
+    parser.add_argument("--rtc-env", help="Existing private LiveKit configuration file")
+    parser.add_argument("--rtc-public-url", help="Client-reachable LiveKit URL")
     args = parser.parse_args()
     configure()
     if args.action == "media-enable":
@@ -524,6 +631,18 @@ def main():
         settings = media_settings()
         print("Annotations enabled:", settings.get("enabled") is True and settings.get("annotations_enabled") is True)
         print("Media enabled:", settings.get("enabled") is True)
+    elif args.action == "rtc-enable":
+        enable_rtc(args.rtc_env, args.rtc_public_url)
+        configure()
+        recreate_api()
+        print("RTC enabled")
+    elif args.action == "rtc-disable":
+        disable_rtc()
+        configure()
+        recreate_api()
+        print("RTC disabled; room cleanup continues asynchronously when configured")
+    elif args.action == "rtc-status":
+        print("RTC enabled:", rtc_settings().get("enabled") is True)
     elif args.action == "ai-enable":
         model = export_ai_config() if args.omni_model is None else export_ai_config(args.omni_model)
         stop_process(ai_process, "ai-worker-process.json")

@@ -31,6 +31,12 @@ public class SupportService {
     private final TransactionTemplate transactions;
     private final ConversationService conversations;
     private xiaozhi.modules.ai.AiExecutionService aiExecution;
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.supportmedia.SupportMediaHooks> mediaProvider;
+    private xiaozhi.modules.supportmedia.SupportMediaHooks mediaForTests;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setMediaProvider(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.supportmedia.SupportMediaHooks> provider){this.mediaProvider=provider;}
+    public void setMediaHooksForTests(xiaozhi.modules.supportmedia.SupportMediaHooks hooks){this.mediaForTests=hooks;}
+    private xiaozhi.modules.supportmedia.SupportMediaHooks media(){return mediaForTests!=null?mediaForTests:mediaProvider==null?null:mediaProvider.getIfAvailable();}
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAiExecution(xiaozhi.modules.ai.AiExecutionService service) { this.aiExecution = service; }
@@ -61,6 +67,7 @@ public class SupportService {
                     capacity_text=VALUES(capacity_text),
                     accepting=IF(VALUES(enabled)=1,accepting,0),updated_at=CURRENT_TIMESTAMP(3)
                     """, userId, body.role(), body.enabled(), body.capacityText());
+            if(media()!=null)media().accountChanged(userId);
             return rawProfile(userId, false);
         });
     }
@@ -219,6 +226,7 @@ public class SupportService {
             // A locking read sees latest commits even under MySQL REPEATABLE READ.
             int occupied = jdbc.queryForList(
                     "SELECT id FROM support_assignment WHERE agent_user_id=? AND released_at IS NULL FOR UPDATE", user).size();
+            if(media()!=null)occupied+=media().reservedTextSlots(user);
             if (occupied >= agent.capacityText()) throw problem(409, "AGENT_AT_CAPACITY");
             jdbc.update("INSERT INTO support_assignment(id,request_id,conversation_id,agent_user_id) VALUES (?,?,?,?)",
                     id(), requestId, req.conversationId(), user);
@@ -327,6 +335,7 @@ public class SupportService {
     }
 
     private void release(Request req) {
+        if(media()!=null)media().responsibilityEnded(req.requestId());
         Conv conv = conversation(req.conversationId(), true);
         jdbc.update("""
                 UPDATE support_assignment SET released_at=CURRENT_TIMESTAMP(3),read_through_seq=?,read_through_event_seq=?

@@ -250,3 +250,44 @@ describe('AI retry and message ordering', () => {
     expect(vm.messages.map(message => message.id)).toEqual(['u', 'm']);
   });
 });
+
+describe('B3 mixed message drafts', () => {
+  const evidence = (id, kind = 'image', status = 'ready') => ({ kind, clientUploadId: `upload-${id}`, status, file: { name: 'evidence' }, attachment: { id, status } });
+  it('sends text and ordered attachments as one message with stable retry identity', async () => {
+    vm.selected = { id: 'c', state: 'AI_ACTIVE' }; vm.draft = '现场证据'; vm.attachmentRows = [evidence('9007199254740993', 'video'), evidence('2', 'file')];
+    api.send.mockRejectedValueOnce(new Error('断开')).mockResolvedValueOnce({ id: 'm', seq: '1', parts: [] });
+    await vm.sendMessage(); const payload = api.send.mock.calls[0][1];
+    expect(payload.parts).toEqual([{ type: 'text', text: '现场证据' }, { type: 'video', attachment_id: '9007199254740993' }, { type: 'file', attachment_id: '2' }]);
+    expect(vm.draft).toBe('现场证据'); expect(vm.attachmentRows).toHaveLength(2);
+    await vm.sendMessage(); expect(api.send.mock.calls[1][1]).toEqual(payload); expect(vm.attachmentRows).toEqual([]); expect(vm.draft).toBe('');
+  });
+  it('does not send text alone while media is checking or failed', async () => {
+    vm.selected = { id: 'c' }; vm.draft = '保留整条消息'; vm.attachmentRows = [evidence('9','image','processing')]; await vm.sendMessage();
+    vm.attachmentRows[0].status = 'failed'; await vm.sendMessage(); expect(api.send).not.toHaveBeenCalled(); expect(vm.draft).toBe('保留整条消息');
+  });
+  it('supports ready attachment-only messages', async () => {
+    vm.selected = { id: 'c' }; vm.attachmentRows = [evidence('9')]; api.send.mockResolvedValue({ id: 'm', parts: [] }); await vm.sendMessage();
+    expect(api.send.mock.calls[0][1].parts).toEqual([{ type: 'image', attachment_id: '9' }]);
+  });
+  it('preserves pending idempotency keys across another conversation send', async () => {
+    vm.selected = { id: 'old' }; vm.draft = 'old text'; vm.attachmentRows = [evidence('9')]; api.send.mockRejectedValueOnce(new Error('unknown')).mockResolvedValueOnce({ id: 'other', parts: [] }).mockResolvedValueOnce({ id: 'old-message', parts: [] });
+    await vm.sendMessage(); const first = api.send.mock.calls[0][1].client_message_id;
+    vm.selected = { id: 'new' }; vm.draft = 'other'; await vm.sendMessage(); vm.selected = { id: 'old' }; await vm.sendMessage();
+    expect(api.send.mock.calls[2][1].client_message_id).toBe(first); expect(vm.attachmentDrafts.old).toEqual([]);
+  });
+});
+
+describe('B3 identity isolation', () => {
+  it('aborts the old identity list request and rejects its late response', async () => {
+    await Promise.resolve(); vm.loadingList = false;
+    const pending = deferred(); api.list.mockReturnValueOnce(pending.promise); const loading = vm.loadConversations();
+    const signal = api.list.mock.calls.at(-1)[1]; vm.conversations = [{ id: 'old', title: 'private' }]; vm.resetIdentity(); expect(signal.aborted).toBe(true);
+    pending.resolve({ items: [{ id: 'old', title: 'private' }], has_more: false, next_cursor: 0 }); await loading;
+    expect(vm.conversations).toEqual([]); expect(vm.selected).toBeNull();
+  });
+  it('rejects a late create response after an identity change', async () => {
+    const pending = deferred(); api.create.mockReturnValueOnce(pending.promise); vm.newTitle = 'old account title'; const creating = vm.createConversation();
+    const signal = api.create.mock.calls[0][1]; vm.resetIdentity(); expect(signal.aborted).toBe(true);
+    pending.resolve({ id: 'private', title: 'old account title' }); await creating; expect(vm.selected).toBeNull(); expect(vm.creating).toBe(false);
+  });
+});

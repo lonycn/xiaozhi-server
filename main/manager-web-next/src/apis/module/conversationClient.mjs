@@ -45,8 +45,8 @@ export function createConversationClient({ baseUrl, getToken, onUnauthorized, fe
     events: (id, after = 0, signal) => request(`/${encodeURIComponent(id)}/events?after=${after}&limit=100`, { signal }),
     handoff: (id, payload) => request(`/${encodeURIComponent(id)}/handoff`, { method: 'POST', body: JSON.stringify(payload) }),
     resume: id => request(`/${encodeURIComponent(id)}/resume-ai`, { method: 'POST', body: '{}' }),
-    list: (before = 0) => request(`?before=${before}&limit=50`),
-    create: title => request('', { method: 'POST', body: JSON.stringify({ title }) }),
+    list: (before = 0, signal) => request(`?before=${before}&limit=50`, { signal }),
+    create: (title, signal) => request('', { method: 'POST', body: JSON.stringify({ title }), signal }),
     messages: (id, after = 0, signal) => request(`/${encodeURIComponent(id)}/messages?after=${after}&limit=100`, { signal }),
     send: (id, payload, signal) => request(`/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify(payload), signal }),
   };

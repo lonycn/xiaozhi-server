@@ -69,6 +69,8 @@ def configure():
             if omni != "qwen3.8-omni-flash":
                 raise RuntimeError("Unsupported Omni model")
             properties["ai.execution.omni-model"] = omni
+    if summary_settings().get("enabled") is True and settings.get("enabled") is True:
+        properties["features.support-summary-assistance-enabled"] = "true"
     media = media_settings()
     if media.get("enabled") is True:
         worker_key = (RUNTIME / "media-worker-key").read_text().strip()
@@ -127,6 +129,99 @@ def ai_settings():
     if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
         raise RuntimeError("Invalid AI settings")
     return data
+
+
+def summary_settings():
+    path = RUNTIME / "summary-settings.json"
+    if not path.exists():
+        return {"enabled": False}
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or type(data.get("enabled")) is not bool:
+        raise RuntimeError("Invalid summary assistance settings")
+    return data
+
+
+def summary_jar_check():
+    marker = "BOOT-INF/classes/xiaozhi/modules/supportsummary/SupportAssistanceService.class"
+    try:
+        with zipfile.ZipFile(API / "target/xiaozhi-esp32-api.jar") as archive:
+            if marker not in archive.namelist():
+                raise RuntimeError("Summary assistance requires a freshly built API")
+    except (OSError, zipfile.BadZipFile):
+        raise RuntimeError("Summary assistance requires a freshly built API") from None
+
+
+def prepare_summary():
+    summary_jar_check()
+    if ai_settings().get("enabled") is not True:
+        raise RuntimeError("Enable the configured AI worker before summary assistance")
+    summary_python()
+    export_ai_config()
+    private_json("summary-settings.json", {"enabled": True})
+
+
+def summary_process():
+    path = RUNTIME / "summary-worker-process.json"
+    if not path.exists():
+        return None
+    try:
+        info = json.loads(path.read_text())
+        pid = info["pid"]
+        if type(pid) is not int or pid <= 1 or not info["identity"] or process_identity(pid) != info["identity"]:
+            return None
+        command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        args = shlex.split(command)
+        if not any(args[i:i + 2] == ["-m", "ai_worker.summary"] for i in range(len(args) - 1)):
+            return None
+        if not any(args[i:i + 2] == ["--config", str(RUNTIME / "ai-worker.json")] for i in range(len(args) - 1)):
+            return None
+        return info
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def summary_python():
+    python = os.environ.get("XIAOZHI_AI_WORKER_PYTHON", str(ROOT.parent / ".venv/bin/python"))
+    try:
+        subprocess.run([python, "-c", "import openai, httpx, ai_worker.summary"], cwd=ROOT / "main/xiaozhi-server", check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Summary assistance requires a prepared AI worker environment") from None
+    return python
+
+
+def start_summary_worker():
+    if summary_process():
+        return
+    if summary_settings().get("enabled") is not True or ai_settings().get("enabled") is not True:
+        raise RuntimeError("Summary assistance and AI must both be enabled")
+    config = RUNTIME / "ai-worker.json"
+    if not config.is_file() or config.stat().st_mode & 0o077:
+        raise RuntimeError("Summary assistance requires the private AI worker configuration")
+    python = summary_python()
+    with (RUNTIME / "summary-worker.log").open("a") as log:
+        process = subprocess.Popen([python, "-m", "ai_worker.summary", "--config", str(config)],
+                                   cwd=ROOT / "main/xiaozhi-server", stdout=log, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+    identity = process_identity(process.pid)
+    if not identity:
+        raise RuntimeError("Summary worker exited; inspect dev/.runtime/summary-worker.log")
+    private_json("summary-worker-process.json", {"pid": process.pid, "identity": identity})
+
+
+def stop_summary_worker():
+    path = RUNTIME / "summary-worker-process.json"
+    if not path.exists():
+        return
+    info = summary_process()
+    if info:
+        os.killpg(info["pid"], signal.SIGTERM)
+        path.unlink()
+        return
+    stored = json.loads(path.read_text())
+    if type(stored.get("pid")) is int and process_identity(stored["pid"]):
+        raise RuntimeError("Summary worker process identity mismatch; refusing to stop")
+    path.unlink()
 
 
 def media_settings():
@@ -771,7 +866,7 @@ def stop_process(find_process, filename):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status", "summary-enable", "summary-disable", "summary-status"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
     parser.add_argument("--storage", choices=["filesystem", "s3"])
@@ -783,7 +878,25 @@ def main():
     parser.add_argument("--realtime-public-url", help="Client-reachable realtime WebSocket URL")
     args = parser.parse_args()
     configure()
-    if args.action == "media-enable":
+    if args.action == "summary-enable":
+        if args.build:
+            build()
+        prepare_summary()
+        stop_summary_worker()
+        configure()
+        recreate_api()
+        start_summary_worker()
+        print("Internal summary assistance enabled; customer messages are never sent automatically")
+    elif args.action == "summary-disable":
+        stop_summary_worker()
+        private_json("summary-settings.json", {"enabled": False})
+        configure()
+        recreate_api()
+        print("Summary assistance disabled; revisions and task records retained")
+    elif args.action == "summary-status":
+        print("Summary assistance enabled:", summary_settings().get("enabled") is True and ai_settings().get("enabled") is True)
+        print("Summary worker running:", bool(summary_process()))
+    elif args.action == "media-enable":
         export_media_config(args.storage, args.storage_env, args.vision_model)
         stop_process(media_process, "media-worker-process.json")
         if ai_settings().get("enabled") is True:
@@ -856,6 +969,7 @@ def main():
         print("Realtime worker running:", bool(realtime_process()))
     elif args.action == "ai-enable":
         model = export_ai_config() if args.omni_model is None else export_ai_config(args.omni_model)
+        stop_summary_worker()
         stop_process(ai_process, "ai-worker-process.json")
         settings = {"enabled": True, "model": model}
         omni = ai_settings().get("omni_model", "") if args.omni_model is None else args.omni_model
@@ -864,10 +978,13 @@ def main():
         configure()
         recreate_api()
         start_ai_worker()
+        if summary_settings().get("enabled") is True:
+            start_summary_worker()
         start_candidate()
         wait_http(CANDIDATE_URL)
         print("AI enabled; Vue 3:", CANDIDATE_URL + "/#/conversations")
     elif args.action == "ai-disable":
+        stop_summary_worker()
         stop_process(ai_process, "ai-worker-process.json")
         settings = ai_settings()
         settings["enabled"] = False
@@ -909,6 +1026,8 @@ def main():
             seed_local_console()
         if realtime_settings().get("enabled") is True:
             realtime_jar_check()
+        if summary_settings().get("enabled") is True and ai_settings().get("enabled") is True:
+            summary_jar_check()
         stage_api_jar()
         compose("up", "-d", "--force-recreate", "api")
         print("Waiting for Dev API…", flush=True)
@@ -917,6 +1036,8 @@ def main():
             start_media_worker()
         if ai_settings().get("enabled") is True:
             start_ai_worker()
+            if summary_settings().get("enabled") is True:
+                start_summary_worker()
         if realtime_settings().get("enabled") is True:
             start_realtime_worker()
         start_candidate()
@@ -924,6 +1045,7 @@ def main():
         wait_http(CANDIDATE_URL)
         print(CANDIDATE_URL + "/#/conversations", flush=True)
     elif args.action == "stop":
+        stop_summary_worker()
         stop_realtime_worker()
         stop_process(media_process, "media-worker-process.json")
         stop_process(ai_process, "ai-worker-process.json")

@@ -24,10 +24,12 @@ class SupportSummaryPersistenceTest {
     static ConversationService conversations;
     static SupportService support;
     static SupportSummaryService summaries;
-    @BeforeAll static void initialize()throws Exception {
-        String url=System.getenv("SUMMARY_TEST_JDBC_URL");
+    @BeforeAll static void initialize(TestInfo info)throws Exception {
+        boolean assistance=info.getTestClass().map(type->type==SupportAssistancePersistenceTest.class).orElse(false);
+        String prefix=assistance?"SUMMARY_ASSISTANCE_TEST":"SUMMARY_TEST";
+        String url=System.getenv(prefix+"_JDBC_URL");
         if(!url.matches("jdbc:mysql://127\\.0\\.0\\.1:34776/xiaozhi_summary_test_[a-z0-9_]+(\\?.*)?"))throw new IllegalArgumentException("Fresh isolated loopback schema required");
-        var source=new DriverManagerDataSource(url,"root",System.getenv("SUMMARY_TEST_DB_PASSWORD")); jdbc=new JdbcTemplate(source);
+        var source=new DriverManagerDataSource(url,"root",System.getenv(prefix+"_DB_PASSWORD")); jdbc=new JdbcTemplate(source);
         jdbc.execute("CREATE TABLE sys_user(id BIGINT PRIMARY KEY,status TINYINT NOT NULL,super_admin TINYINT NOT NULL DEFAULT 0,username VARCHAR(80))");
         jdbc.execute("CREATE TABLE ai_agent(id VARCHAR(32) PRIMARY KEY,user_id BIGINT)");
         jdbc.execute("CREATE TABLE ai_agent_chat_history(id BIGINT PRIMARY KEY,content VARCHAR(100))");

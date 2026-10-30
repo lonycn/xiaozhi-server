@@ -75,6 +75,7 @@ features:
   support-media-enabled: false
   external-identity-enabled: false
   realtime-ai-enabled: false
+  support-summary-assistance-enabled: false
 
 # Worker credential is dedicated to this execution protocol and never a user/server token.
 ai:

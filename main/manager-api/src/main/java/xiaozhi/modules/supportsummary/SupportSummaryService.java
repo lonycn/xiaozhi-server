@@ -116,7 +116,19 @@ public class SupportSummaryService {
             return insert(conversation,body.baseVersion(),"staff_edit",user,current.lastSeq(),jdbc.queryForObject("SELECT source_truncated FROM support_summary_revision WHERE conversation_id=? AND version=? FOR UPDATE",Boolean.class,conversation,body.baseVersion()),body.fields());
         });
     }
-    private void validate(String conversation,long through,Map<String,List<Item>> fields) {
+    void validateModel(String conversation,long through,Map<String,List<Item>> fields) { validate(conversation,through,fields,true); }
+    private void validate(String conversation,long through,Map<String,List<Item>> fields) { validate(conversation,through,fields,false); }
+    private void validate(String conversation,long through,Map<String,List<Item>> fields,boolean model) {
+        if(fields==null||!fields.keySet().equals(new HashSet<>(FIELDS)))throw problem(400,"INVALID_SUMMARY_FIELDS");
+        // A staff edit may retain a generated inference citing user evidence. It may not invent AI provenance.
+        Set<Item> retainedInferences=new HashSet<>();
+        if(!model) {
+            var previous=jdbc.queryForList("SELECT fields_json FROM support_summary_revision WHERE conversation_id=? ORDER BY version DESC LIMIT 1 FOR UPDATE",String.class,conversation);
+            if(!previous.isEmpty())try {
+                Map<String,List<Item>> saved=json.readValue(previous.getFirst(),new TypeReference<Map<String,List<Item>>>(){});
+                for(Item item:saved.getOrDefault("hypotheses",List.of()))if("ai_inference".equals(item.attribution()))retainedInferences.add(item);
+            }catch(java.io.IOException e){throw new IllegalStateException(e);}
+        }
         int total=0;
         for(var field:fields.entrySet()) {
             if(field.getValue()==null||field.getValue().isEmpty()||field.getValue().size()>20)throw problem(400,"INVALID_SUMMARY_ITEMS");
@@ -139,7 +151,7 @@ public class SupportSummaryService {
                     if(("verified_fact".equals(item.attribution()) && !Set.of("user","support_agent","expert").contains(sender))
                       ||("user_statement".equals(item.attribution())&&!"user".equals(sender))
                       ||("staff_statement".equals(item.attribution())&&!Set.of("support_agent","expert").contains(sender))
-                      ||("ai_inference".equals(item.attribution())&&!ai))throw problem(400,"SUMMARY_SOURCE_ATTRIBUTION_MISMATCH");
+                      ||("ai_inference".equals(item.attribution())&&!model&&!ai&&!retainedInferences.contains(item)))throw problem(400,"SUMMARY_SOURCE_ATTRIBUTION_MISMATCH");
                     boolean found=false;
                     for(JsonNode part:tree((String)message.get("parts_json"))) {
                         if(ref.attachmentId()!=null) {
@@ -158,14 +170,14 @@ public class SupportSummaryService {
         if(!attachment.matches("[0-9]{1,19}"))return false;
         return jdbc.queryForList("SELECT id FROM ai_attachment WHERE id=? AND conversation_id=? AND linked_message_id=? AND linked_seq=? FOR UPDATE",Long.class,attachment,conversation,message,seq).size()==1;
     }
-    private Revision insert(String conversation,long previous,String origin,Long editor,long through,boolean truncated,Map<String,List<Item>> fields) {
+    Revision insert(String conversation,long previous,String origin,Long editor,long through,boolean truncated,Map<String,List<Item>> fields) {
         // Snapshot released IDs while the conversation lock serializes all release/transfer/edit paths.
         var excluded=jdbc.queryForList("SELECT id FROM support_assignment WHERE conversation_id=? AND released_at IS NOT NULL FOR UPDATE",String.class,conversation);
         jdbc.update("INSERT INTO support_summary_revision(conversation_id,version,parent_version,origin,edited_by,source_through_seq,source_truncated,fields_json,released_assignment_ids) VALUES(?,?,?,?,?,?,?,?,?)",
             conversation,previous+1,previous==0?null:previous,origin,editor,through,truncated,encode(fields),encode(excluded));
         return jdbc.queryForObject("SELECT * FROM support_summary_revision WHERE conversation_id=? AND version=? FOR UPDATE",this::row,conversation,previous+1);
     }
-    private long latestVersion(String conversation){
+    long latestVersion(String conversation){
         var versions=jdbc.queryForList("SELECT version FROM support_summary_revision WHERE conversation_id=? ORDER BY version DESC LIMIT 1 FOR UPDATE",Long.class,conversation);
         return versions.isEmpty()?0:versions.getFirst();
     }

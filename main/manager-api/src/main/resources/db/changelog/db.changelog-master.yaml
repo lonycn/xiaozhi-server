@@ -781,3 +781,6 @@ databaseChangeLog:
   - include:
       file: support-summary.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: support-summary-assistance.changelog.yaml
+      relativeToChangelogFile: true

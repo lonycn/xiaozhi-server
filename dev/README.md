@@ -91,3 +91,20 @@ AI 默认关闭。先执行 `python3 dev/manage.py up --build` 确保已有 Dev 
 使用 `python3 dev/manage.py ai-status` 查看开关、worker 进程与模型；使用 `python3 dev/manage.py ai-disable` 停止 worker 并关闭 API 的 AI 功能。关闭不会删除历史数据或任务。普通 `up` 会在 AI 已启用时启动 worker，普通 `stop` 会停止它。
 
 worker 默认使用仓库父目录的 `.venv/bin/python`，该环境须已安装 `openai` 和 `httpx`。可通过 `XIAOZHI_AI_WORKER_PYTHON` 指定其他已准备好的 Python；脚本不会自动安装依赖。若 worker 无法启动，检查 `dev/.runtime/ai-worker.log`；API 和 worker 修改配置后必须使用上述命令重新启动。
+
+
+## 内部模型辅助交接
+
+在已启用并配置百炼 AI 的本 Dev 中，显式开启独立能力：
+
+```sh
+python3 dev/manage.py summary-enable --build
+python3 dev/manage.py summary-status
+python3 dev/manage.py summary-disable
+```
+
+默认 `features.support-summary-assistance-enabled=false`。开启前检查新 JAR、私有 AI 配置及 Python 依赖；只启动独立 `ai_worker.summary`，复用已配置模型，不改变普通聊天协议。客服在当前接待中点击“AI辅助整理”，结果和建议只供内部查看；明确加入回复草稿后仍需人工发送。禁止将模型结果当作已核验事实。新消息、版本变化、转接及撤权会使旧任务过期；失败与用量不删除。
+
+`up`/`stop`会管理已启用的独立摘要 worker；`ai-disable`也停止摘要任务执行，保留开启偏好与历史，重新启用 AI 时按偏好恢复。`summary-disable`仅关闭能力并停止 worker，不清理任务/摘要/客户数据。进程身份不符时拒绝终止。当前本机 Dev 已于2026-10-31显式启用，原库增量迁移至117；详见[运维说明](../docs/ai-customer-service/HANDOFF_ASSISTANCE_OPERATIONS.md)和[真实技术验收](../docs/ai-customer-service/HANDOFF_ASSISTANCE_VALIDATION.md)。
+
+B6 只读业务 adapter 仍默认关闭。接通前必须由真实来源实现[签名委托接口](../docs/ai-customer-service/B6_READONLY_HTTP_PROTOCOL.md)，提供独立密钥、TLS 与真实用户/租户/资源归属复核；不能用已有 Workbench 凭据替代。

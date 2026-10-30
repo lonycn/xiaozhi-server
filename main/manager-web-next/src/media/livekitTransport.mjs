@@ -18,7 +18,12 @@ export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => 
     attachments.set(track, element); onTrack(element, track);
     element.play?.().catch(() => onChange({ playbackBlocked: true }));
   }
-  function detach(track) { for (const element of track.detach()) element.remove(); attachments.delete(track); samples.delete(track.sid); }
+  function detach(track) {
+    const owned = attachments.get(track);
+    for (const element of track.detach()) element.remove();
+    // LiveKit may detach first on unsubscribe, leaving its element list empty.
+    owned?.remove(); attachments.delete(track); samples.delete(track.sid);
+  }
   room.on(sdk.RoomEvent.TrackSubscribed, track => { if (!closed) { tracks.add(track); render(track); update(); } });
   room.on(sdk.RoomEvent.TrackUnsubscribed, track => { tracks.delete(track); detach(track); update(); });
   room.on(sdk.RoomEvent.ConnectionStateChanged, () => update());

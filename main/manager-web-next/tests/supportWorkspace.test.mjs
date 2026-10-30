@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Workspace from '../src/views/SupportWorkspace.vue';
 const api = vi.hoisted(() => ({ me: vi.fn(), presence: vi.fn(), queue: vi.fn(), assigned: vi.fn(), agents: vi.fn(), action: vi.fn(), send: vi.fn(), profile: vi.fn() }));
 const conversation = vi.hoisted(() => ({ messages: vi.fn(), detail: vi.fn() }));
+const annotation = vi.hoisted(() => ({ frame: vi.fn() }));
+const images = vi.hoisted(() => ({ blob: vi.fn(), decode: vi.fn(), release: vi.fn() }));
+vi.mock('../src/apis/module/annotation', () => ({ default: annotation }));
+vi.mock('../src/apis/module/annotationClient.mjs', () => ({ privateAnnotationBlob: images.blob, decodeAnnotationBlob: images.decode }));
 const state = vi.hoisted(() => ({ userInfo: {} }));
 vi.mock('../src/apis/module/support', () => ({ default: api }));
 vi.mock('../src/apis/module/conversation', () => ({ default: conversation }));
@@ -10,7 +14,7 @@ vi.mock('../src/store', () => ({ default: { state } }));
 const page = (items = []) => ({ items, next_cursor: '0', has_more: false });
 const profile = { user_id: '9223372036854775806', enabled: true, accepting: false };
 let wrapper;
-function mountDesk() { wrapper = mount(Workspace, { global: { mocks: { $t: key => key }, stubs: { SupportSummaryPanel: true, RouterLink: true, ElAlert: true, ElSwitch: true, ElButton: { template: '<button><slot /></button>' }, ElInput: true, ElInputNumber: true, ElSelect: true, ElOption: true, ElTable: true, ElTableColumn: true } } }); return wrapper; }
+function mountDesk() { wrapper = mount(Workspace, { global: { mocks: { $t: key => key }, stubs: { SupportSummaryPanel: true, Teleport: true, RouterLink: true, ElAlert: true, ElSwitch: true, ElButton: { template: '<button><slot /></button>' }, ElInput: true, ElInputNumber: true, ElSelect: true, ElOption: true, ElTable: true, ElTableColumn: true } } }); return wrapper; }
 beforeEach(() => { vi.useFakeTimers(); vi.resetAllMocks(); state.userInfo = {}; api.me.mockResolvedValue(profile); api.presence.mockImplementation(async accepting => ({ ...profile, accepting })); api.queue.mockResolvedValue(page()); api.assigned.mockResolvedValue(page()); api.agents.mockResolvedValue(page()); conversation.messages.mockResolvedValue(page()); conversation.detail.mockResolvedValue({ title: '咨询' }); });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); });
 describe('support desk', () => {
@@ -116,6 +120,44 @@ describe('B4 support annotations', () => {
     mountDesk();await flushPromises();await wrapper.vm.selectRequest({request_id:'r',conversation_id:'c',status:'active'});wrapper.vm.stageAnnotation({scopeKey:wrapper.vm.attachmentScope,row:generated});wrapper.vm.draft='检查这里';
     api.send.mockResolvedValue({id:'m',parts:[]});await wrapper.vm.send();expect(api.send.mock.calls[0][1].parts).toEqual([{type:'text',text:'检查这里'},{type:'image',attachment_id:'13'}]);
     wrapper.vm.selected.status='resolved';wrapper.vm.stageAnnotation({scopeKey:wrapper.vm.attachmentScope,row:generated});expect(wrapper.vm.attachmentRows).toEqual([]);
+  });
+  it('keeps a live-frame editor and in-flight image load across two polls, then closes on assignment loss', async () => {
+    const request = { request_id: 'r', conversation_id: 'c', status: 'active' };
+    api.assigned.mockResolvedValue(page([request]));
+    annotation.frame.mockResolvedValue({ id: '10', conversation_id: 'c', frame_attachment_id: '11', width: 1000, height: 500, status: 'ready' });
+    let finishImage; images.blob.mockReturnValue(new Promise(resolve => { finishImage = resolve; }));
+    images.decode.mockResolvedValue({ image: { naturalWidth: 1000, naturalHeight: 500 }, release: images.release });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest(request);
+    wrapper.vm.draft = '未发送的文字'; wrapper.vm.attachmentRows = [generated];
+    wrapper.vm.openLiveFrame({ frame: { id: '10' }, conversationId: 'c' }); await flushPromises();
+    const editor = wrapper.findComponent({ name: 'AnnotationEditor' });
+    const signal = annotation.frame.mock.calls[0][1];
+    expect(editor.vm.visible).toBe(true); expect(editor.vm.busy).toBe(true);
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(conversation.messages).toHaveBeenCalledTimes(3);
+    expect(editor.vm.visible).toBe(true); expect(editor.vm.busy).toBe(true); expect(signal.aborted).toBe(false);
+    expect(wrapper.vm.draft).toBe('未发送的文字'); expect(wrapper.vm.attachmentRows).toHaveLength(1);
+    finishImage(new Blob(['image'])); await flushPromises();
+    expect(editor.vm.scene.frame_id).toBe('10'); expect(editor.vm.canWrite).toBe(true);
+    await editor.find('.annotation-label input').setValue('现场标记'); expect(editor.vm.label).toBe('现场标记');
+    api.assigned.mockResolvedValue(page()); await vi.advanceTimersByTimeAsync(4000);
+    expect(editor.vm.visible).toBe(false); expect(editor.vm.writable).toBe(false); expect(signal.aborted).toBe(true);
+    vi.restoreAllMocks();
+  });
+  it('allows switching during a background poll and ignores its late history', async () => {
+    const first = { request_id: 'first', conversation_id: 'c1', status: 'active' };
+    const second = { request_id: 'second', conversation_id: 'c2', status: 'active' };
+    api.assigned.mockResolvedValue(page([first, second])); mountDesk(); await flushPromises(); await wrapper.vm.selectRequest(first);
+    let finishFrame; annotation.frame.mockReturnValue(new Promise(resolve => { finishFrame = resolve; }));
+    wrapper.vm.openLiveFrame({ frame: { id: '10' }, conversationId: 'c1' }); await flushPromises();
+    const editor = wrapper.findComponent({ name: 'AnnotationEditor' }), signal = annotation.frame.mock.calls[0][1];
+    expect(editor.vm.visible).toBe(true);
+    let finish; conversation.messages.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const polling = wrapper.vm.refresh(); await flushPromises(); expect(wrapper.vm.historyPolling).toBe(true); expect(wrapper.vm.historyLoading).toBe(false);
+    await wrapper.vm.selectRequest(second); await wrapper.vm.$nextTick(); expect(editor.vm.visible).toBe(false); expect(signal.aborted).toBe(true);
+    finishFrame({ id: '10', conversation_id: 'c1', status: 'ready' }); finish(page([{ id: 'stale', seq: '1', parts: [] }])); await polling;
+    expect(wrapper.vm.selected.request_id).toBe('second'); expect(wrapper.vm.messages).toEqual([]); expect(wrapper.vm.historyPolling).toBe(false);
   });
   it('retains annotation editing permission during ordinary history polling but revokes it when assignment ends', async () => {
     mountDesk();await flushPromises();await wrapper.vm.selectRequest({request_id:'r',conversation_id:'c',status:'active'});wrapper.vm.historyLoading=true;await wrapper.vm.$nextTick();expect(wrapper.findComponent({name:'AnnotationEditor'}).props('writable')).toBe(true);

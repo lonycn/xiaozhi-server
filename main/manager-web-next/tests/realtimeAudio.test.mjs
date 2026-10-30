@@ -1,6 +1,7 @@
-import {describe,it,expect,vi} from 'vitest';
+import {afterEach,describe,it,expect,vi} from 'vitest';
 import {Pcm16Framer,pcm16Bytes,pcm16Floats,base64Bytes,bytesBase64} from '../src/realtime/pcm.mjs';
 import {createPcmPlayback} from '../src/realtime/playback.mjs';
+afterEach(()=>vi.useRealTimers());
 function context(){const sources=[];return {sources,currentTime:0,destination:{},resume:vi.fn(async()=>{}),close:vi.fn(async()=>{}),createBuffer:vi.fn((_channels,length,rate)=>({length,rate,copyToChannel:vi.fn()})),createBufferSource:()=>{const source={connect:vi.fn(),disconnect:vi.fn(),start:vi.fn(),stop:vi.fn()};sources.push(source);return source;}};}
 describe('realtime PCM framing and bounded playback',()=>{
  it.each([44100,48000])('resamples %i Hz blocks continuously into exact 100ms 16k PCM frames',rate=>{const samples=new Float32Array(rate).fill(.25),framer=new Pcm16Framer(rate),frames=[];for(let i=0;i<samples.length;i+=128)frames.push(...framer.push(samples.subarray(i,i+128)));expect(frames).toHaveLength(10);expect(frames.every(frame=>frame.length===3200)).toBe(true);expect(pcm16Floats(frames[0])[0]).toBeCloseTo(.25,4);expect(framer.flush()).toBeNull();});
@@ -8,5 +9,9 @@ describe('realtime PCM framing and bounded playback',()=>{
  it('clips and encodes signed little endian and rejects malformed or oversized encoded audio',()=>{expect([...pcm16Bytes([-2,0,2])]).toEqual([0,128,0,0,255,127]);const bytes=pcm16Bytes([-.5,.5]);expect(base64Bytes(bytesBase64(bytes))).toEqual(bytes);expect(()=>base64Bytes('bad!!')).toThrow();expect(()=>base64Bytes(bytesBase64(new Uint8Array(65538)))).toThrow();expect(()=>pcm16Floats(new Uint8Array(3))).toThrow();});
  it('schedules output at 24k, refuses stale responses and cancels already scheduled buffers on interrupt',async()=>{const ctx=context(),play=createPcmPlayback(ctx);play.response('first');expect(play.append('first',new Uint8Array(48000))).toBe(true);expect(ctx.createBuffer).toHaveBeenCalledWith(1,24000,24000);expect(ctx.sources[0].start).toHaveBeenCalledWith(0);expect(play.pendingSeconds()).toBe(1);play.clear();expect(ctx.sources[0].stop).toHaveBeenCalledTimes(1);expect(play.pendingSeconds()).toBe(0);play.response('next');expect(play.append('first',new Uint8Array(2))).toBe(false);await play.close();expect(ctx.close).toHaveBeenCalledOnce();});
  it('bounds both single chunks and cumulative scheduled playback time',()=>{const ctx=context(),play=createPcmPlayback(ctx,{maxSeconds:2});play.response('r');play.append('r',new Uint8Array(48000));play.append('r',new Uint8Array(48000));expect(()=>play.append('r',new Uint8Array(2))).toThrow('OUTPUT_LIMIT');expect(()=>play.append('r',new Uint8Array(70000))).toThrow('OUTPUT_LIMIT');});
+ it('bounds playback resume and releases a pending resume immediately on close',async()=>{
+  vi.useFakeTimers();const ctx=context();ctx.resume.mockReturnValue(new Promise(()=>{}));const play=createPcmPlayback(ctx),starting=play.resume(),failure=expect(starting).rejects.toThrow('TIMEOUT');await vi.advanceTimersByTimeAsync(10000);await failure;await play.close();expect(ctx.close).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
+  const next=context();next.resume.mockReturnValue(new Promise(()=>{}));const second=createPcmPlayback(next),pending=second.resume();await second.close();await pending;expect(next.close).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
+ });
  it('flushes a partial recording frame without padding invented samples',()=>{const framer=new Pcm16Framer(48000);framer.push(new Float32Array(2400).fill(.1));expect(framer.flush().length).toBe(1600);expect(framer.flush()).toBeNull();});
 });

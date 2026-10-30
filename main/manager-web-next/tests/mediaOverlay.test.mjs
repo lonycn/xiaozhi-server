@@ -1,7 +1,7 @@
 import {mount,flushPromises} from '@vue/test-utils';
 import {describe,it,expect,vi,beforeEach,afterEach} from 'vitest';
 import Overlay from '../src/components/MediaSessionOverlay.vue';
-const api=vi.hoisted(()=>({invitations:vi.fn(),current:vi.fn(),get:vi.fn(),accept:vi.fn(),reject:vi.fn(),token:vi.fn(),ready:vi.fn(),end:vi.fn(),experts:vi.fn(),capture:vi.fn()}));
+const api=vi.hoisted(()=>({create:vi.fn(),invitations:vi.fn(),current:vi.fn(),get:vi.fn(),accept:vi.fn(),reject:vi.fn(),token:vi.fn(),ready:vi.fn(),end:vi.fn(),experts:vi.fn(),capture:vi.fn()}));
 vi.mock('../src/apis/module/media',()=>({default:api}));
 const attachment=vi.hoisted(()=>({init:vi.fn(),upload:vi.fn(),complete:vi.fn(),get:vi.fn()}));
 vi.mock('../src/apis/module/attachment',()=>({default:attachment}));
@@ -15,6 +15,41 @@ function mountOverlay(props={}){wrapper=mount(Overlay,{props:{userId:'u',convers
 beforeEach(()=>{vi.useFakeTimers();vi.resetAllMocks();api.invitations.mockResolvedValue({items:[{id:'7',type:'session',session_id:'7',conversation_id:'c'}],has_more:false,next_cursor:'0'});api.current.mockResolvedValue(session());api.get.mockResolvedValue(session());api.experts.mockResolvedValue({items:[],has_more:false,next_cursor:'0'});room={setForeground:vi.fn(),connect:vi.fn(async()=>{}),close:vi.fn(async()=>{}),evidence:vi.fn(async()=>({})),microphone:vi.fn(),camera:vi.fn(),videoTrack:()=>cameraTrack};media.factory.mockResolvedValue(room);});
 afterEach(()=>{wrapper?.unmount();wrapper=null;vi.useRealTimers();vi.restoreAllMocks();});
 describe('in-chat media consent and display',()=>{
+ it('starts a new create intent after a completed call and preserves its key after an uncertain response',async()=>{
+  api.invitations.mockResolvedValue({items:[],has_more:false,next_cursor:'0'}); api.current.mockResolvedValue(null);
+  const first=session({id:'7',status:'invited'}), ended={...first,status:'ended'}, second=session({id:'8',status:'invited'});
+  api.create.mockResolvedValueOnce(first).mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce(second);
+  api.end.mockResolvedValue(ended); mountOverlay(); await flushPromises();
+  wrapper.vm.choice={microphone:true,camera:false,allow_snapshots:false};
+  await wrapper.vm.invite(); const firstKey=api.create.mock.calls[0][0].client_session_id;
+  await wrapper.vm.controller.end(); expect(wrapper.vm.terminal).toBe(true);
+  await wrapper.vm.invite(); const secondKey=api.create.mock.calls[1][0].client_session_id;
+  expect(secondKey).not.toBe(firstKey); expect(wrapper.vm.state.error).toBe('media.failed');
+  await wrapper.vm.invite(); expect(api.create.mock.calls[2][0].client_session_id).toBe(secondKey);
+  expect(wrapper.vm.state.session.id).toBe('8');
+ });
+ it.each(['rejected','canceled','expired','failed'])('starts a new intent after a %s session',async status=>{
+  api.invitations.mockResolvedValue({items:[],has_more:false,next_cursor:'0'});api.current.mockResolvedValue(null);
+  const first=session({id:'7'});api.create.mockResolvedValueOnce(first).mockResolvedValueOnce(session({id:'8'}));
+  mountOverlay();await flushPromises();wrapper.vm.choice={microphone:true,camera:false,allow_snapshots:false};
+  await wrapper.vm.invite();await wrapper.vm.controller.load({...first,status});await wrapper.vm.invite();
+  expect(api.create.mock.calls[1][0].client_session_id).not.toBe(api.create.mock.calls[0][0].client_session_id);
+ });
+ it('uses a new key when the request or consent changes after an uncertain create',async()=>{
+  api.invitations.mockResolvedValue({items:[],has_more:false,next_cursor:'0'});api.current.mockResolvedValue(null);api.create.mockRejectedValue(new Error('response lost'));
+  mountOverlay();await flushPromises();wrapper.vm.choice={microphone:true,camera:false,allow_snapshots:false};
+  await wrapper.vm.invite();await wrapper.vm.invite();
+  const key=api.create.mock.calls[0][0].client_session_id;expect(api.create.mock.calls[1][0].client_session_id).toBe(key);
+  wrapper.vm.choice.camera=true;await wrapper.vm.invite();const next=api.create.mock.calls[2][0].client_session_id;expect(next).not.toBe(key);
+  await wrapper.setProps({requestId:'other'});await wrapper.vm.invite();expect(api.create.mock.calls[3][0].client_session_id).not.toBe(next);
+ });
+ it('ignores a late create response after an identity reset',async()=>{
+  api.invitations.mockResolvedValue({items:[],has_more:false,next_cursor:'0'});api.current.mockResolvedValue(null);
+  let finish;api.create.mockReturnValue(new Promise(resolve=>{finish=resolve;}));mountOverlay();await flushPromises();
+  wrapper.vm.choice={microphone:true,camera:false,allow_snapshots:false};wrapper.vm.inviting=true;const pending=wrapper.vm.invite();
+  await wrapper.setProps({identity:'other:true',userId:'other'});wrapper.vm.inviting=true;wrapper.vm.hidden=true;
+  finish(session());await pending;expect(wrapper.vm.state.session).toBeNull();expect(wrapper.vm.inviting).toBe(true);expect(wrapper.vm.hidden).toBe(true);
+ });
  it('renders incoming consent without requesting a token or opening a device',async()=>{mountOverlay();await flushPromises();expect(wrapper.text()).toContain('media.accept');expect(wrapper.findAll('input[type=checkbox]').every(input=>!input.element.checked)).toBe(true);expect(media.factory).not.toHaveBeenCalled();expect(api.token).not.toHaveBeenCalled();const accept=wrapper.findAll('button').find(button=>button.text()==='media.accept');expect(accept.attributes('disabled')).toBeDefined();});
  it('requires microphone consent, keeps camera optional, and passes exact choices on explicit accept',async()=>{mountOverlay();await flushPromises();const accepted=session({status:'connecting',control_epoch:2,participants:session().participants.map(p=>({...p,status:'accepted',consent:{microphone:true,camera:false,allow_snapshots:false}}))});api.accept.mockResolvedValue(accepted);api.get.mockResolvedValue(accepted);api.token.mockResolvedValue({session_id:'7',control_epoch:2,room_generation:1,server_url:'wss://m',participant_token:'private',publish_sources:['microphone']});await wrapper.find('input[type=checkbox]').setValue(true);await wrapper.findAll('button').find(button=>button.text()==='media.accept').trigger('click');await flushPromises();expect(api.accept.mock.calls[0][1].consent).toEqual({microphone:true,camera:false,allow_snapshots:false});expect(room.connect.mock.calls[0][2]).toEqual({microphone:true,camera:false});});
  it('retains mounted media elements while minimized and expanded',async()=>{mountOverlay();await flushPromises();const host=wrapper.find('.media-stage').element;const button=wrapper.find('button[aria-label="media.minimize"]');await button.trigger('click');expect(wrapper.find('.media-stage').element).toBe(host);await button.trigger('click');expect(wrapper.find('.media-stage').element).toBe(host);});

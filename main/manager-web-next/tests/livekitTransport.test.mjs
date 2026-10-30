@@ -15,6 +15,18 @@ describe('LiveKit transport device and receive evidence boundary',()=>{
   it('does not attach prepared-room media until foreground is committed',async()=>{
     const h=harness(),track=h.track();await h.transport.connect('wss://test','private',{microphone:false,camera:false});h.transport.setForeground(false);h.listeners.get('track')(track);expect(track.attach).not.toHaveBeenCalled();h.transport.setForeground(true);expect(track.attach).toHaveBeenCalledTimes(1);h.transport.setForeground(false);expect(track.detach).toHaveBeenCalledTimes(1);await h.transport.close();
   });
+  it('removes its video when the SDK already detached it, across unsubscribe, foreground changes and close',async()=>{
+    const host=document.createElement('div'),h=harness();h.onTrack.mockImplementation(element=>host.appendChild(element));
+    const makeTrack=()=>{let attached=[];return {kind:'video',sid:'TR_video',isMuted:false,attach:vi.fn(()=>{const element=document.createElement('video');element.play=vi.fn(async()=>{});attached.push(element);return element;}),detach:vi.fn(()=>{const previous=attached;attached=[];return previous;})};};
+    await h.transport.connect('wss://test','private',{microphone:false,camera:false});h.transport.setForeground(true);
+    const first=makeTrack();h.listeners.get('track')(first);expect(host.querySelectorAll('video')).toHaveLength(1);
+    first.detach();h.listeners.get('untrack')(first);expect(host.querySelectorAll('video')).toHaveLength(0);
+    const second=makeTrack();h.listeners.get('track')(second);expect(host.querySelectorAll('video')).toHaveLength(1);
+    second.detach();h.transport.setForeground(false);expect(host.querySelectorAll('video')).toHaveLength(0);
+    h.transport.setForeground(true);expect(host.querySelectorAll('video')).toHaveLength(1);
+    second.detach();await h.transport.close();expect(host.querySelectorAll('video')).toHaveLength(0);
+    const next=harness();next.onTrack.mockImplementation(element=>host.appendChild(element));next.transport.setForeground(true);next.listeners.get('track')(makeTrack());expect(host.querySelectorAll('video')).toHaveLength(1);await next.transport.close();expect(host.querySelectorAll('video')).toHaveLength(0);
+  });
   it('requires a fresh inbound byte increase from the actual peer before reporting receiving audio',async()=>{
     const h=harness(),track=h.track();h.room.remoteParticipants.set('peer',{sid:'peer',trackPublications:new Map([['track',{track}]])});track.getRTCStatsReport.mockResolvedValueOnce(new Map([['x',{type:'inbound-rtp',bytesReceived:100}]])).mockResolvedValueOnce(new Map([['x',{type:'inbound-rtp',bytesReceived:160}]])).mockResolvedValueOnce(new Map([['x',{type:'inbound-rtp',bytesReceived:160}]]));await h.transport.connect('wss://test','private',{microphone:false,camera:false});h.listeners.get('track')(track);
     expect(await h.transport.evidence()).toMatchObject({transport_ready:true,receiving_audio:false,participant_sid:'self',peer_sid:'peer'});expect((await h.transport.evidence()).receiving_audio).toBe(true);expect((await h.transport.evidence()).receiving_audio).toBe(false);await h.transport.close();

@@ -1,0 +1,12 @@
+{
+  "warning": "PUBLIC TEST FIXTURE ONLY; deployment rejects this known key.",
+  "key_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "key_id": "xiaozhi-public-v1",
+  "timestamp": "1700000000",
+  "nonce": "000102030405060708090a0b0c0d0e0f",
+  "path": "/api/v1/external/identity/issue",
+  "body_utf8": "{\"external_subject\":\"test-subject\",\"source_session_id\":\"test-source-A\",\"source_expires_at\":\"1700003600\",\"display_name\":\"测试用户\",\"tenant\":{\"type\":\"company\",\"id\":\"123\"},\"scope\":{\"project_ids\":[\"site-1\"],\"device_ids\":[\"device-1\"]}}",
+  "body_sha256": "28238ae713f8b8441c858229056aab4a4763be59652157d9c11055e65a19d9a9",
+  "canonical_utf8": "POST\n/api/v1/external/identity/issue\n1700000000\n000102030405060708090a0b0c0d0e0f\n28238ae713f8b8441c858229056aab4a4763be59652157d9c11055e65a19d9a9",
+  "signature_hex": "01014d813a56a0eacf113f878d340d9695e83c99d8b3d909daa8a19db4674d3a"
+}

@@ -119,6 +119,12 @@ public class ShiroConfig {
         filterMap.put("/internal/media-worker/**", "mediaWorker");
         // Only this precise content endpoint accepts a short capability. The controller verifies
         // its attachment/variant/actor/expiry and current account + resource grant on every GET.
+        // B6 public entry routes have their own HMAC or single-use capability validation.
+        filterMap.put("/api/v1/external/identity/issue", "anon");
+        filterMap.put("/api/v1/external/identity/revoke", "anon");
+        filterMap.put("/api/v1/external/identity/exchange", "anon");
+        filterMap.put("/api/v1/external/attachments/*/content", "anon");
+        filterMap.put("/api/v1/external/**", "conversation");
         filterMap.put("/api/v1/ai/attachments/*/content", "anon");
         filterMap.put("/api/v1/ai/**", "conversation");
         filterMap.put("/api/v1/support/**", "conversation");

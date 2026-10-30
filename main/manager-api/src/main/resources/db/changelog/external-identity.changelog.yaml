@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202610310100
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202610310100.sql
+            relativeToChangelogFile: true

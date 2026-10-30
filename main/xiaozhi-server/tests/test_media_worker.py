@@ -366,3 +366,77 @@ async def test_video_with_audio_also_normalizes_for_transcription(tmp_path):
     audio = next(path for kind, _, path in artifacts if kind == 'audio')
     with wave.open(str(audio)) as wav:
         assert wav.getnchannels() == 1 and wav.getframerate() == 16000
+
+
+@pytest.mark.asyncio
+async def test_java_string_size_claim_download_real_png_processing_wire(tmp_path):
+    output = io.BytesIO()
+    Image.new('RGB', (40, 30), 'red').save(output, 'PNG')
+    raw = output.getvalue()
+    wire_task = task(raw)
+    wire_task.update(filename='logo.png', mime_type='image/png', size=str(len(raw)),
+                     metadata={'width': '40', 'height': '30'})
+    actions = []
+    async def handler(request):
+        if request.url.path.endswith('/claim'):
+            return httpx.Response(200, json={'code': 0, 'msg': '', 'data': wire_task})
+        if request.url.path.endswith('/input'):
+            return httpx.Response(200, stream=Bytes(raw))
+        if '/artifacts/' in request.url.path:
+            with Image.open(io.BytesIO(await request.aread())) as artifact:
+                assert artifact.format == 'JPEG'
+                artifact.verify()
+            actions.append(request.url.path.rsplit('/', 1)[-1])
+        if request.url.path.endswith('/complete'):
+            metadata = json.loads(await request.aread())['metadata']
+            assert metadata['width'] == 40 and metadata['height'] == 30
+            actions.append('complete')
+        return httpx.Response(200, json={'code': 0, 'data': None})
+    conf = config(temp_root=str(tmp_path))
+    manager = Manager(conf, client(handler))
+    transcriber = Transcriber(conf)
+    claimed = await manager.claim()
+    assert type(claimed['size']) is int and claimed['size'] == len(raw)
+    assert claimed['metadata'] == {'width': 40, 'height': 30}
+    await Worker(conf, manager, Processor(conf), transcriber).execute(claimed)
+    assert actions == ['display', 'thumbnail', 'complete'] and list(tmp_path.iterdir()) == []
+    await manager.close()
+    await transcriber.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('declared', [True, False, 1.0, -1, '-1', '0', '01', '+1', '1.0', '1e2',
+                                     ' 1', '1 ', '1\n', '١', str(2**63), '9'*5000, (20 << 20) + 1])
+async def test_invalid_wire_size_never_reads_input(tmp_path, declared):
+    async def handler(request): pytest.fail('invalid declared size must fail before HTTP input')
+    manager = Manager(config(), client(handler))
+    claimed = task()
+    claimed['size'] = declared
+    with pytest.raises(MediaFailure, match='INVALID_MEDIA'):
+        await manager.download(claimed, tmp_path / 'input')
+    assert not (tmp_path / 'input').exists()
+    await manager.close()
+
+
+def test_wire_normalizes_only_known_measurements_never_ids_or_scene():
+    from media_worker.transport import normalize_task
+    claimed = task()
+    scene = {'width': '400', 'text': '00123', 'elements': [{'x': '0.5', 'text': '1000'}]}
+    claimed.update(size='5', attachment_id='000123', metadata={
+        'frame_id': '00101', 'source_attachment_id': '00100', 'expected_width': '400',
+        'expected_height': '300', 'requested_time_ms': '500', 'duration_ms': '2000',
+        'frames': [{'artifact': 'frame_0', 'time_ms': '1500'}], 'scene': scene})
+    normalized = normalize_task(claimed)
+    assert normalized['attachment_id'] == '000123' and normalized['metadata']['frame_id'] == '00101'
+    assert normalized['metadata']['source_attachment_id'] == '00100'
+    assert normalized['metadata']['scene'] is scene
+    assert normalized['metadata']['requested_time_ms'] == 500
+    assert normalized['metadata']['expected_width'] == 400
+    assert normalized['metadata']['frames'][0]['time_ms'] == 1500
+    assert claimed['metadata']['frames'][0]['time_ms'] == '1500'
+    assert claimed['size'] == '5'
+    for field, value in [('requested_time_ms', True), ('requested_time_ms', '1.0'),
+                         ('expected_width', '8193'), ('expected_height', '-1'), ('duration_ms', '600001')]:
+        invalid = task()
+        invalid['metadata'] = {field: value}
+        with pytest.raises(MediaFailure, match='INVALID_MEDIA'): normalize_task(invalid)

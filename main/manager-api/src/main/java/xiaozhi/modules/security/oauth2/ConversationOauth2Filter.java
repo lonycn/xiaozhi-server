@@ -12,7 +12,7 @@ public class ConversationOauth2Filter extends Oauth2Filter {
     @Override
     protected boolean onAccessDenied(ServletRequest request, ServletResponse response) throws Exception {
         boolean allowed = super.onAccessDenied(request, response);
-        if (!allowed) {
+        if (!allowed && ((HttpServletResponse) response).getStatus() < 400) {
             ((HttpServletResponse) response).setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         }
         return allowed;

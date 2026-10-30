@@ -80,6 +80,16 @@ public class Oauth2Filter extends AuthenticatingFilter {
             ServletResponse response) {
         HttpServletResponse httpResponse = (HttpServletResponse) response;
         httpResponse.setContentType("application/json;charset=utf-8");
+        if (authenticationUnavailable(e)) {
+            // A failed identity-store lookup does not prove that a valid credential is invalid.
+            // Preserve clients' sessions and let them retry after the dependency recovers.
+            httpResponse.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            httpResponse.setHeader("Retry-After", "2");
+            try {
+                httpResponse.getWriter().print("{\"code\":503,\"msg\":\"AUTHENTICATION_UNAVAILABLE\",\"data\":null}");
+            } catch (IOException ignored) { }
+            return false;
+        }
         httpResponse.setHeader("Access-Control-Allow-Credentials", "true");
         httpResponse.setHeader("Access-Control-Allow-Origin", HttpContextUtils.getOrigin());
         try {
@@ -91,6 +101,19 @@ public class Oauth2Filter extends AuthenticatingFilter {
         } catch (IOException e1) {
         }
 
+        return false;
+    }
+
+    private static boolean authenticationUnavailable(Throwable error) {
+        var seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());
+        for (Throwable cause = error; cause != null && seen.add(cause); cause = cause.getCause()) {
+            if (cause instanceof org.springframework.jdbc.CannotGetJdbcConnectionException
+                    || cause instanceof org.springframework.dao.RecoverableDataAccessException
+                    || cause instanceof org.springframework.dao.TransientDataAccessException
+                    || cause instanceof org.springframework.data.redis.RedisConnectionFailureException
+                    || cause instanceof java.sql.SQLTransientConnectionException
+                    || cause instanceof java.sql.SQLRecoverableException) return true;
+        }
         return false;
     }
 

@@ -1,0 +1,163 @@
+.welcome {
+  min-width: 0;
+  width: 100%;
+  min-height: 675px;
+  min-height: 100dvh;
+  height: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #f5f8fd, #6baaff, #9ebbfc, #f5f8fd);
+  background-size: cover;
+  /* 确保背景图像覆盖整个元素 */
+  background-position: center;
+  /* 从顶部中心对齐 */
+  -webkit-background-size: cover;
+  /* 兼容老版本WebKit浏览器 */
+  -o-background-size: cover;
+  /* 兼容老版本Opera浏览器 */
+}
+
+.login-text {
+  font-weight: 700;
+  font-size: 25px;
+  text-align: left;
+  color: #3d4566;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.login-welcome {
+  font-weight: 400;
+  font-size: 9px;
+  text-align: left;
+  color: #818cae;
+  align-self: flex-end;
+  margin-bottom: 7px;
+}
+
+.login-box {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 18%;
+  background-color: #fff;
+  border-radius: 20px;
+  padding: 35px 0;
+  width: 450px;
+  box-sizing: border-box;
+}
+
+.el-dropdown-link {
+  font-weight: 400;
+  font-size: 14px;
+  text-align: left;
+  color: #979db1;
+}
+
+.input-icon {
+  width: 19px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.login-btn {
+  height: 35px;
+  background: #5778ff;
+  border-radius: 10px;
+  font-weight: 400;
+  font-size: 14px;
+  cursor: pointer;
+  color: #fff;
+  line-height: 35px;
+  margin: 15px 30px 15px 30px;
+}
+
+.input-box {
+  display: flex;
+  margin-top: 20px;
+  align-items: center;
+  border-radius: 10px;
+  border: 1px solid #e4e6ef;
+  height: 40px;
+  padding: 0 15px;
+  gap: 20px;
+}
+
+:deep(.el-tabs) {
+  .el-tabs__nav-wrap::after {
+    height: 1px;
+  }
+
+  .el-tabs__nav-wrap::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 1px;
+    background-color: #e4e7ed;
+    z-index: 1;
+  }
+
+  .el-tabs__item {
+    height: 65px;
+    line-height: 65px;
+    font-weight: 700;
+    color: #3d4566;
+  }
+
+  .el-tabs__item.is-active {
+    color: #5778ff;
+  }
+
+  .el-tabs__nav-scroll {
+    padding: 0 30px;
+  }
+
+}
+
+.input-box {
+  :deep(.el-input__wrapper),
+  :deep(.el-select__wrapper) {
+    box-shadow: none;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    min-height: 38px;
+  }
+
+  :deep(.el-input__inner) {
+    border: none;
+    background-color: transparent;
+    height: 38px;
+    padding: 0;
+  }
+}
+
+.login-person {
+  width: 500px;
+  color: #fff;
+  position: absolute;
+  top: 50%;
+  left: 25%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+
+/* Keep the same login forms usable on narrow and short screens. */
+@media (max-width: 900px) {
+  .welcome { min-height: 100dvh; align-items: stretch; }
+  .welcome > .el-container { min-width: 0; min-height: 100dvh; height: auto !important; }
+  .welcome .el-main { padding: 24px 16px; overflow: visible; }
+  .login-person { display: none; }
+  .login-box { position: relative; top: auto; right: auto; transform: none; margin: 24px auto; width: min(450px, 100%); }
+  .login-text { white-space: normal; font-size: 22px; }
+  .login-welcome { display: none; }
+  .input-box { min-width: 0; gap: 12px; }
+  .input-box :deep(.el-select) { min-width: 80px; }
+}
+@media (min-width: 901px) and (max-height: 780px) {
+  .welcome { min-height: 780px; }
+  .welcome > .el-container { min-height: 780px; }
+}

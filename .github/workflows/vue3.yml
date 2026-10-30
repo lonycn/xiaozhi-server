@@ -1,0 +1,29 @@
+name: Vue 3 candidate
+on:
+  push:
+    branches: [Dev]
+    paths:
+      - 'main/manager-web-next/**'
+      - '.github/workflows/vue3.yml'
+  pull_request:
+    paths:
+      - 'main/manager-web-next/**'
+      - '.github/workflows/vue3.yml'
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: main/manager-web-next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.1'
+          cache: npm
+          cache-dependency-path: main/manager-web-next/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:snapshot
+      - run: npm run check:i18n
+      - run: npm run build

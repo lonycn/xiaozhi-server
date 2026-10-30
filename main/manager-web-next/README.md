@@ -1,0 +1,61 @@
+# 智控台 Vue 3 开发版
+
+本目录是 `Dev` 分支上的独立 Vue 3 前端，按 `docs/ai-customer-service/VUE3_UPGRADE_PLAN.md` 迁移。原 `main/manager-web` 保留；两个前端共用现有 Dev API，不创建第二套用户或业务后端。后续前端迭代在本目录进行。
+
+## 启动
+
+推荐 Node.js 22.23.1，版本记录于 `.nvmrc`。在本目录执行 `npm ci`，使用自己的 `node_modules`，不要链接到旧前端的依赖目录。
+
+在仓库根目录执行：
+
+```sh
+python3 dev/manage.py up
+python3 dev/manage.py candidate-up
+python3 dev/manage.py candidate-status
+```
+
+访问 <http://127.0.0.1:18894/#/conversations>，登录账号沿用本机 Dev 智控台。旧前端仍在 18892，Dev API 在 18893。需要停止新前端时执行 `python3 dev/manage.py candidate-stop`，该命令保留后端与 Dev 数据。
+
+也可直接在本目录执行 `npm run dev`。可选环境变量见 `.env.example`；私有覆盖放在忽略提交的 `.env.local`。`VITE_*` 是会进入浏览器的公开配置，禁止放入服务密钥。开发和静态预览默认代理 `/xiaozhi` 到 18893。
+
+## 已迁移内容
+
+| 范围 | 实现 |
+| --- | --- |
+| 框架 | Vue 3.5、Vite 8、Vue Router 4、Pinia、Element Plus、Vue I18n 11，依赖锁文件独立保存 |
+| 页面与组件 | 原 24 个视图和 36 个业务组件，以及 App，共 61 个 SFC 均有对应迁移版本；额外提供 SVG 图标适配组件 |
+| 登录与权限 | 真实验证码、SM2 `04` 前缀/模式 1、现有 TokenDTO、服务端用户信息与权限；Pinia 为唯一状态源 |
+| 请求 | 现有回调 API 与统一对话共用鉴权和单次并发刷新；保留 FormData、JSON、Blob/ArrayBuffer、HTTP 错误语义 |
+| 统一对话 | 会话创建、列表和历史分页、文字持久化、草稿、失败重试、中文输入法与位置展示；64 位 ID 保留字符串精度 |
+| 业务模块 | 智能体/角色/设备、模型/供应器/参数/字典/模板、用户、知识库、固件、音色/声纹/音频、替换词、通讯录和功能配置 |
+| 交互 | Vue 3 插槽、事件、v-model、Element Plus 表单/弹窗/分页、SVG 图标；六种语言及 Element Plus 语言联动 |
+| 资源与媒体 | Vite 资源 URL、字体与 Opus worker 路径；播放拒绝处理、组件实例隔离和退出时资源回收 |
+| 部署 | 独立 Dockerfile、nginx API 代理模板、Dev/PR 构建工作流；候选前端不注册 Service Worker |
+
+部分文件暂时保留 `from 'vuex'` 写法，由 Vite 精确映射到 `src/adapters/store-helpers.js`。该薄适配层直接读写 Pinia，不包含 Vuex 运行时，也不保存第二份鉴权状态。新功能直接使用 Pinia。
+
+## 验证
+
+```sh
+npm ci
+npm test
+npm run test:snapshot
+npm run check:i18n
+npm run build
+```
+
+测试覆盖 SM2 请求字段、Token 恢复与单次并发刷新、失效跳转、请求错误/上传/二进制、统一对话竞态与字符串游标、Vue 3 实际挂载的模型/业务组件以及媒体清理。六种语言的 1546 个键完成一致性检查。
+
+2026-10-30 本机结果：130 个单元/组件测试、10 个接口/界面契约测试、13 个快照辅助测试及 2 个候选进程安全测试全部通过，生产构建通过；独立临时目录执行 `npm ci` 成功。依赖树仅有 Vue 3，不含 Vue 2、Vuex 或 Element UI 运行时。
+
+本机浏览器已通过真实验证码登录，读取管理员、模型、模板、角色和绑定设备等 Dev 数据，打开模板编辑后取消，切换英文再恢复中文，并发送一条明确标注的 Dev 对话验证消息，刷新后历史仍可读取。登录和统一对话在 390px 手机宽度检查无横向溢出。生产静态预览也通过真实登录与刷新历史读取。浏览器联调不代表所有第三方服务或真实设备已经完成验收。
+
+`npm run build && npm run preview` 可在 18895 验证生产静态产物，预览代理仍指向 Dev API。独立 nginx 镜像的构建/启动命令见 `dev/README.md`；部署时设置 `API_PROXY_TARGET`。构建配置中的 `VITE_PUBLIC_PATH` 可调整资源基础路径。
+
+Docker 验证尝试在下载 Node/nginx 基础镜像元数据时遇到 Docker Hub 连接超时，尚未完成镜像构建、容器静态文件与容器代理验收。GitHub Actions 工作流已提供，是否通过应以远端实际运行结果为准。
+
+## 本次边界与回退
+
+本次完成前端框架迁移。原规划中的 AI 回复、附件存储、人工接待和实时音视频是后续业务开发内容，页面继续明确显示已有能力范围。外部知识库、云端音色克隆、真实音频采集/播放、设备连接及完整文件上传需要相应服务、浏览器权限和真实设备配合验收。
+
+按本次“新建一个文件夹迭代”的要求，保留 `manager-web-next`，没有执行 M5 中替换旧目录的步骤，也没有切换默认发布镜像。需要回退使用旧前端时打开 18892；不要删除 Dev 数据卷。此次不改变设备固件、OTA/WebSocket 地址或现有生产服务。

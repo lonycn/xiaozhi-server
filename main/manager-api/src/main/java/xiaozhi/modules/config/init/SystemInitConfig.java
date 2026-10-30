@@ -33,9 +33,8 @@ public class SystemInitConfig {
         // 检查版本号
         String redisVersion = (String) redisUtils.get(RedisKeys.getVersionKey());
         if (!Constant.VERSION.equals(redisVersion)) {
-            // 如果版本不一致，清空Redis
-            redisUtils.emptyAll();
-            // 存储新版本号
+            // A version marker is not permission to erase sessions, device state or
+            // other modules' keys. Refresh the owned caches below and preserve data.
             redisUtils.set(RedisKeys.getVersionKey(), Constant.VERSION);
         }
 

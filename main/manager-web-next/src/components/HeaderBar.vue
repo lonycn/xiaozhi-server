@@ -9,6 +9,7 @@
 
       <!-- 中间导航菜单 -->
       <div class="header-center">
+        <button v-if="conversationEnabled && (supportAvailable || supportAdmin)" class="equipment-management" style="border: 0; background: transparent; font: inherit;" @click="$router.push('/support')">{{ $t('support.workspace') }}</button>
         <button v-if="conversationEnabled" class="equipment-management" style="border: 0; background: transparent; font: inherit;" @click="$router.push('/conversations')">
           <LegacyIcon class="el-icon-chat-dot-round" style="font-size: 20px; margin-right: 8px;" />
           <span class="nav-text">统一对话</span>
@@ -181,6 +182,8 @@
 </template>
 
 <script>
+import supportApi from '@/apis/module/support';
+import { isSupportAdmin } from '@/utils/support.mjs';
 import { assetUrl } from "@/adapters/assets.js";
 import i18n, { changeLanguage } from "@/i18n";
 import featureManager from "@/utils/featureManager"; // 引入功能管理工具类
@@ -197,6 +200,7 @@ export default {
     return {
       search: "",
       isChangePasswordDialogVisible: false, // 控制修改密码弹窗的显示
+      supportAvailable: false,
       paramDropdownVisible: false,
       voiceCloneDropdownVisible: false,
       userMenuVisible: false, // 添加用户菜单可见状态
@@ -231,6 +235,7 @@ export default {
   },
   beforeUnmount() { clearTimeout(this.menuVisibleTimer); },
   computed: {
+    supportAdmin() { return isSupportAdmin(this.userInfo); },
     conversationEnabled() { return import.meta.env.VITE_CONVERSATION_ENABLED === 'true'; },
     ...mapState({
       featureStatus: (state) => ({
@@ -329,6 +334,7 @@ export default {
     },
   },
   async mounted() {
+    if (this.conversationEnabled) supportApi.me().then(profile => { this.supportAvailable = !!profile?.enabled; }).catch(() => {});
     // 等待featureManager初始化完成后再加载功能状态
     await this.loadFeatureStatus();
   },

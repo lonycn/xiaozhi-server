@@ -25,11 +25,18 @@
           <div v-if="!selected" class="welcome-state"><span class="welcome-icon"><LegacyIcon class="el-icon-chat-dot-round" /></span><h2>从一个问题开始</h2><p>记录故障现象，保留每一次沟通。<br />选择左侧会话，或新建一段对话。</p><button class="primary-button" @click="openCreate">新建对话 <LegacyIcon class="el-icon-right" /></button></div>
           <div v-else-if="loadingMessages && !messages.length" class="welcome-state" role="status"><LegacyIcon class="el-icon-loading" /><p>正在读取聊天记录…</p></div>
           <div v-else-if="!messages.length" class="welcome-state"><span class="welcome-icon"><LegacyIcon class="el-icon-edit-outline" /></span><h2>这段对话还没有消息</h2><p>可以描述设备、故障表现和已尝试的操作。</p></div>
-          <article v-for="message in messages" :key="message.id" class="message-row"><div class="message-content"><div class="message-meta">我 <span>{{ formatDate(message.created_at, true) }}</span></div><div class="message-bubble"><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><div v-else-if="part.type === 'location'" class="location-card"><LegacyIcon class="el-icon-location-outline" /> 共享位置：{{ part.latitude }}, {{ part.longitude }}<small>{{ part.coordinate_system }} · 精度 {{ part.accuracy_m }} 米</small></div></template></div><div class="message-saved"><LegacyIcon class="el-icon-check" /> 已保存</div></div><span class="sender-avatar">我</span></article>
+          <article v-for="message in messages" :key="message.id" class="message-row" :class="{ incoming: message.sender_type && message.sender_type !== 'user' }"><div class="message-content"><div class="message-meta">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }} <span>{{ formatDate(message.created_at, true) }}</span></div><div class="message-bubble"><template v-for="(part, index) in message.parts" :key="index"><p v-if="part.type === 'text'">{{ part.text }}</p><div v-else-if="part.type === 'location'" class="location-card"><LegacyIcon class="el-icon-location-outline" /> 共享位置：{{ part.latitude }}, {{ part.longitude }}<small>{{ part.coordinate_system }} · 精度 {{ part.accuracy_m }} 米</small></div></template></div><div class="message-saved"><LegacyIcon class="el-icon-check" /> 已保存</div></div><span class="sender-avatar">{{ $t(`support.${senderKey(message.sender_type || 'user')}`) }}</span></article>
         </div>
         <footer class="composer-area">
-          <div class="capability-note"><LegacyIcon class="el-icon-info" /><span>当前支持文字保存、历史读取与位置展示。AI 回复、附件和人工服务正在接入。</span></div>
-          <form class="message-composer" @submit.prevent="sendMessage"><textarea v-model="draft" aria-label="消息内容" :disabled="!selected || sending" maxlength="8000" rows="3" :placeholder="selected ? '描述你的问题…' : '新建或选择会话后，即可开始记录'" @keydown="composerKeydown" /><div class="composer-bottom"><span>{{ draft.length }}/8000 <span class="keyboard-hint">· Enter 发送，Shift + Enter 换行</span></span><button type="submit" class="primary-button send-button" :disabled="!selected || !draft.trim() || sending || loadingMessages"><LegacyIcon :class="sending ? 'el-icon-loading' : 'el-icon-position'" /> {{ sending ? '保存中' : '发送消息' }}</button></div></form>
+          <div v-if="selected" class="support-controls" aria-live="polite">
+            <span>{{ $t('support.' + (selected.state || 'AI_ACTIVE')) }}</span>
+            <span v-if="supportRequest" :title="supportRequest.request_id"> · {{ $t('support.' + supportRequest.status) }}</span>
+            <el-button v-if="!humanActive && selected.state !== 'RESOLVED'" :loading="supportBusy" @click="handoff">{{ $t('support.handoff') }}</el-button>
+            <el-button v-if="supportRequest?.status === 'queued'" :loading="supportBusy" @click="cancelHandoff">{{ $t('support.cancel') }}</el-button>
+            <el-button v-if="selected.state === 'RESOLVED'" :loading="supportBusy" @click="resumeAi">{{ $t('support.resume') }}</el-button>
+          </div>
+          <div class="capability-note"><LegacyIcon class="el-icon-info" /><span>{{ $t('support.capability') }}</span></div>
+          <form class="message-composer" @submit.prevent="sendMessage"><textarea v-model="draft" aria-label="消息内容" :disabled="!selected || sending || selected.state === 'RESOLVED'" maxlength="8000" rows="3" :placeholder="selected ? '描述你的问题…' : '新建或选择会话后，即可开始记录'" @keydown="composerKeydown" /><div class="composer-bottom"><span>{{ draft.length }}/8000 <span class="keyboard-hint">· Enter 发送，Shift + Enter 换行</span></span><button type="submit" class="primary-button send-button" :disabled="!selected || !draft.trim() || sending || loadingMessages || selected.state === 'RESOLVED'"><LegacyIcon :class="sending ? 'el-icon-loading' : 'el-icon-position'" /> {{ sending ? '保存中' : '发送消息' }}</button></div></form>
         </footer>
       </section>
     </main>
@@ -43,6 +50,8 @@
 
 <script>
 import conversationApi from '../apis/module/conversation';
+import supportApi from '../apis/module/support';
+import { senderKey } from '../utils/support.mjs';
 
 function cursorInteger(value) {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return BigInt(value);
@@ -54,17 +63,71 @@ function cursorInteger(value) {
 export default {
   name: 'ConversationWorkspace',
   data() {
-    return { environmentLabel: import.meta.env.VITE_ENV_LABEL || '开发预览', conversations: [], selected: null, messages: [], drafts: {}, pending: null, error: '', createError: '', loadingList: false, loadingMessages: false, sending: false, createVisible: false, creating: false, newTitle: '', listCursor: 0, listHasMore: false, selectionVersion: 0 };
+    return { environmentLabel: import.meta.env.VITE_ENV_LABEL || '开发预览', conversations: [], selected: null, messages: [], drafts: {}, pending: null, error: '', createError: '', loadingList: false, loadingMessages: false, sending: false, createVisible: false, creating: false, newTitle: '', listCursor: 0, listHasMore: false, selectionVersion: 0, supportRequest: null, supportBusy: false, handoffPending: {}, pollTimer: null, messageCursor: '0', eventCursor: '0', pollBusy: false, disposed: false };
   },
   computed: {
+    humanActive() { return ['HUMAN_QUEUED', 'HUMAN_ACTIVE'].includes(this.selected?.state); },
     draft: {
       get() { return this.selected ? this.drafts[this.selected.id] || '' : ''; },
       set(value) { if (this.selected) this.drafts[this.selected.id] = value; },
     },
   },
-  mounted() { this.loadConversations(); },
-  beforeUnmount() { this.selectionVersion++; },
+  mounted() { this.loadConversations(); this.pollTimer = setInterval(() => this.pollConversation(), 4000); },
+  beforeUnmount() { this.disposed = true; this.selectionVersion++; clearInterval(this.pollTimer); },
   methods: {
+    senderKey,
+    async refreshSupport(id, version) {
+      const detail = await conversationApi.detail(id);
+      if (version !== this.selectionVersion) return;
+      this.selected = { ...this.selected, ...detail };
+      let more = true;
+      while (more) {
+        const page = await conversationApi.events(id, this.eventCursor);
+        if (version !== this.selectionVersion) return;
+        for (const event of page.items) if (event.data?.request_id) this.supportRequest = { request_id: event.data.request_id };
+        if (page.has_more && cursorInteger(page.next_cursor) <= cursorInteger(this.eventCursor)) throw new Error('历史记录游标异常，请刷新后重试');
+        this.eventCursor = page.next_cursor; more = page.has_more;
+      }
+      if (this.supportRequest) {
+        const request = await supportApi.get(this.supportRequest.request_id);
+        if (version === this.selectionVersion) this.supportRequest = request;
+      }
+    },
+    async pollConversation() {
+      if (!this.selected || this.pollBusy || this.loadingMessages || this.sending || this.supportBusy || this.disposed) return;
+      this.pollBusy = true; const version = this.selectionVersion, id = this.selected.id;
+      try {
+        let more = true;
+        while (more) {
+          const page = await conversationApi.messages(id, this.messageCursor);
+          if (version !== this.selectionVersion) return;
+          for (const message of page.items) if (!this.messages.some(item => item.id === message.id)) this.messages.push(message);
+          if (page.has_more && cursorInteger(page.next_cursor) <= cursorInteger(this.messageCursor)) throw new Error('历史记录游标异常，请刷新后重试');
+          this.messageCursor = page.next_cursor; more = page.has_more;
+        }
+        await this.refreshSupport(id, version);
+      } catch (error) { if (version === this.selectionVersion) this.error = error.message; }
+      finally { this.pollBusy = false; }
+    },
+    async supportAction(action) {
+      if (!this.selected || this.supportBusy) return;
+      const id = this.selected.id, version = this.selectionVersion; this.supportBusy = true; this.error = '';
+      try {
+        await action(id);
+        if (version === this.selectionVersion) await this.refreshSupport(id, version);
+      } catch (error) { if (version === this.selectionVersion) this.error = error.message; }
+      finally { this.supportBusy = false; }
+    },
+    handoff() {
+      return this.supportAction(async id => {
+        const clientId = this.handoffPending[id] || (this.handoffPending[id] = crypto.randomUUID());
+        const result = await conversationApi.handoff(id, { client_request_id: clientId, requested_mode: 'text', target_agent_user_id: null });
+        delete this.handoffPending[id];
+        if (this.selected?.id === id) this.supportRequest = result;
+      });
+    },
+    cancelHandoff() { const id = this.supportRequest?.request_id; return id && this.supportAction(() => supportApi.action(id, 'cancel')); },
+    resumeAi() { return this.supportAction(id => conversationApi.resume(id)); },
     formatDate(value, time = false) { return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', ...(time ? { hour: '2-digit', minute: '2-digit' } : {}) }); },
     openCreate() { this.newTitle = ''; this.createError = ''; this.createVisible = true; },
     focusTitle() { this.$refs.titleInput?.focus(); },
@@ -92,7 +155,7 @@ export default {
     },
     async selectConversation(item) {
       const version = ++this.selectionVersion;
-      this.selected = item; this.messages = []; this.loadingMessages = true; this.error = '';
+      this.selected = item; this.messages = []; this.supportRequest = null; this.messageCursor = '0'; this.eventCursor = '0'; this.loadingMessages = true; this.error = '';
       try {
         let after = 0; let more = true;
         while (more) {
@@ -100,8 +163,9 @@ export default {
           if (version !== this.selectionVersion) return;
           this.messages.push(...page.items);
           if (page.has_more && cursorInteger(page.next_cursor) <= cursorInteger(after)) throw new Error('历史记录游标异常，请刷新后重试');
-          after = page.next_cursor; more = page.has_more;
+          after = page.next_cursor; this.messageCursor = after; more = page.has_more;
         }
+        await this.refreshSupport(item.id, version);
         this.scrollToLatest();
       } catch (error) { if (version === this.selectionVersion) this.error = error.message; }
       finally { if (version === this.selectionVersion) this.loadingMessages = false; }
@@ -109,7 +173,7 @@ export default {
     scrollToLatest() { this.$nextTick(() => { const list = this.$refs.messageList; if (list) list.scrollTop = list.scrollHeight; }); },
     composerKeydown(event) { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); this.sendMessage(); } },
     async sendMessage() {
-      if (!this.selected || !this.draft.trim() || this.sending || this.loadingMessages) return;
+      if (!this.selected || this.selected.state === 'RESOLVED' || !this.draft.trim() || this.sending || this.loadingMessages) return;
       const id = this.selected.id; const text = this.draft;
       const sameRetry = this.pending && this.pending.id === id && this.pending.text === text;
       const clientId = sameRetry ? this.pending.clientId : crypto.randomUUID();
@@ -127,6 +191,11 @@ export default {
 </script>
 
 <style scoped>
+.support-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; padding: 8px 0; }
+.message-row.incoming { justify-content: flex-end; flex-direction: row-reverse; }
+.message-row.incoming .message-meta { text-align: left; }
+.message-row.incoming .message-bubble { background: #f2f5f7; border-radius: 2px 12px 12px; }
+.message-row.incoming .message-saved { text-align: left; }
 .conversation-workspace { height: 100vh; height: 100dvh; color: #23334b; background: #f5f7fb; display: flex; flex-direction: column; text-align: left; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif; }
 .workspace-header { height: 68px; flex: 0 0 68px; background: #fff; border-bottom: 1px solid #e7ebf2; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; gap: 12px; }
 .workspace-brand { display: flex; align-items: center; gap: 12px; font-size: 18px; }

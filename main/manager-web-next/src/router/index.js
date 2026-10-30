@@ -3,6 +3,7 @@ import { pinia, useAuthStore } from '../stores/auth'
 import { anonymousRouteNames } from './authLifecycle'
 
 const routes = [
+  ...(import.meta.env.VITE_CONVERSATION_ENABLED === 'true' ? [{ path: '/support', name: 'SupportWorkspace', component: () => import('../views/SupportWorkspace.vue') }] : []),
   ...(import.meta.env.VITE_CONVERSATION_ENABLED === 'true' ? [{
     path: '/conversations',
     name: 'ConversationWorkspace',

@@ -434,6 +434,10 @@ public class AttachmentService {
         if(!a.status().equals("ready") || (mustBeSent && a.message()==null))throw problem(409,"ANNOTATION_SOURCE_NOT_READY");
         return view(a);
     }
+    public View serverUnsentImage(long actor,String attachmentId,String conversation) {
+        View view=serverSource(actor,attachmentId,conversation,false);A a=attachment(id(attachmentId),true);
+        if(a.actor()!=actor || a.message()!=null || !a.kind().equals("image"))throw problem(409,"LIVE_CAPTURE_SOURCE_INVALID");return view;
+    }
     public String serverCreateGenerated(long actor,String conversation,long snapshotId,String type) {
         if(!generatedType(type))throw problem(400,"INVALID_GENERATED_JOB");write(actor,conversation);long id=nextId();
         db.update("INSERT INTO ai_attachment(id,conversation_id,uploader_user_id,client_upload_id,filename,mime_type,kind,size,sha256,status,metadata_json,expires_at) VALUES(?,?,?,?,?,'image/jpeg','image',0,?,'processing','{}',?)",id,conversation,actor,"_b4_"+type+"_"+snapshotId,"snapshot-"+snapshotId+".jpg","0".repeat(64),timestamp(Instant.now().plusSeconds(retention)));

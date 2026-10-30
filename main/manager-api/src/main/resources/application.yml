@@ -72,6 +72,7 @@ features:
   ai-text-enabled: false
   attachments-enabled: false
   annotations-enabled: false
+  support-media-enabled: false
 
 # Worker credential is dedicated to this execution protocol and never a user/server token.
 ai:
@@ -99,3 +100,19 @@ media:
       prefix: ${MEDIA_S3_PREFIX:b3-private-attachments/}
       access-key: ${MEDIA_S3_ACCESS_KEY:}
       secret-key: ${MEDIA_S3_SECRET_KEY:}
+
+# B5 uses private, explicit credentials and a dedicated room namespace on shared LiveKit.
+support-media:
+  livekit:
+    internal-url: ${SUPPORT_LIVEKIT_INTERNAL_URL:}
+    public-url: ${SUPPORT_LIVEKIT_PUBLIC_URL:}
+    api-key: ${SUPPORT_LIVEKIT_API_KEY:}
+    api-secret: ${SUPPORT_LIVEKIT_API_SECRET:}
+    room-prefix: ${SUPPORT_LIVEKIT_ROOM_PREFIX:xz-support-b5-}
+    request-timeout-millis: 5000
+    token-ttl-seconds: 60
+  invitation-seconds: 45
+  transfer-seconds: 60
+  ready-seconds: 15
+  reconnect-seconds: 60
+  maintenance-delay-ms: 3000

@@ -60,6 +60,27 @@ class MediaPreparationTests(unittest.IsolatedAsyncioTestCase):
         prepared=await Worker(config(),MediaManager(),None).prepare(task())
         self.assertEqual(prepared['messages'],task()['messages'])
 
+    async def test_java_long_frame_timestamps_are_bounded_and_ids_preserved(self):
+        for timestamp in ('0', '501', '180000', 0, 501, 180000):
+            with self.subTest(timestamp=timestamp):
+                manager = MediaManager()
+                reference = ref('frame_0', 'video', time_ms=timestamp,
+                                attachment_id='2116127778922262529')
+                prepared = await Worker(config(vision_model='vision-model'),manager,None).prepare(media_task([reference]))
+                self.assertIn(f'{int(timestamp)} ms', json.dumps(prepared['messages']))
+                self.assertEqual(manager.downloads[0]['attachment_id'], '2116127778922262529')
+                self.assertEqual(reference['time_ms'], timestamp)
+
+    async def test_noncanonical_or_out_of_range_frame_timestamps_never_download(self):
+        for timestamp in ('00','01',' 1','1 ','+1','-1','1e3','1.0','NaN',
+                          '180001','9223372036854775807','',None,True,1.0):
+            with self.subTest(timestamp=timestamp):
+                manager = MediaManager()
+                with self.assertRaisesRegex(ProviderFailure, 'MEDIA_INPUT_UNAVAILABLE'):
+                    await Worker(config(vision_model='vision-model'),manager,None).prepare(
+                        media_task([ref('frame_0','video',time_ms=timestamp)]))
+                self.assertEqual(manager.downloads, [])
+
     async def test_ref_limit_rejected_before_download(self):
         manager=MediaManager()
         with self.assertRaisesRegex(ProviderFailure,'MEDIA_INPUT_UNAVAILABLE'):

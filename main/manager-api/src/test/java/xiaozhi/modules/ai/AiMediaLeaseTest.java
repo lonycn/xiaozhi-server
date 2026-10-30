@@ -30,8 +30,8 @@ class AiMediaLeaseTest {
             when(transactions.getTransaction(any(TransactionDefinition.class))).thenAnswer(i->{active.set(true);return null;});
             doAnswer(i->{active.set(false);return null;}).when(transactions).commit(any());
             doAnswer(i->{active.set(false);return null;}).when(transactions).rollback(any());
-            when(jdbc.queryForList("SELECT * FROM ai_run WHERE id=?",RUN)).thenReturn(List.of(run));
-            when(jdbc.queryForList("SELECT * FROM ai_run WHERE id=? FOR UPDATE",RUN)).thenReturn(List.of(run));
+            when(jdbc.query(eq("SELECT * FROM ai_run WHERE id=?"),any(xiaozhi.common.jdbc.TimestampColumnMapRowMapper.class),eq(RUN))).thenReturn(List.of(run));
+            when(jdbc.query(eq("SELECT * FROM ai_run WHERE id=? FOR UPDATE"),any(xiaozhi.common.jdbc.TimestampColumnMapRowMapper.class),eq(RUN))).thenReturn(List.of(run));
             when(jdbc.queryForList("SELECT * FROM ai_conversation WHERE id=? FOR UPDATE",CONVERSATION)).thenReturn(List.of(conversation));
             when(jdbc.queryForObject("SELECT COUNT(*) FROM sys_user WHERE id=? AND status=1",Long.class,1L)).thenReturn(1L);
             when(jdbc.queryForObject("SELECT lease_expires_at>CURRENT_TIMESTAMP(3) FROM ai_run WHERE id=?",Boolean.class,RUN)).thenReturn(true);
@@ -80,11 +80,11 @@ class AiMediaLeaseTest {
         String later="e".repeat(32);
         when(f.jdbc.queryForList(AiExecutionService.DISCOVERY_QUERY,32L))
             .thenReturn(List.of(Map.of("id",later,"conversation_id",CONVERSATION,"list_sequence",33L)));
-        when(f.jdbc.queryForList("SELECT * FROM ai_run WHERE id=? FOR UPDATE",later))
+        when(f.jdbc.query(eq("SELECT * FROM ai_run WHERE id=? FOR UPDATE"),any(xiaozhi.common.jdbc.TimestampColumnMapRowMapper.class),eq(later)))
             .thenReturn(List.of(Map.of("id",later,"status","completed")));
         assertNull(f.service.claim(new AiModels.Claim("worker")));
         verify(f.jdbc).queryForList(AiExecutionService.DISCOVERY_QUERY,32L);
-        verify(f.jdbc).queryForList("SELECT * FROM ai_run WHERE id=? FOR UPDATE",later);
+        verify(f.jdbc).query(eq("SELECT * FROM ai_run WHERE id=? FOR UPDATE"),any(xiaozhi.common.jdbc.TimestampColumnMapRowMapper.class),eq(later));
     }
     @Test void discoveryRewindsForOldExpiredRunAndRecoversAfterEmptyQueue() {
         var f=new Fixture();f.run.put("attempt",0L);
@@ -95,12 +95,12 @@ class AiMediaLeaseTest {
         when(f.attachments.plan(eq(CONVERSATION),eq(4L),any())).thenReturn(new AiAttachmentContext.Plan(List.of(),true,false,null));
         assertNull(f.service.claim(new AiModels.Claim("worker")));
         assertNull(f.service.claim(new AiModels.Claim("worker")));
-        verify(f.jdbc,times(2)).queryForList("SELECT * FROM ai_run WHERE id=? FOR UPDATE",RUN);
+        verify(f.jdbc,times(2)).query(eq("SELECT * FROM ai_run WHERE id=? FOR UPDATE"),any(xiaozhi.common.jdbc.TimestampColumnMapRowMapper.class),eq(RUN));
         when(f.jdbc.queryForList(AiExecutionService.DISCOVERY_QUERY,0L)).thenReturn(List.of());
         assertNull(f.service.claim(new AiModels.Claim("worker")));
         when(f.jdbc.queryForList(AiExecutionService.DISCOVERY_QUERY,0L)).thenReturn(List.of(candidate));
         assertNull(f.service.claim(new AiModels.Claim("worker")));
-        verify(f.jdbc,times(3)).queryForList("SELECT * FROM ai_run WHERE id=? FOR UPDATE",RUN);
+        verify(f.jdbc,times(3)).query(eq("SELECT * FROM ai_run WHERE id=? FOR UPDATE"),any(xiaozhi.common.jdbc.TimestampColumnMapRowMapper.class),eq(RUN));
         verify(f.jdbc,never()).update(anyString(),any(Object[].class));
     }
 

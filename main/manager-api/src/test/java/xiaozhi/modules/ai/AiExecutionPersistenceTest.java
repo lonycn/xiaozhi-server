@@ -85,7 +85,10 @@ class AiExecutionPersistenceTest {
         String id=conversation();var input=conversations.send(owner,id,text("question","isolated question"));
         assertEquals(input,conversations.send(owner,id,text("question","isolated question")));
         assertEquals(1,ai.list(owner,id,0,100).items().size());assertEquals(2,conversations.messages(owner,id,0,100).items().size());
-        var queued=run(id);var task=ai.claim(new Claim("worker-1"));assertEquals(queued.runId(),task.runId());assertEquals("test-model",task.model());
+        var queued=run(id);
+        assertTrue(Math.abs(java.time.Duration.between(queued.createdAt(),java.time.Instant.now()).toSeconds())<90,
+                "DATETIME must use the connection time zone, not a guessed UTC offset");
+        var task=ai.claim(new Claim("worker-1"));assertEquals(queued.runId(),task.runId());assertEquals("test-model",task.model());
         assertTrue(task.messages().stream().anyMatch(m->m.content().contains("isolated question")));
         ai.delta(task.runId(),new Delta(task.leaseToken(),1L,"你"));
         long events=number("SELECT last_event_seq FROM ai_conversation WHERE id=?",id);

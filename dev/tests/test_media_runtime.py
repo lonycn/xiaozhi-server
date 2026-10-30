@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import zipfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -81,6 +82,57 @@ class MediaRuntimeTest(unittest.TestCase):
         with patch.object(manage, 'ANNOTATION_DEFAULT_FONT', font):
             manage.set_annotations_enabled(True)
         self.assertTrue(manage.media_settings()['annotations_enabled'])
+
+    def rtc_source(self, internal='http://127.0.0.1:17880', public='http://example.test:17880', key='synthetic-key', secret='synthetic-secret'):
+        path = self.root / 'rtc-source.env'
+        path.write_text(f'LIVEKIT_INTERNAL_URL={internal}\nLIVEKIT_URL={public}\nLIVEKIT_API_KEY={key}\nLIVEKIT_API_SECRET={secret}\n')
+        return str(path)
+
+    def test_rtc_opt_in_preserves_private_source_and_room_prefix(self):
+        manage.configure()
+        self.assertNotIn('features.support-media-enabled=true', (self.root / 'application-dev.properties').read_text())
+        source = self.rtc_source()
+        manage.enable_rtc(source, 'https://rtc.example.test')
+        settings = manage.rtc_settings()
+        self.assertEqual(settings['internal-url'], 'http://host.docker.internal:17880')
+        self.assertEqual(settings['public-url'], 'wss://rtc.example.test')
+        self.assertEqual((self.root / 'rtc-settings.json').stat().st_mode & 0o777, 0o600)
+        manage.configure()
+        self.assertIn('features.support-media-enabled=true', (self.root / 'application-dev.properties').read_text())
+        self.assertIn('support-media.livekit.room-prefix=' + settings['room-prefix'], (self.root / 'application-dev.properties').read_text())
+        manage.enable_rtc(source, 'wss://new.example.test')
+        self.assertEqual(manage.rtc_settings()['room-prefix'], settings['room-prefix'])
+        api = self.root / 'api'
+        (api / 'target').mkdir(parents=True)
+        jar = api / 'target/xiaozhi-esp32-api.jar'
+        with patch.object(manage, 'API', api):
+            with self.assertRaisesRegex(RuntimeError, 'drain support'):
+                manage.disable_rtc()
+            self.assertTrue(manage.rtc_settings()['enabled'])
+            with zipfile.ZipFile(jar, 'w') as archive:
+                archive.writestr('BOOT-INF/classes/xiaozhi/modules/supportmedia/MediaDrainController.class', b'test-marker')
+            manage.disable_rtc()
+        manage.configure()
+        props = (self.root / 'application-dev.properties').read_text()
+        self.assertNotIn('features.support-media-enabled=true', props)
+        self.assertIn('support-media.livekit.room-prefix=' + settings['room-prefix'], props)
+        self.assertIn('support-media.livekit.api-key=synthetic-key', props)
+        self.assertFalse(manage.rtc_settings()['enabled'])
+        manage.enable_rtc()
+        self.assertEqual(manage.rtc_settings()['room-prefix'], settings['room-prefix'])
+        before = (self.root / 'rtc-settings.json').read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'redirect'):
+            manage.enable_rtc(self.rtc_source(internal='http://other.test:17880'))
+        self.assertEqual((self.root / 'rtc-settings.json').read_bytes(), before)
+
+    def test_rtc_invalid_config_fails_closed_without_snapshot(self):
+        for kw in ({'internal': 'http://user:pass@example.test'}, {'secret': ''},
+                   {'public': 'https://example.test/?token=secret'}, {'key': 'bad\\key'}):
+            with self.subTest(kw=kw), self.assertRaises(RuntimeError):
+                manage.enable_rtc(self.rtc_source(**kw))
+            self.assertFalse((self.root / 'rtc-settings.json').exists())
+        with self.assertRaisesRegex(RuntimeError, 'requires --rtc-env'):
+            manage.enable_rtc()
 
     def test_existing_asr_credentials_exported_privately_without_db_writes(self):
         with self.mock_db() as db:

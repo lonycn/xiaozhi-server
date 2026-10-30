@@ -43,6 +43,10 @@ public class XssFilter implements Filter {
     }
 
     private boolean shouldNotFilter(HttpServletRequest request) {
+        // This exact endpoint verifies the signed RAW body before parsing and enforces its own
+        // bounded read. Rewriting/buffering JSON here would invalidate the signature and bypass
+        // that bound. Keep every other URL on the existing XSS path.
+        if ("/internal/livekit/webhook".equals(request.getServletPath())) return true;
         // 放行不过滤的URL
         return properties.getExcludeUrls().stream()
                 .anyMatch(excludeUrl -> pathMatcher.match(excludeUrl, request.getServletPath()));

@@ -769,3 +769,6 @@ databaseChangeLog:
   - include:
       file: annotations.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: support-media.changelog.yaml
+      relativeToChangelogFile: true

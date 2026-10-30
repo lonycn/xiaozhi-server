@@ -117,6 +117,8 @@ public class ShiroConfig {
         filterMap.put("/voiceClone/play/**", "anon");
         filterMap.put("/internal/ai-worker/**", "aiWorker");
         filterMap.put("/internal/media-worker/**", "mediaWorker");
+        // Exact signed raw-body webhook endpoint; controller performs independent LiveKit verification.
+        filterMap.put("/internal/livekit/webhook", "anon");
         // Only this precise content endpoint accepts a short capability. The controller verifies
         // its attachment/variant/actor/expiry and current account + resource grant on every GET.
         filterMap.put("/api/v1/ai/attachments/*/content", "anon");

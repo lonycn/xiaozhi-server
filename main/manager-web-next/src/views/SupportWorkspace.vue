@@ -1,6 +1,6 @@
 <template>
-  <main class="support-workspace">
-    <header><h1>{{ $t('support.workspace') }}</h1><router-link to="/home">{{ $t('support.back') }}</router-link></header>
+  <section class="support-workspace">
+    <header><h1>{{ $t('support.workspace') }}</h1></header>
     <el-alert v-if="error" :title="error" type="error" show-icon @close="error = ''" />
     <p v-if="loading" role="status">{{ $t('support.loading') }}</p>
     <p v-if="!loading && !profile" role="status">{{ admin ? `${$t('support.agent')} · ${$t('knowledgeBaseDialog.statusDisabled')}` : $t('support.denied') }}</p>
@@ -30,7 +30,7 @@
       <form class="toolbar" @submit.prevent="saveProfile"><el-input v-model="edit.user_id" :aria-label="$t('support.userId')" :placeholder="$t('support.userId')" /><el-select v-model="edit.role" :aria-label="$t('support.role')"><el-option value="support_agent" :label="$t('support.agent')" /><el-option value="expert" :label="$t('support.expert')" /></el-select><el-switch :aria-label="$t('support.enabled')" v-model="edit.enabled" :active-text="$t('support.enabled')" /><el-input-number v-model="edit.capacity_text" :min="1" :max="20" :aria-label="$t('support.capacity')" /><el-button native-type="submit" type="primary" :loading="saving" :disabled="!/^\d+$/.test(edit.user_id)">{{ $t('support.save') }}</el-button></form>
       <el-table :data="agents"><el-table-column :label="$t('support.username')"><template #default="{ row }">{{ row.username }}<el-tag v-if="row.account_enabled === false" type="danger" size="small">{{ $t('knowledgeBaseDialog.statusDisabled') }}</el-tag></template></el-table-column><el-table-column prop="user_id" :label="$t('support.userId')" /><el-table-column :label="$t('support.role')"><template #default="{ row }">{{ $t(row.role === 'expert' ? 'support.expert' : 'support.agent') }}</template></el-table-column><el-table-column :label="$t('support.enabled')"><template #default="{ row }">{{ $t(row.enabled ? 'knowledgeBaseDialog.statusEnabled' : 'knowledgeBaseDialog.statusDisabled') }}</template></el-table-column><el-table-column prop="capacity_text" :label="$t('support.capacity')" /><el-table-column :label="$t('support.edit')"><template #default="{ row }"><el-button @click="edit = { user_id: row.user_id, role: row.role, enabled: row.enabled, capacity_text: row.capacity_text }">{{ $t('support.edit') }}</el-button></template></el-table-column></el-table>
     </section>
-  </main>
+  </section>
 </template>
 <script>
 import supportApi from '../apis/module/support';
@@ -161,6 +161,6 @@ export default {
 };
 </script>
 <style scoped>
-.support-workspace { padding: 24px; max-width: 1500px; margin: auto; text-align: left; color: #344968; }
+.support-workspace { padding: 0; width: 100%; margin: 0; text-align: left; color: #344968; }
 header,.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; } header { justify-content: space-between; } h1 { font-size: 22px; } h2 { font-size: 16px; } .toolbar .el-input { width: 230px; } .toolbar .el-select { width: 180px; } .workspace-grid { display: grid; grid-template-columns: 330px minmax(0,1fr); gap: 24px; } aside,.chat,.admin { min-width: 0; box-sizing: border-box; border: 1px solid #e6ebf3; padding: 18px; border-radius: 10px; background: white; } .queue-row { display: flex; gap: 8px; align-items: center; overflow-wrap: anywhere; margin: 8px 0; font-size: 12px; }.request-button { display: block; height: auto; white-space: normal; overflow-wrap: anywhere; text-align: left; margin: 8px 0; max-width: 100%; overflow: hidden; } .history { min-height: 200px; max-height: 55vh; overflow: auto; } article { border-bottom: 1px solid #edf1f5; padding: 12px; } article p { white-space: pre-wrap; overflow-wrap: anywhere; } small { color: #7b8ca5; } form p,.toolbar span { font-size: 12px; color: #7b8ca5; } form .el-button { margin-top: 8px; } .admin { margin-top: 24px; } @media(max-width:760px) { .workspace-grid { grid-template-columns: minmax(0,1fr); } .support-workspace { padding: 12px; } }
 </style>

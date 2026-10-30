@@ -1,6 +1,6 @@
 <template>
-  <div class="welcome">
-    <HeaderBar />
+  <div class="welcome admin-page">
+    
 
     <div class="operation-bar">
       <h2 class="page-title">{{ $t("modelConfig." + activeTab) }}</h2>
@@ -236,23 +236,19 @@
         @confirm="handleAddConfirm"
       />
     </div>
-    <el-footer>
-      <version-footer />
-    </el-footer>
+    
   </div>
 </template>
 
 <script>
 import Api from "@/apis/api";
 import AddModelDialog from "@/components/AddModelDialog.vue";
-import HeaderBar from "@/components/HeaderBar.vue";
 import ModelEditDialog from "@/components/ModelEditDialog.vue";
 import TtsModel from "@/components/TtsModel.vue";
 import CustomPagination from "@/components/CustomPagination.vue";
 import CustomButton from "@/components/CustomButton.vue";
-import VersionFooter from "@/components/VersionFooter.vue";
 export default {
-  components: { HeaderBar, ModelEditDialog, TtsModel, AddModelDialog, VersionFooter, CustomPagination, CustomButton },
+  components: { ModelEditDialog, TtsModel, AddModelDialog, CustomPagination, CustomButton },
   data() {
     return {
       addDialogVisible: false,
@@ -569,9 +565,9 @@ export default {
 }
 
 .welcome {
-  min-width: 900px;
-  min-height: 506px;
-  height: 100vh;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   position: relative;
   flex-direction: column;
@@ -583,7 +579,9 @@ export default {
 
 .main-wrapper {
   // 顶部 63px 底部 35px 查询72px
-  height: calc(100vh - 63px - 35px - 72px);
+  flex: 1;
+  min-height: 0;
+  height: auto;
   margin: 0 22px;
   border-radius: 15px;
   position: relative;
@@ -675,7 +673,7 @@ export default {
   flex: 1;
   padding: 24px 24px 0;
   height: 100%;
-  min-width: 600px;
+  min-width: 0;
   overflow: hidden;
   background-color: white;
   display: flex;
@@ -841,7 +839,7 @@ export default {
 }
 
 :deep(.nav-panel .el-menu-item.is-active .menu-text) {
-  color: #fff !important;
+  color: #3375d5 !important;
 }
 
 
@@ -983,4 +981,27 @@ export default {
   font-size: 14px;
   margin-top: 8px;
 }
+</style>
+
+<style scoped>
+.admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
+.admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
+.admin-page .right-operations { flex-wrap: wrap; }
+.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
+.admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
+.admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
+@media (max-width: 760px) {
+  .admin-page .right-operations { margin-left: 0; width: 100%; }
+  .admin-page .search-input { max-width: 100%; }
+}
+</style>
+
+<style scoped>
+.admin-page .nav-panel { min-width: 158px; width: 158px; background: #fff; padding: 12px 8px; }
+.admin-page .nav-panel .el-menu-item { width: 100%; min-width: 0; margin: 2px 0; padding: 0 14px !important; border-radius: 4px !important; justify-content: flex-start; background: transparent; }
+.admin-page .nav-panel .el-menu-item.is-active { background: #ecf4ff; color: #3375d5; }
+.admin-page .nav-panel .el-menu-item.is-active::before { display: none; }
+.admin-page .nav-panel .menu-text { text-align: left; color: inherit; }
+@media (max-width: 760px) { .admin-page .content-panel { flex-direction: column; } .admin-page .nav-panel { width: 100%; min-width: 0; height: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid #e5e9ef; } .admin-page .nav-panel .el-menu-item { min-width: max-content; width: auto; } }
 </style>

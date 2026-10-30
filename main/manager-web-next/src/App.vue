@@ -1,9 +1,15 @@
-<template><el-config-provider :locale="elementLocale"><router-view /></el-config-provider></template>
+<template><el-config-provider :locale="elementLocale"><router-view v-if="anonymous" /><AdminLayout v-else><router-view /></AdminLayout></el-config-provider></template>
 <script>
 import i18n, { elementLocales } from './i18n';
+import AdminLayout from './layouts/AdminLayout.vue';
+import { anonymousRouteNames } from './router/authLifecycle';
 export default {
   name: 'App',
-  computed: { elementLocale() { return elementLocales[i18n.locale] || elementLocales.zh_CN; } },
+  components: { AdminLayout },
+  computed: {
+    anonymous() { return !this.$route.name || anonymousRouteNames.has(this.$route.name); },
+    elementLocale() { return elementLocales[i18n.locale] || elementLocales.zh_CN; },
+  },
   mounted() {
     if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && import.meta.env.VITE_H5_URL) window.location.href = import.meta.env.VITE_H5_URL;
   },

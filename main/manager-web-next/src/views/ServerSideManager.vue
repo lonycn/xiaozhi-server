@@ -1,6 +1,6 @@
 <template>
-  <div class="welcome">
-    <HeaderBar />
+  <div class="welcome admin-page">
+    
     <div class="main-wrapper">
       <div class="content-panel">
         <div class="content-area">
@@ -32,20 +32,16 @@
         </div>
       </div>
     </div>
-    <el-footer>
-      <version-footer />
-    </el-footer>
+    
   </div>
 </template>
 
 <script>
 import Api from "@/apis/api";
 import CustomButton from "@/components/CustomButton.vue";
-import HeaderBar from "@/components/HeaderBar.vue";
-import VersionFooter from "@/components/VersionFooter.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, CustomButton },
+  components: { CustomButton },
   data() {
     return {
       paramsList: [],
@@ -130,9 +126,9 @@ export default {
 
 <style lang="scss" scoped>
 .welcome {
-  min-width: 900px;
-  min-height: 506px;
-  height: 100vh;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   position: relative;
   flex-direction: column;
@@ -144,7 +140,9 @@ export default {
 }
 
 .main-wrapper {
-  height: calc(100vh - 63px - 35px);
+  flex: 1;
+  min-height: 0;
+  height: auto;
   padding: 20px 22px 0;
   position: relative;
   display: flex;
@@ -170,7 +168,7 @@ export default {
 .content-area {
   flex: 1;
   height: 100%;
-  min-width: 600px;
+  min-width: 0;
   overflow: auto;
   background-color: white;
   display: flex;
@@ -268,5 +266,19 @@ export default {
 .copy-button {
   font-size: 14px;
   color: #5778ff;
+}
+</style>
+
+<style scoped>
+.admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
+.admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
+.admin-page .right-operations { flex-wrap: wrap; }
+.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
+.admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
+.admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
+@media (max-width: 760px) {
+  .admin-page .right-operations { margin-left: 0; width: 100%; }
+  .admin-page .search-input { max-width: 100%; }
 }
 </style>

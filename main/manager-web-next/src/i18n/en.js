@@ -1,4 +1,9 @@
 export default {
+  'adminLayout.workspace': 'Workspace',
+  'adminLayout.models': 'Models and knowledge',
+  'adminLayout.system': 'System management',
+  'adminLayout.conversations': 'Conversations',
+
   // Support B1: Chinese copy is shared temporarily across the six locales.
   'support.errorAuth': "Your session has expired. Please sign in again.",
   'support.errorTimeout': "Connection timed out. Please try again.",

@@ -1,4 +1,9 @@
 export default {
+  'adminLayout.workspace': '工作空間',
+  'adminLayout.models': '模型與知識',
+  'adminLayout.system': '系統管理',
+  'adminLayout.conversations': '統一對話',
+
   // Support B1: Chinese copy is shared temporarily across the six locales.
   'support.errorAuth': "登入已過期，請重新登入",
   'support.errorTimeout': "連線逾時，請重試",

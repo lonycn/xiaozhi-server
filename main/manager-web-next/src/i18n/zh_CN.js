@@ -1,4 +1,9 @@
 export default {
+  'adminLayout.workspace': '工作空间',
+  'adminLayout.models': '模型与知识',
+  'adminLayout.system': '系统管理',
+  'adminLayout.conversations': '统一对话',
+
   'support.errorAuth': '登录已过期，请重新登录',
   'support.errorTimeout': '连接超时，请重试',
   'support.errorPermission': '当前账号没有此操作权限，或接待已转交，请刷新后重试',

@@ -1,10 +1,6 @@
 <template>
   <div class="conversation-workspace">
-    <header class="workspace-header">
-      <div class="workspace-brand"><span class="brand-icon"><LegacyIcon class="el-icon-chat-dot-round" /></span><strong>统一对话</strong><span class="environment-label">{{ environmentLabel }}</span></div>
-      <router-link to="/home" class="back-link"><LegacyIcon class="el-icon-back" /> 返回智控台</router-link>
-    </header>
-    <main class="workspace-grid">
+    <div class="workspace-grid">
       <aside class="conversation-sidebar" aria-label="会话列表">
         <div class="sidebar-heading"><span>我的会话</span><button class="icon-button" aria-label="刷新会话列表" :disabled="loadingList || sending" @click="loadConversations()"><LegacyIcon class="el-icon-refresh" /></button></div>
         <button class="new-conversation" :disabled="sending" @click="openCreate"><LegacyIcon class="el-icon-plus" /> 新建对话</button>
@@ -39,7 +35,7 @@
           <form class="message-composer" @submit.prevent="sendMessage"><textarea v-model="draft" aria-label="消息内容" :disabled="!selected || sending || selected.state === 'RESOLVED'" maxlength="8000" rows="3" :placeholder="selected ? '描述你的问题…' : '新建或选择会话后，即可开始记录'" @keydown="composerKeydown" /><div class="composer-bottom"><span>{{ draft.length }}/8000 <span class="keyboard-hint">· Enter 发送，Shift + Enter 换行</span></span><button type="submit" class="primary-button send-button" :disabled="!selected || !draft.trim() || sending || loadingMessages || selected.state === 'RESOLVED'"><LegacyIcon :class="sending ? 'el-icon-loading' : 'el-icon-position'" /> {{ sending ? '保存中' : '发送消息' }}</button></div></form>
         </footer>
       </section>
-    </main>
+    </div>
     <el-dialog title="新建对话" v-model="createVisible" width="min(440px, 92vw)" :close-on-click-modal="!creating" @opened="focusTitle">
       <label class="title-label" for="conversation-title">对话名称</label><el-input id="conversation-title" ref="titleInput" v-model="newTitle" placeholder="例如：3 号库压缩机运行异响" maxlength="200" :disabled="creating" @keyup.enter="createConversation" /><p class="dialog-hint">使用设备或问题命名，方便以后找到。</p>
       <p v-if="createError" class="create-error" role="alert">{{ createError }}</p>
@@ -196,13 +192,13 @@ export default {
 .message-row.incoming .message-meta { text-align: left; }
 .message-row.incoming .message-bubble { background: #f2f5f7; border-radius: 2px 12px 12px; }
 .message-row.incoming .message-saved { text-align: left; }
-.conversation-workspace { height: 100vh; height: 100dvh; color: #23334b; background: #f5f7fb; display: flex; flex-direction: column; text-align: left; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif; }
+.conversation-workspace { height: 100%; min-height: 0; color: #23334b; background: #f5f7fb; display: flex; flex-direction: column; text-align: left; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif; border: 1px solid #e5e9f0; border-radius: 6px; overflow: hidden; }
 .workspace-header { height: 68px; flex: 0 0 68px; background: #fff; border-bottom: 1px solid #e7ebf2; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; gap: 12px; }
 .workspace-brand { display: flex; align-items: center; gap: 12px; font-size: 18px; }
 .brand-icon { width: 34px; height: 34px; border-radius: 10px; background: #477bfa; color: white; display: grid; place-items: center; font-size: 22px; }
 .environment-label { padding: 4px 9px; border-radius: 5px; color: #60759d; background: #f0f4fb; font-size: 12px; font-weight: 500; }
 .back-link { color: #67758b; text-decoration: none; font-size: 13px; white-space: nowrap; }
-.workspace-grid { display: grid; grid-template-columns: 280px minmax(0, 1fr); flex: 1; min-height: 0; max-width: 1600px; width: 100%; margin: 0 auto; }
+.workspace-grid { display: grid; grid-template-columns: 250px minmax(0, 1fr); flex: 1; min-height: 0; width: 100%; margin: 0 auto; }
 .conversation-sidebar { display: flex; flex-direction: column; min-height: 0; padding: 26px 18px 16px; border-right: 1px solid #e6ebf3; }
 .sidebar-heading { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; padding: 0 10px 15px; color: #67758b; }
 button { font: inherit; cursor: pointer; transition: background .15s; }
@@ -265,9 +261,9 @@ textarea::placeholder { color: #a1aabc; }
   .workspace-brand { gap: 8px; font-size: 16px; }
   .brand-icon { width: 28px; height: 28px; font-size: 19px; }
   .workspace-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: 160px minmax(0, 1fr); }
-  .conversation-sidebar { border-right: 0; border-bottom: 1px solid #e6ebf3; padding: 10px 16px; }
+  .conversation-sidebar { position: relative; border-right: 0; border-bottom: 1px solid #e6ebf3; padding: 10px 16px; }
   .sidebar-heading { padding: 0 0 5px; }
-  .new-conversation { position: absolute; right: 16px; top: 69px; padding: 6px 12px; font-size: 12px; }
+  .new-conversation { position: absolute; right: 16px; top: 9px; padding: 6px 12px; font-size: 12px; }
   .conversation-list { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding-top: 4px; }
   .conversation-item { width: 190px; min-width: 190px; padding: 9px 10px; }
   .sidebar-note { padding: 5px 0 0; }

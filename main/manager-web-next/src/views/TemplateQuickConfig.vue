@@ -1,6 +1,6 @@
 <template>
-  <div class="welcome">
-    <HeaderBar />
+  <div class="welcome admin-page">
+    
 
     <div class="operation-bar">
       <h2 class="page-title">{{ $t('templateQuickConfig.title') }}</h2>
@@ -53,16 +53,12 @@
         </div>
       </div>
     </div>
-    <el-footer>
-      <version-footer />
-    </el-footer>
+    
   </div>
 </template>
 
 <script>
-import HeaderBar from "@/components/HeaderBar.vue";
 import agentApi from '@/apis/module/agent';
-import VersionFooter from "@/components/VersionFooter.vue";
 
 // 默认模型配置常量
 const DEFAULT_MODEL_CONFIG = {
@@ -77,7 +73,7 @@ const DEFAULT_MODEL_CONFIG = {
 
 export default {
   name: 'TemplateQuickConfig',
-  components: { HeaderBar, VersionFooter },
+  components: {},
   data() {
     return {
       form: {
@@ -264,8 +260,8 @@ export default {
 
 <style scoped>
 .welcome {
-  min-width: 900px;
-  height: 100vh;
+  min-width: 0;
+  height: 100%;
   display: flex;
   position: relative;
   flex-direction: column;
@@ -290,7 +286,9 @@ export default {
 }
 
 .main-wrapper {
-  height: calc(100vh - 63px - 35px - 60px);
+  flex: 1;
+  min-height: 0;
+  height: auto;
   margin: 0 22px;
   border-radius: 15px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
@@ -322,7 +320,7 @@ export default {
 
 .config-card {
   background: white !important;
-  border-radius: 15px !important;
+  border-radius: 6px !important;
   overflow: hidden !important;
   height: 100% !important;
   margin: 0 !important;
@@ -478,5 +476,18 @@ export default {
   width: 32px;
   height: 32px;
   margin-left: 8px;
+}
+</style>
+<style scoped>
+.admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
+.admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
+.admin-page .right-operations { flex-wrap: wrap; }
+.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
+.admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
+.admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
+@media (max-width: 760px) {
+  .admin-page .right-operations { margin-left: 0; width: 100%; }
+  .admin-page .search-input { max-width: 100%; }
 }
 </style>

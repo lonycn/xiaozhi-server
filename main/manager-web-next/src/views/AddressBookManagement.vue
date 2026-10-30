@@ -1,6 +1,6 @@
 <template>
-  <div class="welcome">
-    <HeaderBar />
+  <div class="welcome admin-page">
+    
 
     <div class="page-content">
       <!-- 左侧设备列表 -->
@@ -195,16 +195,12 @@
       </div>
     </div>
 
-    <el-footer>
-      <version-footer />
-    </el-footer>
+    
   </div>
 </template>
 
 <script>
 import { assetUrl } from "@/adapters/assets.js";
-import HeaderBar from "@/components/HeaderBar.vue";
-import VersionFooter from "@/components/VersionFooter.vue";
 import Api from "@/apis/api.js";
 import AddressBookApi from "@/apis/module/addressBook.js";
 import MacAddressMask from "@/components/MacAddressMask.vue";
@@ -213,7 +209,7 @@ import { formatCreateDate, parseTimestamp } from '@/utils/deviceTime.mjs';
 
 export default {
   name: "AddressBookManagement",
-  components: { HeaderBar, VersionFooter, MacAddressMask, CustomButton },
+  components: { MacAddressMask, CustomButton },
   data() {
     return {
       searchKeyword: "",
@@ -621,9 +617,9 @@ export default {
 
 <style lang="scss" scoped>
 .welcome {
-  min-width: 1200px;
-  min-height: 506px;
-  height: 100vh;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background-size: cover;
@@ -1292,4 +1288,26 @@ export default {
 :deep(.el-empty) {
   height: 100%;
 }
+</style>
+
+<style scoped>
+.admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
+.admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
+.admin-page .right-operations { flex-wrap: wrap; }
+.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
+.admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
+.admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
+@media (max-width: 760px) {
+  .admin-page .right-operations { margin-left: 0; width: 100%; }
+  .admin-page .search-input { max-width: 100%; }
+}
+</style>
+
+<style scoped>
+.admin-page .page-content { margin: 0; gap: 16px; min-height: 0; }
+.admin-page .left-panel { width: 260px; flex: 0 0 260px; border: 1px solid #e5e9ef; border-radius: 6px; }
+.admin-page .right-panel { min-width: 0; border: 1px solid #e5e9ef; border-radius: 6px; }
+@media (max-width: 900px) { .admin-page .left-panel { width: 220px; flex-basis: 220px; } }
+@media (max-width: 680px) { .admin-page .page-content { flex-direction: column; overflow: auto; } .admin-page .left-panel { width: 100%; flex: 0 0 auto; max-height: 280px; } .admin-page .right-panel { min-height: 400px; flex: 0 0 auto; } }
 </style>

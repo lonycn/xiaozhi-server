@@ -1,4 +1,9 @@
 export default {
+  'adminLayout.workspace': 'Arbeitsbereich',
+  'adminLayout.models': 'Modelle und Wissen',
+  'adminLayout.system': 'Systemverwaltung',
+  'adminLayout.conversations': 'Unterhaltungen',
+
   // Support B1: Chinese copy is shared temporarily across the six locales.
   'support.errorAuth': "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
   'support.errorTimeout': "Zeitüberschreitung der Verbindung. Bitte versuchen Sie es erneut.",

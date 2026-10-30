@@ -56,6 +56,9 @@ public class XssFilter implements Filter {
         // Dedicated-key worker callbacks preserve literal provider transcripts; controller reads
         // at most 1 MiB before strict parsing. This excludes no sibling or child URL.
         if (request.getServletPath().matches("/internal/realtime-worker/sessions/[a-f0-9]{32}/events")) return true;
+        // The AI delta controller bounds and strictly parses the original provider text.
+        if ("POST".equals(request.getMethod())
+                && request.getServletPath().matches("/internal/ai-worker/runs/[a-f0-9]{32}/delta")) return true;
         // 放行不过滤的URL
         return properties.getExcludeUrls().stream()
                 .anyMatch(excludeUrl -> pathMatcher.match(excludeUrl, request.getServletPath()));

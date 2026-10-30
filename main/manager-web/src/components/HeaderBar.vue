@@ -9,6 +9,10 @@
 
       <!-- 中间导航菜单 -->
       <div class="header-center">
+        <button v-if="conversationEnabled" class="equipment-management" style="border: 0; background: transparent; font: inherit;" @click="$router.push('/conversations')">
+          <i class="el-icon-chat-dot-round" style="font-size: 20px; margin-right: 8px;" />
+          <span class="nav-text">统一对话</span>
+        </button>
         <div class="equipment-management" :class="{
           'active-tab':
             $route.path === '/home' ||
@@ -224,6 +228,7 @@ export default {
     };
   },
   computed: {
+    conversationEnabled() { return process.env.VUE_APP_CONVERSATION_ENABLED === 'true'; },
     ...mapState({
       featureStatus: (state) => ({
         voiceClone: state.pubConfig.systemWebMenu?.features?.voiceClone?.enabled, // 音色克隆功能状态

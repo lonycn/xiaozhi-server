@@ -46,7 +46,13 @@ public final class RealtimeModels {
     public record Usage(@JsonSerialize(using=NumberSerializer.class) @JsonDeserialize(using=IntegerReader.class) Long inputTokens,@JsonSerialize(using=NumberSerializer.class) @JsonDeserialize(using=IntegerReader.class) Long outputTokens,@JsonSerialize(using=NumberSerializer.class) @JsonDeserialize(using=IntegerReader.class) Long totalTokens) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record ProviderEvent(String leaseToken,@JsonDeserialize(using=IntegerReader.class) Long sequence,String providerEventId,String type,String providerSessionId,
-            String providerItemId,String responseId,String injectionId,String commandId,String text,String finishReason,Usage usage,String errorCode) { @Override public String toString(){return "ProviderEvent[type="+type+", lease=REDACTED]";} }
+            String providerItemId,String responseId,String injectionId,String commandId,String text,String finishReason,Usage usage,String errorCode,String requestItemId) {
+        public ProviderEvent(String leaseToken,Long sequence,String providerEventId,String type,String providerSessionId,
+                String providerItemId,String responseId,String injectionId,String commandId,String text,String finishReason,Usage usage,String errorCode) {
+            this(leaseToken,sequence,providerEventId,type,providerSessionId,providerItemId,responseId,injectionId,commandId,text,finishReason,usage,errorCode,null);
+        }
+        @Override public String toString(){return "ProviderEvent[type="+type+", lease=REDACTED]";}
+    }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Session(String id,String conversationId,String status,@JsonSerialize(using=NumberSerializer.class) long controlEpoch,
             String model,Consent consent,String providerSessionId,@JsonSerialize(using=NumberSerializer.class) long lastEventSequence,

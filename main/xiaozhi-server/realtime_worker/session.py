@@ -125,6 +125,9 @@ class Session:
         self.injections = set()
         self.context_index = 0
         self.context_pending = None
+        self.last_provider_item_id = None
+        self.accepted_items = OrderedDict()
+        self.injection_failure_code = "INJECTION_UNCONFIRMED"
         self.seen = OrderedDict()
         self.early = []
         self.early_since = None
@@ -218,7 +221,7 @@ class Session:
             for key in ('id', 'message_id', 'provider_item_id'): safe_id(injection.get(key))
             if injection['id'] in self.injections: raise Fault('WORKER_ERROR')
             self.injections.add(injection['id'])
-            self.pending_injection = injection
+            self.pending_injection = {**injection, "anchor": self.last_provider_item_id}
             self.pending_since = time.monotonic()
             await self.send_provider({'type':'conversation.item.create', 'item': {
                 'id':injection['provider_item_id'], 'type':'message', 'role':'user',
@@ -251,7 +254,7 @@ class Session:
         if self.context_index < len(self.task['context']):
             message = self.task['context'][self.context_index]
             item_id = 'ctx_' + hashlib.sha256((self.task['session_id']+':'+str(self.context_index)).encode()).hexdigest()[:28]
-            self.context_pending = item_id
+            self.context_pending = dict(request_item_id=item_id, role=message["role"], text=message["content"], anchor=self.last_provider_item_id)
             self.context_index += 1
             await self.send_provider({'type':'conversation.item.create', 'item':dict(
                 id=item_id, type='message', role=message['role'], content=[{
@@ -261,6 +264,65 @@ class Session:
             self.ready = True
             self.pending_since = None
             await self.send_browser('ready')
+
+    def matching_echo(self, event, expected, role):
+        """The live provider may allocate its own ID: prove content, role and predecessor."""
+        item = event.get('item')
+        if not isinstance(item, dict) or item.get('type') != 'message' or item.get('role') != role:
+            return False
+        content = item.get('content')
+        if not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict):
+            return False
+        allowed = ('input_text',) if role == 'user' else ('text', 'output_text')
+        return (content[0].get('type') in allowed and content[0].get('text') == expected['text']
+                and event.get('previous_item_id') == expected['anchor'])
+
+    def remember_item(self, item_id, fingerprint):
+        self.accepted_items[item_id] = fingerprint
+        if len(self.accepted_items) > 512: self.accepted_items.popitem(last=False)
+        self.last_provider_item_id = item_id
+
+    async def item_created(self, event):
+        item = event.get('item')
+        if not isinstance(item, dict): raise Fault('PROVIDER_ERROR')
+        if item.get('type') in ('function_call', 'mcp_approval_request', 'mcp_call'):
+            raise Fault('UNSUPPORTED_TOOL')
+        item_id = safe_id(item.get('id'))
+        previous = event.get('previous_item_id')
+        if previous is not None: safe_id(previous)
+        fingerprint = hashlib.sha256(json.dumps([item,previous],sort_keys=True).encode()).digest()
+        if item_id in self.accepted_items:
+            if self.accepted_items[item_id] != fingerprint: raise Fault('PROVIDER_ERROR')
+            return  # A genuine repeated/late ACK cannot rewind the predecessor or ACK again.
+        if self.context_pending:
+            if not self.matching_echo(event,self.context_pending,self.context_pending['role']):
+                raise Fault('PROVIDER_ERROR')
+            self.remember_item(item_id,fingerprint)
+            self.context_pending = None
+            await self.seed_context(event)
+        elif self.pending_injection:
+            injection = self.pending_injection
+            expected = dict(text=injection['text'],anchor=injection['anchor'])
+            if len(item_id)>100 or not self.matching_echo(event,expected,'user'):
+                self.injection_failure_code = 'PROVIDER_REJECTED'
+                raise Fault('PROVIDER_ERROR')
+            self.remember_item(item_id,fingerprint)
+            await self.canonical(event,'injection.ack',injection_id=injection['id'],
+                request_item_id=injection['provider_item_id'],provider_item_id=item_id)
+            self.pending_injection = None
+            self.waiting_response = True
+            self.pending_since = time.monotonic()
+            await self.send_browser('injection.status',injection_id=injection['id'],message_id=injection['message_id'],
+                status='acknowledged',provider_item_id=item_id)
+            await self.send_provider({'type':'response.create'})
+        elif (item.get('type') == 'message' and
+                (item.get('role') == 'assistant' and self.response is not None
+                 or item.get('role') == 'user' and (self.waiting_commit or self.turn_audio > 0)
+                    and isinstance(item.get('content'),list) and item['content']
+                    and all(isinstance(part,dict) and part.get('type') == 'input_audio' for part in item['content']))):
+            self.remember_item(item_id,fingerprint)
+        else:
+            raise Fault('PROVIDER_ERROR')
 
     async def client_event(self, event):
         if not isinstance(event, dict): raise Fault('INPUT_LIMIT')
@@ -330,21 +392,7 @@ class Session:
             self.provider_session_id = safe_id(event.get('session', {}).get('id'))
             await self.seed_context(event)
         elif kind == 'conversation.item.created':
-            item = event.get('item', {})
-            item_id = item.get('id')
-            if self.context_pending == item_id and item_id is not None:
-                self.context_pending = None
-                await self.seed_context(event)
-            elif self.pending_injection and self.pending_injection['provider_item_id'] == item_id:
-                injection = self.pending_injection
-                await self.canonical(event, 'injection.ack', injection_id=injection['id'], provider_item_id=item_id)
-                self.pending_injection = None
-                self.waiting_response = True
-                self.pending_since = time.monotonic()
-                await self.send_browser('injection.status', injection_id=injection['id'], message_id=injection['message_id'], status='acknowledged', provider_item_id=item_id)
-                await self.send_provider({'type':'response.create'})
-            elif item.get('type') in ('function_call', 'mcp_approval_request', 'mcp_call'):
-                raise Fault('UNSUPPORTED_TOOL')
+            await self.item_created(event)
         elif kind == 'input_audio_buffer.committed':
             if not self.waiting_commit: raise Fault('PROVIDER_ERROR')
             await self.canonical(event, 'input.committed', provider_item_id=safe_id(event.get('item_id')))
@@ -515,7 +563,7 @@ class Session:
         try:
             if self.pending_injection:
                 await self.canonical({'event_id':'worker_injection_failure'}, 'injection.failed',
-                    injection_id=self.pending_injection['id'], error_code='INJECTION_UNCONFIRMED')
+                    injection_id=self.pending_injection['id'], error_code=self.injection_failure_code)
             await self.canonical({'event_id':'worker_session_failure'}, 'session.error', error_code=code)
             # The accepted terminal error may revoke the lease, so no further heartbeat is needed.
             await self.send_browser('error', authorize=False, terminal=True, code=code, clear_audio=True,

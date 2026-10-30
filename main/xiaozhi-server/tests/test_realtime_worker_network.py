@@ -1,6 +1,7 @@
 """Real loopback HTTP/WebSocket tests. No provider credentials or business database."""
 import asyncio
 import base64
+import copy
 import io
 import json
 from pathlib import Path
@@ -49,7 +50,7 @@ class Harness:
         self.pending_injections=[]; self.pending_commands=[]; self.browsers=[]
         self.sequence=0; self.mode='normal'; self.ack_items=True; self.lost_event_ack=False
         self.false_heartbeat=False; self.error_http=False; self.callback_interrupt=False; self.delta_fence=False; self.force_canceled=False; self.terminal_receipt=False; self.reject_commit=False
-        self.response_number=0; self.provider_count=0; self.provider_closed=asyncio.Event()
+        self.response_number=0; self.provider_count=0; self.input_number=0; self.audio_open=False; self.current_audio_item=None; self.last_item=None; self.ack_mode='allocated'; self.old_ack=None; self.provider_closed=asyncio.Event()
         self.media_received=asyncio.Event(); self.hold_response=asyncio.Event()
         self.control_delay=0; self.provider_delay=0
 
@@ -147,6 +148,9 @@ class Harness:
         if self.mode=='out_of_order':
             await self.emit(ws,'response.audio_transcript.delta',response_id=rid,delta='first')
         await self.emit(ws,'response.created',response=dict(id=rid))
+        assistant='assistant-item-'+rid
+        await self.emit(ws,'conversation.item.created',item={'id':assistant,'type':'message','role':'assistant','content':[]},previous_item_id=self.last_item)
+        self.last_item=assistant
         if self.mode=='late_asr':
             await self.emit(ws,'conversation.item.input_audio_transcription.completed',item_id='audio-input-1',transcript='late technical speech')
         event=await self.emit(ws,'response.audio_transcript.delta',response_id=rid,delta='possible ')
@@ -181,11 +185,32 @@ class Harness:
                     self.updated=event
                     await self.emit(ws,'session.updated',session=dict(id='provider-session'))
                 elif kind=='conversation.item.create':
-                    if self.ack_items: await self.emit(ws,'conversation.item.created',item=event['item'])
-                elif kind=='input_audio_buffer.append': self.media_received.set()
+                    if self.ack_items:
+                        item=copy.deepcopy(event['item']);item['id']='allocated-item-'+str(self.provider_count+1)
+                        previous=self.last_item
+                        if self.ack_mode=='wrong_text': item['content'][0]['text']='different text'
+                        if self.ack_mode=='wrong_role': item['role']='assistant'
+                        if self.ack_mode=='wrong_anchor': previous='unrelated-predecessor'
+                        if self.ack_mode=='late_ack' and self.old_ack:
+                            late=copy.deepcopy(self.old_ack);late['event_id']='late-'+str(self.provider_count+1)
+                            await ws.send(json.dumps(late))
+                        ack=await self.emit(ws,'conversation.item.created',item=item,previous_item_id=previous)
+                        self.old_ack=copy.deepcopy(ack)
+                        self.last_item=item['id']
+                        if self.ack_mode=='duplicate_ack':
+                            duplicate=copy.deepcopy(ack);duplicate['event_id']='duplicate-'+str(self.provider_count+1)
+                            await ws.send(json.dumps(duplicate))
+                elif kind=='input_audio_buffer.append':
+                    self.media_received.set()
+                    if not self.audio_open:
+                        self.input_number+=1;self.audio_open=True
+                        self.current_audio_item='audio-input-'+str(self.input_number)
+                        await self.emit(ws,'conversation.item.created',item={'id':self.current_audio_item,'type':'message','role':'user','content':[{'type':'input_audio'}]},previous_item_id=self.last_item)
+                        self.last_item=self.current_audio_item
                 elif kind=='input_audio_buffer.commit':
-                    if self.mode!='late_asr': await self.emit(ws,'conversation.item.input_audio_transcription.completed',item_id='audio-input-1',transcript='technical speech')
-                    await self.emit(ws,'input_audio_buffer.committed',item_id='audio-input-1')
+                    audio_item=self.current_audio_item;self.audio_open=False
+                    if self.mode!='late_asr': await self.emit(ws,'conversation.item.input_audio_transcription.completed',item_id=audio_item,transcript='technical speech')
+                    await self.emit(ws,'input_audio_buffer.committed',item_id=audio_item)
                 elif kind=='response.create':
                     self.response_number+=1
                     rid='response-'+str(self.response_number)
@@ -294,12 +319,46 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         ws=await h.connect()
         status=await receive(ws,'injection.status',timeout=4)
         self.assertEqual(status['status'],'acknowledged')
+        self.assertTrue(status['provider_item_id'].startswith('allocated-item-'))
+        ack=next(event for event in h.events if event['type']=='injection.ack')
+        self.assertEqual(ack['request_item_id'],'server-item-1')
+        self.assertEqual(ack['provider_item_id'],status['provider_item_id'])
         await receive(ws,'response.completed')
         self.assertEqual(sum(e['type']=='injection.ack' for e in h.events),1)
         new=[e for e in h.provider_sent if e['type']=='conversation.item.create' and e['item']['id']=='server-item-1']
         self.assertEqual(len(new),1)
         self.assertEqual(len([e for e in h.provider_sent if e['type']=='conversation.item.create']),3)
         self.assertEqual(sum(e['type']=='response.create' for e in h.provider_sent),1)
+
+    async def test_allocated_ack_requires_exact_echo_role_and_real_predecessor(self):
+        for mode in ('wrong_text','wrong_role','wrong_anchor'):
+            h=await self.harness();h.ack_mode=mode
+            h.pending_injections=[dict(id='inject-1',message_id='message-1',text='persisted exact text',provider_item_id='server-item-1')]
+            ws=await h.connect()
+            self.assertEqual((await receive(ws,'error'))['code'],'PROVIDER_ERROR')
+            self.assertFalse(any(event['type']=='injection.ack' for event in h.events))
+            self.assertFalse(any(event['type']=='response.create' for event in h.provider_sent))
+            self.assertEqual(next(event for event in h.events if event['type']=='injection.failed')['error_code'],'PROVIDER_REJECTED')
+
+    async def test_context_echo_mismatch_never_reaches_ready(self):
+        h=await self.harness();h.ack_mode='wrong_text'
+        h.task['context']=[dict(role='user',content='immutable previous context')]
+        ws=await h.connect(ready=False)
+        self.assertEqual((await receive(ws,'error'))['code'],'PROVIDER_ERROR')
+        self.assertFalse(any(event['type']=='session.ready' for event in h.events))
+
+    async def test_duplicate_and_late_allocated_item_acks_do_not_reinject_or_rewind(self):
+        h=await self.harness();h.ack_mode='duplicate_ack'
+        h.pending_injections=[dict(id='inject-1',message_id='message-1',text='first persisted text',provider_item_id='server-item-1')]
+        ws=await h.connect();await receive(ws,'injection.status');await receive(ws,'response.completed')
+        self.assertEqual(sum(event['type']=='injection.ack' for event in h.events),1)
+        h.ack_mode='late_ack'
+        h.pending_injections=[dict(id='inject-2',message_id='message-2',text='second persisted text',provider_item_id='server-item-2')]
+        ack=await receive(ws,'injection.status');await receive(ws,'response.completed')
+        self.assertEqual(ack['injection_id'],'inject-2')
+        self.assertEqual(sum(event['type']=='injection.ack' for event in h.events),2)
+        self.assertEqual(sum(event['type']=='response.create' for event in h.provider_sent),2)
+        self.assertFalse(any(event['type']=='session.error' for event in h.events))
 
     async def test_missing_ack_fails_injection_without_synthetic_success(self):
         h=await self.harness(ack_timeout_seconds=.15);h.ack_items=False

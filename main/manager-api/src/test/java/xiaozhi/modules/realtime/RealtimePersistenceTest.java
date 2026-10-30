@@ -54,7 +54,7 @@ class RealtimePersistenceTest {
     Session create(){return create(conversation());}
     Session create(String c){return realtime.create(7L,new Create(c,key(),new Consent(true,false)));}
     Task connect(Session s){var ticket=realtime.ticket(7L,s.id(),new Epoch(s.controlEpoch()));return realtime.consume(new Consume(ticket.ticket(),"fixture-worker","fixture-server"));}
-    ProviderEvent event(Task task,long seq,String type,String item,String response,String text,String finish,Usage usage,String injection,String command,String error){return new ProviderEvent(task.leaseToken(),seq,"event-"+seq,type,type.equals("session.ready")?"provider-session":null,item,response,injection,command,text,finish,usage,error);}
+    ProviderEvent event(Task task,long seq,String type,String item,String response,String text,String finish,Usage usage,String injection,String command,String error){return new ProviderEvent(task.leaseToken(),seq,"event-"+seq,type,type.equals("session.ready")?"provider-session":null,item,response,injection,command,text,finish,usage,error,type.equals("injection.ack")?item:null);}
     Receipt emit(Task task,long seq,String type,String response,String text){return realtime.providerEvent(task.sessionId(),event(task,seq,type,null,response,text,type.equals("response.completed")?"stop":null,null,null,null,null));}
     Task active(){var task=connect(create());emit(task,1,"session.ready",null,null);return task;}
     SendMessage text(String id,String value){return new SendMessage(id,List.of(new MessagePart("text",value,null,null,null,null,null,null)));}
@@ -164,6 +164,34 @@ class RealtimePersistenceTest {
             context.getBeanFactory().registerSingleton("jdbc",db);context.getBeanFactory().registerSingleton("manager",manager);context.getBeanFactory().registerSingleton("json",json);context.getBeanFactory().registerSingleton("dao",new ConversationDao(db));context.register(org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor.class,RealtimeStore.class,RealtimeService.class,ConversationService.class,AiExecutionService.class,SupportService.class);context.refresh();
             assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(RealtimeStore.class)));var cs=context.getBean(ConversationService.class);var rs=context.getBean(RealtimeService.class);String c=cs.create(7L,new CreateConversation("spring-proxy-graph",null)).id();created.add(c);var session=rs.create(7L,new Create(c,key(),new Consent(true,false)));var accepted=rs.send(7L,session.id(),new Send(session.controlEpoch(),key(),"actual spring hook"));assertEquals("queued",accepted.injection().status());assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM ai_run WHERE conversation_id=?",Long.class,c));var request=context.getBean(SupportService.class).handoff(7L,c,new Handoff(key(),"text",null));assertNotNull(request);assertEquals("canceled",rs.get(7L,session.id()).status());
         }
+    }
+
+    @Test void allocatedProviderIdIsSavedOnlyForExactDispatchedRequestAndReplaysAreIdempotent(){
+        var task=active();var sent=realtime.send(7L,task.sessionId(),new Send(task.controlEpoch(),key(),"provider allocates a real item ID"));
+        var dispatch=realtime.heartbeat(task.sessionId(),new Heartbeat(task.leaseToken(),false)).injections().getFirst();
+        String actual="item-actual-provider-allocated";
+        var forged=new ProviderEvent(task.leaseToken(),2L,"allocated-ack","injection.ack",null,actual,null,dispatch.id(),null,null,null,null,null,"rt-inject-"+"f".repeat(32));
+        assertEquals(409,error(()->realtime.providerEvent(task.sessionId(),forged)));
+        var missing=new ProviderEvent(task.leaseToken(),2L,"allocated-ack","injection.ack",null,actual,null,dispatch.id(),null,null,null,null,null);
+        assertEquals(400,error(()->realtime.providerEvent(task.sessionId(),missing)));
+        var oldLease=new ProviderEvent("f".repeat(64),2L,"allocated-ack","injection.ack",null,actual,null,dispatch.id(),null,null,null,null,null,dispatch.providerItemId());
+        assertEquals(409,error(()->realtime.providerEvent(task.sessionId(),oldLease)));
+        assertEquals("dispatched",realtime.injections(7L,task.sessionId(),0,50).items().getFirst().status());
+        var tooLong=new ProviderEvent(task.leaseToken(),2L,"allocated-ack","injection.ack",null,"i".repeat(101),null,dispatch.id(),null,null,null,null,null,dispatch.providerItemId());
+        assertEquals(400,error(()->realtime.providerEvent(task.sessionId(),tooLong)));
+        var accepted=new ProviderEvent(task.leaseToken(),2L,"allocated-ack","injection.ack",null,actual,null,dispatch.id(),null,null,null,null,null,dispatch.providerItemId());
+        var receipt=realtime.providerEvent(task.sessionId(),accepted);realtime.providerEvent(task.sessionId(),accepted);
+        var view=realtime.injections(7L,task.sessionId(),0,50).items().getFirst();
+        assertEquals("acknowledged",view.status());assertEquals(actual,view.providerItemId());assertEquals(sent.message().id(),receipt.messageId());
+        assertEquals(2,count("ai_realtime_event",task.sessionId()));
+        var duplicate=new ProviderEvent(task.leaseToken(),3L,"new-id-same-injection","injection.ack",null,actual,null,dispatch.id(),null,null,null,null,null,dispatch.providerItemId());
+        assertEquals(409,error(()->realtime.providerEvent(task.sessionId(),duplicate)));
+        var next=realtime.send(7L,task.sessionId(),new Send(task.controlEpoch(),key(),"another persisted message"));
+        var nextDispatch=realtime.heartbeat(task.sessionId(),new Heartbeat(task.leaseToken(),false)).injections().getFirst();
+        var reused=new ProviderEvent(task.leaseToken(),3L,"reused-provider-id","injection.ack",null,actual,null,nextDispatch.id(),null,null,null,null,null,nextDispatch.providerItemId());
+        assertEquals(409,error(()->realtime.providerEvent(task.sessionId(),reused)));
+        assertEquals("dispatched",realtime.injections(7L,task.sessionId(),0,50).items().getLast().status());
+        assertEquals(2,count("ai_realtime_event",task.sessionId()));
     }
 
 }

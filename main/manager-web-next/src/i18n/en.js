@@ -1939,7 +1939,7 @@ export default {
   "realtime.interrupt": "Interrupt response",
   "realtime.end": "End realtime session",
   "realtime.manualNote": "Manual recording: click Start recording, then Finish this segment. Each segment is limited to 60 seconds. Automatic voice detection is not enabled.",
-  "realtime.frameNote": "During recording, at most one bounded JPEG per second is sent to the model. This is sampled images, not continuous video or server verification of camera provenance.",
+  "realtime.frameNote": "Recording sends at most one image per second. Ask about the image during this recording. Sampling stops with the recording; text alone sends no new image.",
   "realtime.sampling": "Sending sampled camera pictures",
   "realtime.stopCamera": "Stop camera sampling for this session",
   "realtime.seconds": "seconds",

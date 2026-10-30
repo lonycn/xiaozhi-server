@@ -1,28 +1,28 @@
-# P3 Python realtime worker验证
+# P3 realtime worker验证
 
-2026-10-30；基线 `c41c71f`，共享worktree `work/realtime-ai`。本交付只修改Python独立realtime_worker、其测试与REALTIME_WORKER文档；Java/Vue/Dev由其他责任代理处理。未提交、推送、读取私有部署凭据、启动实际worker服务或调用外部提供方；测试只创建临时loopback HTTP/WebSocket服务，无数据库操作。
+2026-10-30。真实Java/Python桥接R6通过23项；当前loopback HTTP/WebSocket网络回归31项通过。ACK修复的Java定向30项通过，其中21项使用全新 `xiaozhi_realtime_test_allocated_ack_20261030_r1`，JDBC/MySQL会话匹配UTC；原行保留，无重置。父代理负责合并后最终全量计数。
 
-## 已测范围
+真实R6使用全新 `xiaozhi_ai_test_rt_http_20261030_205525_8075a1`、独立Spring API `127.0.0.1:19899`、Python worker `127.0.0.1:18900`、实际百炼模型。JDBC与SQL会话均为+08:00。Redis使用当时确认空的独立逻辑DB10并预设版本键，避开旧启动代码的FLUSHDB；没有清空已有Redis数据。使用仓库技术WAV转PCM，未使用浏览器或麦克风；服务进程均已停止，测试schema和证据保留。
 
-同一最终代码在Python3.11.15与Python3.13.13上，各28项全部通过、无跳过；不能把两个兼容性运行相加当成56个独立用例。证据：根workspace `work/realtime-worker-network-py311.log`、`work/realtime-worker-network-py313.log`。3.11日志中的asyncio慢任务调试行只记录测试协程及时间，不含用户内容或秘密。
+23项覆盖：真实provider ready、owner隔离/票据单用、原始PCM和真实回复音频、实际转写/assistant持久化及user-before-assistant顺序、Java接受committed后再response、持久文字真实item ACK及回复、实际interrupt/command ACK/保留canceled partial、结束后B2重新入队、新session携历史context真实ACK、人工handoff关闭、旧lease的真实callback重放409与无迟到event行。handoff后0.265秒关闭。R6收到音频合计290400字节；两次完整响应的实际usage分别497/74/571与536/24/560（输入/输出/合计）。取消/接管轮缺少完整usage时保持空，不估算。
 
-测试实际经过三个网络端点：aiohttp浏览器WS客户端→本worker aiohttp WS服务→独立websockets模拟提供方，同时本worker通过实际httpx HTTP请求访问独立aiohttp模拟Java。没有用对象mock代替这三段网络连接；提供方WSS连接器仅把受限测试endpoint映射到临时loopback WS，生产URL校验仍严格要求配置的workspace Bailian WSS。
+实际提供方为文本新分配item_* ID，不回显请求item.id。ACK修复同时传request_item_id验证Java派发身份、保存真实provider_item_id；worker必须单pending、精确role/content_type/text echo、真实previous_item_id锚全部匹配，不能仅靠顺序。31项网络回归包含真实分配ID形状、错误内容/role/锚、context不匹配、重复/迟到ACK、音频append阶段早到input item、取消竞态、撤权、队列/资源释放；Java覆盖伪造request ID、旧lease、缺字段、重复ACK及provider ID复用。
 
-覆盖：
+证据绝对路径：
 
-- 现代session.created/update/updated，manual PCM16 mono16k输入、PCM16 mono24k音频返回、Java先接受转写与assistant文本再向浏览器输出，真实格式usage三整数/无usage为空、只取一个文本表示避免重复。模拟usage452/95/547是协议fixture，不是本次真实提供方调用或计费。
-- 精确Origin、首body短ticket、5秒内鉴权（测试缩短timeout）、ticket单用、拒绝URL ticket与浏览器Bearer、连接数限制、未ready输入拒绝、默认disabled/私有0600配置/只bindloopback、字符串session/provider标识与数字epoch。
-- Camera初始明确consent；真实JPEG解码、实际input_image_buffer.append网络发送、同turn先音频、1fps、无同意拒绝；URL/伪装/未知客户端assistant事件不转发。图片为测试生成的单色技术样本，不是客户现场材料。
-- 历史context逐条item ACK后ready；持久文本注入匹配Java固定provider item ID，ACK后才请求回复，缺ACK明确失败且不伪造成功、不重复注入。音频busy期间不派发文本。
-- 真实input_audio_buffer.committed→Java input.committed ACK→response.create的顺序；ASR final既可先到，也可在response.started后迟到。committed被Java拒绝时不请求模型回复。历史消息顺序与占位填充由Java模块的实库测试负责，本网络测试不冒称覆盖数据库。
-- 提供方typed/untyped错误脱敏、明确UNSUPPORTED_TOOL并关联当前response、重复event ID内容变化拒绝、重复事件不重写history、乱序delta先缓存后按started顺序提交；客户端不能伪造assistant输出；manual拒绝未经请求的provider response。
-- 中断立即清播放、provider真实done后Java取消/命令ACK、partial保留、迟到delta抑制。专测“输出最后一次授权时才取到interrupt”、“delta精确409围栏不前进sequence”、“完成回执已canceled不泄漏全文”、“provider已结束后取到中断命令不再cancel”、“上一取消轮音频迟到新一轮不泄漏”；取消真实格式usage同样传Java。
-- `active:false`、HTTP不可达、撤lease、terminal callback receipt立即关闭、不写迟到callbacks、无权限音频不发provider；callback ACK丢失重试完全相同sequence/event ID/body且只保存一次；有界队列压力与时长超限终结；应用shutdown后provider、浏览器、HTTP client、readers/timer均释放，无后台Session任务。
+- `/Users/lengwang/code/esp32/work/realtime-bridge-proof-r6.json`
+- `/Users/lengwang/code/esp32/work/realtime-bridge-e2e-r6.log`
+- `/Users/lengwang/code/esp32/work/realtime-worker-allocated-ack-r2.log`
+- `/Users/lengwang/code/esp32/work/realtime-allocated-ack-java-r1.log`
 
-`compileall`与定向 `git diff --check`通过。独立测试环境位于 `/tmp/xiaozhi-realtime-worker-test-311` 与 `/tmp/xiaozhi-realtime-worker-test-venv`（3.13），未修改既有ESP32环境依赖；运行需使用 `realtime_worker/requirements.txt`。
+R2/R4保留了原ID相等规则导致的真实注入超时证据；R3遇磁盘满而迁移失败，失败schema保留。没有把这些失败记录改为成功。只回收过本任务已停止runtime里的两份重复JAR，源构建及日志/proof保留；后续使用硬链接避免重复占盘。
 
-## 实际验收边界
+复现入口为 `main/xiaozhi-server/tests/realtime_bridge_e2e.py`，必须显式 `--allow-real-provider`，所有私密路径和Java/worker解释器由参数提供，测试数据库密码通过 `REALTIME_E2E_DB_PASSWORD` 环境提供。脚本不含真实key或机器私密默认路径；只创建新schema与自有localhost进程，透明诊断只记事件类型/ID/文本哈希，不记原文、音频或key。
 
-本worker暂未通过真实Dev/提供方端到端，留给父代理执行Java真实身份/ticket→本worker→百炼→实际输入转写、音频/文字、usage持久化、同会话普通文字恢复、人工接管。父最新授权后独立provider probe已成功，并非当前403受阻；独立probe成功仍不等于本worker或浏览器链路已验收。
+交付仍是manual技术MVP，非自动VAD/WebRTC。真实摄像头输入、浏览器/安卓麦克风权限与播放回声、HTTPS/WSS部署、弱网/现场机械声及业务工具另行验收。实时camera仅在网络mock验证实际JPEG转发；本轮真实provider E2E没有摄像头。技术录音或普通TTS不构成机械故障诊断验收。
 
-交付模式明确是manual技术MVP，不是VAD自动通话、WebRTC或完整视频轨道；摄像头是受限JPEG采样。需要真实浏览器/安卓麦克风权限与回声/播放测试、HTTPS/WSS反向代理、弱网与恢复、实际模型授权/限流/配额/错误、现场证据与专家对照。测试静音PCM/生成JPEG及普通TTS不能替代机械异响判断验收。没有可信业务工具adapter，任何function/MCP调用都明确失败，没有执行或生成伪工具结果。
+## 主工作树最终补验
+
+ACK五个源码文件与验证工作树逐一SHA一致，主工作树Java全量457、Vue368+10契约、实时网络31通过。恢复副本运行最终整合JAR、独立worker18902。真实采样图问答补验见 INTEGRATION_20261030.md：同轮语音提问可正确描述技术图标；后续纯文字对旧帧的追问没有可靠视觉结果，不宣传该能力。
+
+交付的可重复E2E脚本在R6后将运行JAR由硬链接改为独立复制，先检查磁盘余量，以避免并行构建修改正在运行的文件；该小运行隔离调整通过语法检查，未重复调用provider。R6当时的JAR hash及实际成功证据保持原样。

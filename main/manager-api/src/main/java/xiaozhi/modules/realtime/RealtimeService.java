@@ -213,8 +213,12 @@ public class RealtimeService implements RealtimeHooks {
                 if(!"dispatched".equals(injection.get("status")))throw problem(409,"INJECTION_NOT_DISPATCHED");
                 if(instant(injection,"dispatched_at")==null||!instant(injection,"dispatched_at").plusSeconds(15).isAfter(Instant.now()))throw problem(409,"INJECTION_ACK_EXPIRED");
                 if("injection.ack".equals(e.type())){
-                    if(!e.providerItemId().equals(injection.get("provider_item_id")))throw problem(409,"INJECTION_PROVIDER_ITEM_MISMATCH");
-                    store.jdbc().update("UPDATE ai_realtime_injection SET status='acknowledged',acknowledged_at=CURRENT_TIMESTAMP(3) WHERE id=?",e.injectionId());
+                    if(!e.requestItemId().equals(injection.get("provider_item_id")) || !("rt-inject-"+e.injectionId()).equals(e.requestItemId()))
+                        throw problem(409,"INJECTION_REQUEST_ITEM_MISMATCH");
+                    if(!store.rows("SELECT id FROM ai_realtime_injection WHERE provider_item_id=? AND id<>?",e.providerItemId(),e.injectionId()).isEmpty()
+                            || !store.rows("SELECT id FROM ai_realtime_turn WHERE session_id=? AND provider_item_id=?",sessionId,e.providerItemId()).isEmpty())
+                        throw problem(409,"INJECTION_PROVIDER_ITEM_REUSED");
+                    store.jdbc().update("UPDATE ai_realtime_injection SET provider_item_id=?,status='acknowledged',acknowledged_at=CURRENT_TIMESTAMP(3) WHERE id=?",e.providerItemId(),e.injectionId());
                 }else store.jdbc().update("UPDATE ai_realtime_injection SET status='failed',error_code=? WHERE id=?",e.errorCode(),e.injectionId());
                 event(s,"realtime."+e.type(),Map.of("injection_id",e.injectionId(),"message_id",injection.get("message_id"),"status","injection.ack".equals(e.type())?"acknowledged":"failed"));
             }
@@ -299,11 +303,12 @@ public class RealtimeService implements RealtimeHooks {
     private static void validate(ProviderEvent e){
         if(e==null||e.sequence()==null||e.sequence()<1||!safe(e.providerEventId(),200)||e.type()==null)throw problem(400,"INVALID_PROVIDER_EVENT");
         Set<String> allowed=switch(e.type()){
-            case "session.ready" -> Set.of("providerSessionId");case "input.committed" -> Set.of("providerItemId");case "input.transcript" -> Set.of("providerItemId","text");case "response.started" -> Set.of("responseId");case "response.canceled" -> Set.of("responseId","usage");case "response.delta" -> Set.of("responseId","text");case "response.completed" -> Set.of("responseId","text","finishReason","usage");case "injection.ack" -> Set.of("injectionId","providerItemId");case "injection.failed" -> Set.of("injectionId","errorCode");case "command.ack" -> Set.of("commandId","responseId");case "session.error" -> Set.of("errorCode");default -> throw problem(400,"INVALID_PROVIDER_EVENT");};
-        Map<String,Object> values=new HashMap<>();values.put("providerSessionId",e.providerSessionId());values.put("providerItemId",e.providerItemId());values.put("responseId",e.responseId());values.put("injectionId",e.injectionId());values.put("commandId",e.commandId());values.put("text",e.text());values.put("finishReason",e.finishReason());values.put("usage",e.usage());values.put("errorCode",e.errorCode());
+            case "session.ready" -> Set.of("providerSessionId");case "input.committed" -> Set.of("providerItemId");case "input.transcript" -> Set.of("providerItemId","text");case "response.started" -> Set.of("responseId");case "response.canceled" -> Set.of("responseId","usage");case "response.delta" -> Set.of("responseId","text");case "response.completed" -> Set.of("responseId","text","finishReason","usage");case "injection.ack" -> Set.of("injectionId","providerItemId","requestItemId");case "injection.failed" -> Set.of("injectionId","errorCode");case "command.ack" -> Set.of("commandId","responseId");case "session.error" -> Set.of("errorCode");default -> throw problem(400,"INVALID_PROVIDER_EVENT");};
+        Map<String,Object> values=new HashMap<>();values.put("providerSessionId",e.providerSessionId());values.put("providerItemId",e.providerItemId());values.put("requestItemId",e.requestItemId());values.put("responseId",e.responseId());values.put("injectionId",e.injectionId());values.put("commandId",e.commandId());values.put("text",e.text());values.put("finishReason",e.finishReason());values.put("usage",e.usage());values.put("errorCode",e.errorCode());
         for(var value:values.entrySet())if(value.getValue()!=null&&!allowed.contains(value.getKey()))throw problem(400,"UNEXPECTED_PROVIDER_EVENT_FIELD");
         for(String field:allowed){if(Set.of("usage").contains(field))continue;if(values.get(field)==null)throw problem(400,"MISSING_PROVIDER_EVENT_FIELD");}
-        if(e.providerSessionId()!=null)providerId(e.providerSessionId());if(e.providerItemId()!=null)providerId(e.providerItemId());if(e.responseId()!=null)providerId(e.responseId());if(e.injectionId()!=null)validId(e.injectionId());if(e.commandId()!=null)validId(e.commandId());
+        if("injection.ack".equals(e.type()) && e.providerItemId().length()>100)throw problem(400,"INVALID_PROVIDER_ID");
+        if(e.providerSessionId()!=null)providerId(e.providerSessionId());if(e.providerItemId()!=null)providerId(e.providerItemId());if(e.requestItemId()!=null)providerId(e.requestItemId());if(e.responseId()!=null)providerId(e.responseId());if(e.injectionId()!=null)validId(e.injectionId());if(e.commandId()!=null)validId(e.commandId());
         if(e.text()!=null&&(e.text().length()>("response.completed".equals(e.type())?128000:16000)||("response.delta".equals(e.type())&&e.text().isEmpty())))throw problem(400,"INVALID_EVENT_TEXT");
         if(e.finishReason()!=null&&!FINISH.contains(e.finishReason()))throw problem(400,"INVALID_FINISH_REASON");
         if(e.usage()!=null&&(e.usage().inputTokens()==null||e.usage().outputTokens()==null||e.usage().totalTokens()==null||e.usage().inputTokens()<0||e.usage().outputTokens()<0||e.usage().totalTokens()<0))throw problem(400,"INVALID_USAGE");

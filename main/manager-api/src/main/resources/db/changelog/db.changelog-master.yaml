@@ -772,3 +772,6 @@ databaseChangeLog:
   - include:
       file: support-media.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: external-identity.changelog.yaml
+      relativeToChangelogFile: true

@@ -73,6 +73,7 @@ features:
   attachments-enabled: false
   annotations-enabled: false
   support-media-enabled: false
+  external-identity-enabled: false
 
 # Worker credential is dedicated to this execution protocol and never a user/server token.
 ai:
@@ -116,3 +117,7 @@ support-media:
   ready-seconds: 15
   reconnect-seconds: 60
   maintenance-delay-ms: 3000
+# B6 uses its own xiaozhi-* issuer/key namespace; never reuse the original App SSO keys.
+external-identity:
+  keys-json: ${EXTERNAL_IDENTITY_KEYS_JSON:}
+  token-seconds: 300

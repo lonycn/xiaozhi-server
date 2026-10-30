@@ -47,6 +47,12 @@ public class XssFilter implements Filter {
         // bounded read. Rewriting/buffering JSON here would invalidate the signature and bypass
         // that bound. Keep every other URL on the existing XSS path.
         if ("/internal/livekit/webhook".equals(request.getServletPath())) return true;
+        // B6 signatures authenticate exact wire bytes; never transform these two POST bodies.
+        // Their earlier boundary filter limits input before wrapping, then dedicated code verifies
+        // HMAC before strict JSON parsing. Do not widen this to an integration prefix.
+        String path=request.getRequestURI().substring(request.getContextPath().length());
+        if("POST".equals(request.getMethod()) && request.getQueryString()==null
+                && java.util.Set.of("/api/v1/external/identity/issue","/api/v1/external/identity/revoke").contains(path))return true;
         // 放行不过滤的URL
         return properties.getExcludeUrls().stream()
                 .anyMatch(excludeUrl -> pathMatcher.match(excludeUrl, request.getServletPath()));

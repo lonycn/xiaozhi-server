@@ -29,6 +29,55 @@ ARTIFACT_LIMITS = {'display': 20 << 20, 'thumbnail': 1 << 20, 'poster': 2 << 20,
                   **{f'frame_{i}': 2 << 20 for i in range(6)}}
 
 
+def wire_integer(value, minimum, maximum):
+    """Accept Java long strings without accepting coercions, IDs or user scene values."""
+    if isinstance(value, str):
+        # Bound length before int() and require canonical ASCII decimal notation.
+        if not re.fullmatch(r'0|[1-9][0-9]{0,18}', value):
+            raise MediaFailure('INVALID_MEDIA')
+        value = int(value)
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise MediaFailure('INVALID_MEDIA')
+    return value
+
+
+def normalize_task(task):
+    if task is None:
+        return None
+    if not isinstance(task, dict):
+        raise MediaFailure('INVALID_MEDIA')
+    result = dict(task)
+    result['size'] = wire_integer(task.get('size'), 1, LIMITS.get(task.get('mime_type'), 0))
+    for key, lower, upper in [('attempt', 1, 3), ('lease_seconds', 1, 300)]:
+        if key in task:
+            result[key] = wire_integer(task[key], lower, upper)
+    metadata = task.get('metadata')
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            raise MediaFailure('INVALID_MEDIA')
+        metadata = dict(metadata)
+        bounds = {'width': (1, 8192), 'height': (1, 8192),
+                  'expected_width': (1, 8192), 'expected_height': (1, 8192),
+                  'duration_ms': (0, 600000), 'time_ms': (0, 180000),
+                  'requested_time_ms': (0, 179999), 'actual_time_ms': (0, 180000)}
+        for key, (lower, upper) in bounds.items():
+            if key in metadata:
+                if key == 'requested_time_ms' and metadata[key] is None:
+                    continue
+                metadata[key] = wire_integer(metadata[key], lower, upper)
+        if 'frames' in metadata:
+            frames = metadata['frames']
+            if not isinstance(frames, list) or len(frames) > 6 or any(not isinstance(frame, dict) for frame in frames):
+                raise MediaFailure('INVALID_MEDIA')
+            metadata['frames'] = [dict(frame) for frame in frames]
+            for frame in metadata['frames']:
+                if 'time_ms' in frame:
+                    frame['time_ms'] = wire_integer(frame['time_ms'], 0, 180000)
+        # Deliberately never recurse into scene, text, IDs, URLs or arbitrary keys.
+        result['metadata'] = metadata
+    return result
+
+
 class Manager:
     def __init__(self, config, client=None):
         self.worker_id = config.worker_id
@@ -70,7 +119,7 @@ class Manager:
                 await asyncio.sleep(.25 * 2 ** attempt)
 
     async def claim(self):
-        return await self.post('claim', {'worker_id': self.worker_id})
+        return normalize_task(await self.post('claim', {'worker_id': self.worker_id}))
 
     async def callback(self, task, action, **body):
         path = self.path(task, action).removeprefix('internal/media-worker/')
@@ -78,9 +127,7 @@ class Manager:
 
     async def download(self, task, target):
         maximum = LIMITS.get(task.get('mime_type'), 0)
-        declared = task.get('size')
-        if type(declared) is not int or not 0 < declared <= maximum:
-            raise MediaFailure('INVALID_MEDIA')
+        declared = wire_integer(task.get('size'), 1, maximum)
         digest = hashlib.sha256()
         size = 0
         try:

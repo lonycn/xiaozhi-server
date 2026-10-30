@@ -71,6 +71,7 @@ features:
   support-handoff-enabled: false
   ai-text-enabled: false
   attachments-enabled: false
+  annotations-enabled: false
 
 # Worker credential is dedicated to this execution protocol and never a user/server token.
 ai:

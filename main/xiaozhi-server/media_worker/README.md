@@ -50,3 +50,72 @@ The adapter protocol is covered with mocked responses; live provider acceptance 
 ## Provenance
 
 `/Users/lengwang/code/aimeet/services/api/app/uploads.py` was read as a local reference for validation-before-storage, metadata removal and extension/MIME checks. No source code was copied. No root license was found for that local service, so this implementation is independently written; no right to redistribute that service is asserted. The existing repository's `ai_worker` supplied the internal HTTP Result/lease design pattern. Pillow, pypdf, httpx and FFmpeg retain their own licenses; install them separately rather than vendoring their source or binaries.
+
+## B4 precise frames and annotation previews
+
+The same one-task lease loop accepts two additional immutable generation jobs.
+Both download real source bytes through the existing input endpoint, verify the
+Task's actual input byte count/SHA-256, and upload only JPEG `display` plus
+`thumbnail`. `capture_frame` input is a sent source image's normalized JPEG display
+or the original ready MP4/WebM. `annotation_preview` input is the fixed Frame's
+normalized JPEG display. Neither task accepts an input URL, storage key, remote
+font, uploaded render, or path chosen by scene data.
+
+Strict task metadata:
+
+```text
+capture_frame:
+  frame_id, source_attachment_id, requested_time_ms (null for image),
+  capture_policy="first_at_or_after", expected_width, expected_height
+annotation_preview:
+  annotation_id, frame_id, source_attachment_id, expected_width, expected_height,
+  scene (full immutable annotation-v1)
+```
+
+Complete metadata is exactly `mime_type="image/jpeg", width, height`, plus
+`actual_time_ms` for video capture only. Java alone adds the trusted provenance
+IDs and source relationships to public output metadata.
+
+For video, FFprobe decodes the real video stream and enumerates its real integer
+PTS values and rational time base. The first decoded frame defines normalized
+time zero. Selection compares **unrounded rational timestamps** with the requested
+integer millisecond and chooses the first presentation frame at or after it.
+FFmpeg then decodes from the beginning and uses an exact decoded-frame index
+`select=eq(n, INDEX)`; it does not seek by approximate time or reuse B3 samples.
+Displayed `actual_time_ms` is the selected true timestamp rounded upward to integer
+milliseconds (less than 1ms display quantization); this value is not used to select
+a frame. A request inside duration with no subsequent frame fails explicitly.
+Nonmonotonic/missing PTS, invalid containers, duration over 180 seconds, dimensions
+over 3840x2160, and expected-dimension mismatches fail. PTS enumeration is bounded
+at 8MiB JSON/100,000 frames and shares the 60-second task processing deadline,
+subprocess RSS/CPU/output limits, local-only protocols and process-group cleanup.
+
+Pillow performs an independent strict annotation-v1 validation in a disposable
+subprocess: exact allowed root/element/point fields, matching Frame ID and real
+pixel dimensions, finite normalized geometry, unique short ASCII IDs, fixed hex
+colors, stroke and font bounds, 256KiB scene JSON, 200 elements, 2,000 points per
+freehand/20,000 total points, 1,000 Unicode code points per text/8,000 total text.
+Circles use a true pixel radius relative to the smaller dimension. Rectangles,
+arrows, freehand paths, circles and plain text are drawn on a fresh RGB raster;
+the input frame and immutable scene are not modified. Text uses top-left anchoring
+and 1.25 line height, with actual fixed-font ink/line-box boundary validation.
+Markup in a text string is drawn literally and cannot load or execute resources.
+
+The default Chinese font is the repository's local
+`main/manager-web/public/generator/static/fonts/noto_qwen.ttf`. Deployments that
+package the worker without manager-web must privately set `annotation_font` to a
+fixed existing local copy. Scene data cannot choose or change the font; a missing
+configured font fails processing. This reuses the local repository font supplied
+for B4; it adds no downloaded or vendored font or dependency.
+
+Run the independent B4 suite alongside the B3 suite:
+
+```sh
+/tmp/xiaozhi-b3-media-venv/bin/python -m pytest --noconftest -q tests/test_media_worker.py tests/test_media_annotations.py
+```
+
+These tests use synthetic color videos, including B frames, nonzero PTS origins
+and fractional-millisecond timestamps, plus real Pillow rendering of all five
+tools and Chinese characters. They prove deterministic local processing, schema
+and resource rejection, immutable inputs and lease cancellation; they are not a
+real customer-media or deployed end-to-end acceptance claim.

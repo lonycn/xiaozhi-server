@@ -17,6 +17,7 @@ class Config:
     temp_root: str = ''
     ffmpeg: str = 'ffmpeg'
     ffprobe: str = 'ffprobe'
+    annotation_font: str = ''
     asr_base_url: str = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
     asr_api_key: str = ''
     asr_model: str = 'qwen3-asr-flash'

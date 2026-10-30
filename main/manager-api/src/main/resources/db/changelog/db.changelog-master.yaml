@@ -766,3 +766,6 @@ databaseChangeLog:
   - include:
       file: attachments.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: annotations.changelog.yaml
+      relativeToChangelogFile: true

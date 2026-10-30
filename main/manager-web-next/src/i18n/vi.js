@@ -1,4 +1,9 @@
 export default {
+  'adminLayout.workspace': 'Không gian làm việc',
+  'adminLayout.models': 'Mô hình và kiến thức',
+  'adminLayout.system': 'Quản trị hệ thống',
+  'adminLayout.conversations': 'Hội thoại',
+
   // Support B1: Chinese copy is shared temporarily across the six locales.
   'support.errorAuth': "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
   'support.errorTimeout': "Kết nối hết thời gian. Vui lòng thử lại.",

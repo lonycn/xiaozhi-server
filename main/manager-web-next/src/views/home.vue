@@ -1,21 +1,15 @@
 <template>
-  <div class="welcome">
+  <div class="welcome admin-page">
     <!-- 公共头部 -->
-    <HeaderBar :devices="devices" />
-    <el-main style="padding: 20px;display: flex;flex-direction: column;">
+    
+    <el-main class="agent-page-content">
       <div>
         <!-- 首页内容 -->
+        <div class="agent-page-heading">
+          <h1>{{ $t('header.smartManagement') }}</h1>
+        </div>
         <div class="add-device">
           <div class="add-device-bg">
-            <div class="hellow-text" style="padding-top: 30px;">
-              {{ $t('home.greeting') }}
-            </div>
-            <div class="hellow-text">
-              {{ $t('home.wish') }}
-            </div>
-            <div class="hi-hint">
-              let's have a wonderful day!
-            </div>
             <div class="add-device-options">
             <div class="search-container">
               <div class="search-wrapper">
@@ -50,7 +44,7 @@
                   </div>
                 </div>
               </div>
-              <el-button  class="add-device-btn" @click="showAddDialog"><template #icon><LegacyIcon class="el-icon-plus"/></template>{{ $t('home.addAgent') }}</el-button>
+              <el-button  type="primary" class="add-device-btn" @click="showAddDialog"><template #icon><LegacyIcon class="el-icon-plus"/></template>{{ $t('home.addAgent') }}</el-button>
             </div>
           </div>
         </div>
@@ -128,9 +122,7 @@
         </span></template>
       </el-dialog>
     </el-main>
-    <el-footer>
-      <version-footer />
-    </el-footer>
+    
     <chat-history-dialog v-model:visible="showChatHistory" :agent-id="currentAgentId" :agent-name="currentAgentName" />
   </div>
 
@@ -142,13 +134,11 @@ import { mapState } from "vuex";
 import AddWisdomBodyDialog from '@/components/AddWisdomBodyDialog.vue';
 import ChatHistoryDialog from '@/components/ChatHistoryDialog.vue';
 import DeviceItem from '@/components/DeviceItem.vue';
-import HeaderBar from '@/components/HeaderBar.vue';
-import VersionFooter from '@/components/VersionFooter.vue';
 import featureManager from '@/utils/featureManager';
 
 export default {
   name: 'HomePage',
-  components: { DeviceItem, AddWisdomBodyDialog, HeaderBar, VersionFooter, ChatHistoryDialog },
+  components: { DeviceItem, AddWisdomBodyDialog, ChatHistoryDialog },
   data() {
     return {
       addDeviceDialogVisible: false,
@@ -432,84 +422,13 @@ export default {
 </script>
 
 <style scoped>
-.welcome {
-  min-width: 900px;
-  min-height: 506px;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: #eff4ff;
-  background-size: cover;
-  /* 确保背景图像覆盖整个元素 */
-  background-position: center;
-  /* 从顶部中心对齐 */
-  -webkit-background-size: cover;
-  /* 兼容老版本WebKit浏览器 */
-  -o-background-size: cover;
-  /* 兼容老版本Opera浏览器 */
-}
-
-.add-device {
-  height: 195px;
-  border-radius: 15px;
-  position: relative;
-  background: linear-gradient(269.62deg,
-      #e0e6fd 0%,
-      #cce7ff 49.69%,
-      #d3d3fe 100%);
-}
-
-.add-device-bg {
-  width: 100%;
-  height: 100%;
-  text-align: left;
-  background-image: url("@/assets/home/main-top-bg.png");
-  background-size: cover;
-  /* 确保背景图像覆盖整个元素 */
-  background-position: center;
-  /* 从顶部中心对齐 */
-  -webkit-background-size: cover;
-  /* 兼容老版本WebKit浏览器 */
-  -o-background-size: cover;
-  box-sizing: border-box;
-
-  /* 兼容老版本Opera浏览器 */
-  .hellow-text {
-    margin-left: 75px;
-    color: #3d4566;
-    font-size: 33px;
-    font-weight: 700;
-    letter-spacing: 0;
-  }
-
-  .hi-hint {
-    font-weight: 400;
-    font-size: 12px;
-    text-align: left;
-    color: #818cae;
-    margin-left: 75px;
-    margin-top: 5px;
-  }
-}
-.add-device-options {
-  display: flex;
-  margin-top: 16px;
-  margin-left: 75px;
-  align-items: center;
-}
-
-.add-device-btn {
-  color: #fff;
-  margin-left: 10px;
-  background: #3375fd;
-  border-radius: 20px;
-}
-
-.search-container {
-  width: 360px;
-  margin-right: 5px;
-}
-
+.agent-page-content { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: auto; }
+.agent-page-heading { display: flex; align-items: center; margin-bottom: 20px; }
+.agent-page-heading h1 { margin: 0; font-size: 22px; font-weight: 600; color: #263445; }
+.add-device { background: #fff; border: 1px solid #e5e9ef; border-bottom: 0; border-radius: 6px 6px 0 0; padding: 18px 20px; }
+.add-device-options { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.add-device-btn { border-radius: 4px; }
+.search-container { width: 320px; max-width: 100%; }
 .search-wrapper {
   position: relative;
 }
@@ -654,9 +573,12 @@ export default {
 
 .device-list-container {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  gap: 30px;
-  padding: 30px 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  border: 1px solid #e5e9ef;
+  border-radius: 0 0 6px 6px;
+  background: #fff;
 }
 
 /* 在 DeviceItem.vue 的样式中 */
@@ -687,10 +609,10 @@ export default {
   background: #fff;
   border-radius: 8px;
   padding: 20px;
-  height: 120px;
+  height: 80px;
   position: relative;
   overflow: hidden;
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 
 .skeleton-image {
@@ -901,5 +823,19 @@ export default {
   background: linear-gradient(to right, #4a7cfd, #8154fc);
   border: none;
   opacity: 0.45;
+}
+</style>
+
+<style scoped>
+.admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
+.admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
+.admin-page .right-operations { flex-wrap: wrap; }
+.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
+.admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
+.admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
+@media (max-width: 760px) {
+  .admin-page .right-operations { margin-left: 0; width: 100%; }
+  .admin-page .search-input { max-width: 100%; }
 }
 </style>

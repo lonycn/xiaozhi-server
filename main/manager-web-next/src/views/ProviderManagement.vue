@@ -1,6 +1,6 @@
 <template>
-  <div class="welcome">
-    <HeaderBar />
+  <div class="welcome admin-page">
+    
     <div class="main-wrapper">
       <div class="content-panel">
         <div class="content-area">
@@ -85,22 +85,18 @@
     <provider-dialog :title="dialogTitle" v-model:visible="dialogVisible" :form="providerForm" :model-types="modelTypes"
       @submit="handleSubmit" @cancel="dialogVisible = false" />
 
-    <el-footer>
-      <version-footer />
-    </el-footer>
+    
   </div>
 </template>
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 import ProviderDialog from "@/components/ProviderDialog.vue";
-import VersionFooter from "@/components/VersionFooter.vue";
 import CustomButton from "@/components/CustomButton.vue";
 import CustomTable from "@/components/CustomTable.vue";
 
 export default {
-  components: { HeaderBar, ProviderDialog, VersionFooter, CustomButton, CustomTable },
+  components: { ProviderDialog, CustomButton, CustomTable },
   data() {
     return {
       searchName: "",
@@ -379,9 +375,9 @@ export default {
 
 <style lang="scss" scoped>
 .welcome {
-  min-width: 900px;
-  min-height: 506px;
-  height: 100vh;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   position: relative;
   flex-direction: column;
@@ -394,7 +390,9 @@ export default {
 
 .main-wrapper {
   // 顶部 63px 底部 35px
-  height: calc(100vh - 63px - 35px);
+  flex: 1;
+  min-height: 0;
+  height: auto;
   padding: 20px 22px 0;
   position: relative;
   display: flex;
@@ -438,7 +436,7 @@ export default {
 .content-area {
   flex: 1;
   height: 100%;
-  min-width: 600px;
+  min-width: 0;
   overflow: auto;
   background-color: white;
   display: flex;
@@ -505,5 +503,19 @@ export default {
 
 :deep(.el-table .el-button.is-link:hover) {
   color: #5a64b5;
+}
+</style>
+
+<style scoped>
+.admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
+.admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
+.admin-page .right-operations { flex-wrap: wrap; }
+.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
+.admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
+.admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
+@media (max-width: 760px) {
+  .admin-page .right-operations { margin-left: 0; width: 100%; }
+  .admin-page .search-input { max-width: 100%; }
 }
 </style>

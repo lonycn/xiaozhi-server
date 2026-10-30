@@ -1,53 +1,30 @@
 <template>
-  <div class="device-item">
-    <div style="display: flex;justify-content: space-between;">
-    <el-tooltip :content="device.agentName" placement="top" effect="light">
-      <div class="device-item-title">
-        {{ device.agentName }}
-      </div>
-    </el-tooltip>
-      <div>
-        <img src="@/assets/home/delete.png" alt="" style="width: 18px;height: 18px;margin-right: 10px;"
-          @click.stop="handleDelete" />
-        <el-tooltip class="item" effect="light" :content="device.systemPrompt" placement="top"
-          popper-class="device-item-tooltip"> 
-          <img src="@/assets/home/info.png" alt="" style="width: 18px;height: 18px;" />
+  <article class="device-item">
+    <div class="agent-identity">
+      <span class="agent-avatar" aria-hidden="true"><LegacyIcon class="el-icon-user" /></span>
+      <div class="agent-identity-copy">
+        <el-tooltip :content="device.systemPrompt || device.agentName" placement="top" effect="light" popper-class="device-item-tooltip">
+          <h3 class="device-item-title">{{ device.agentName }}</h3>
         </el-tooltip>
+        <div v-if="tags.length" class="agent-tags"><el-tag v-for="tag in tags" :key="tag" size="small" effect="plain">{{ tag }}</el-tag></div>
+        <span class="agent-device-count">{{ $t('home.deviceManagement') }} · {{ device.deviceCount || 0 }}</span>
       </div>
     </div>
-    <div class="device-name">
-      {{ $t('home.languageModel') }}：{{ device.llmModelName }}
+    <div class="agent-models">
+      <div class="device-name"><span>{{ $t('home.languageModel') }}</span><strong>{{ device.llmModelName || '—' }}</strong></div>
+      <div class="device-name"><span>{{ $t('home.voiceModel') }}</span><strong>{{ device.ttsModelName || '—' }}<template v-if="device.ttsVoiceName"> · {{ device.ttsVoiceName }}</template></strong></div>
     </div>
-    <div class="device-name">
-      {{ $t('home.voiceModel') }}：{{ device.ttsModelName }} ({{ device.ttsVoiceName }})
-    </div>
-    <div style="display: flex;gap: 10px;align-items: center;">
-      <div class="settings-btn" @click="handleConfigure">
-        {{ $t('home.configureRole') }}
-      </div>
-      <div v-if="featureStatus.voiceprintRecognition" class="settings-btn" @click="handleVoicePrint">
-        {{ $t('home.voiceprintRecognition') }}
-      </div>
-      <div class="settings-btn" @click="handleDeviceManage">
-        {{ $t('home.deviceManagement') }}({{ device.deviceCount }})
-      </div>
-      <div :class="['settings-btn', { 'disabled-btn': device.memModelId === 'Memory_nomem' }]"
-        @click="handleChatHistory">
-        <el-tooltip effect="light" v-if="device.memModelId === 'Memory_nomem'" :content="$t('home.enableMemory')" placement="top">
-          <span>{{ $t('home.chatHistory') }}</span>
-        </el-tooltip>
-        <span v-else>{{ $t('home.chatHistory') }}</span>
-      </div>
-    </div>
-    <div class="version-info">
-      <div>{{ $t('home.lastConversation') }}：{{ formattedLastConnectedTime }}</div>
-      <el-tooltip :content="tags.join()" placement="top" effect="light">
-        <div class="version-info-scroll">
-          {{ tags.join() }}
-        </div>
+    <div class="version-info"><span>{{ $t('home.lastConversation') }}</span><span>{{ formattedLastConnectedTime }}</span></div>
+    <div class="agent-actions">
+      <el-button link type="primary" @click="handleConfigure">{{ $t('home.configureRole') }}</el-button>
+      <el-button v-if="featureStatus.voiceprintRecognition" link type="primary" @click="handleVoicePrint">{{ $t('home.voiceprintRecognition') }}</el-button>
+      <el-button link type="primary" @click="handleDeviceManage">{{ $t('home.deviceManagement') }}</el-button>
+      <el-tooltip :disabled="device.memModelId !== 'Memory_nomem'" :content="$t('home.enableMemory')" placement="top">
+        <span><el-button link type="primary" :disabled="device.memModelId === 'Memory_nomem'" @click="handleChatHistory">{{ $t('home.chatHistory') }}</el-button></span>
       </el-tooltip>
+      <el-button class="agent-delete" link type="danger" :aria-label="$t('common.delete')" :title="$t('common.delete')" @click.stop="handleDelete"><LegacyIcon class="el-icon-delete" /></el-button>
     </div>
-  </div>
+  </article>
 </template>
 
 <script>
@@ -118,79 +95,26 @@ export default {
 }
 </script>
 <style lang="scss" scoped>
-.device-item {
-  width: 342px;
-  border-radius: 20px;
-  background: #fafcfe;
-  padding: 22px 22px 14px;
-  box-sizing: border-box;
-  &-title {
-    flex: 1;
-    font-weight: bold;
-    font-size: 18px;
-    color: #3d4566;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    overflow: hidden;
-  }
-}
-
-.device-name {
-  margin: 7px 0 10px;
-  font-weight: 400;
-  font-size: 11px;
-  color: #3d4566;
-  text-align: left;
-}
-
-.settings-btn {
-  font-weight: 500;
-  font-size: 12px;
-  color: #5778ff;
-  background: #e6ebff;
-  width: auto;
-  padding: 0 12px;
-  height: 21px;
-  line-height: 21px;
-  cursor: pointer;
-  border-radius: 14px;
-}
-
-.version-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 15px;
-  font-size: 12px;
-  color: #979db1;
-  font-weight: 400;
-  &-scroll {
-    margin-left: 20px;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-wrap: nowrap;
-    text-align: right;
-  }
-}
-
-.more-tag {
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.all-tags-popover {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.disabled-btn {
-  background: #e6e6e6;
-  color: #999;
-  cursor: not-allowed;
-}
+.device-item { width: 100%; display: grid; grid-template-columns: minmax(170px, 1.1fr) minmax(200px, 1.25fr) minmax(110px, .65fr) minmax(240px, 1.2fr); align-items: center; gap: 20px; padding: 24px 20px; box-sizing: border-box; border-bottom: 1px solid #edf0f4; background: #fff; text-align: left; }
+.device-item:last-child { border-bottom: 0; }
+.device-item:hover { background: #fafbfd; }
+.agent-identity { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.agent-avatar { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 8px; background: #edf4ff; color: #3b76dc; display: grid; place-items: center; font-size: 24px; }
+.agent-identity-copy { min-width: 0; }
+.device-item-title { margin: 0 0 6px; color: #263445; font-size: 15px; line-height: 1.4; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.agent-device-count { font-size: 12px; color: #8b95a5; }
+.agent-models { min-width: 0; }
+.device-name { display: flex; align-items: baseline; gap: 10px; margin: 5px 0; font-size: 12px; }
+.device-name span { color: #8b95a5; flex-shrink: 0; }
+.device-name strong { font-weight: 400; color: #566477; overflow-wrap: anywhere; }
+.version-info { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: #65758a; }
+.version-info > :first-child { color: #8b95a5; }
+.agent-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 14px; }
+.agent-actions .el-button { margin: 0; font-size: 12px; }
+.agent-delete { padding: 4px; font-size: 15px !important; }
+@media (max-width: 1200px) { .device-item { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1.1fr) minmax(210px, 1fr); } .version-info { grid-column: 2; grid-row: 2; flex-direction: row; } .agent-actions { grid-column: 3; grid-row: 1 / span 2; } }
+@media (max-width: 760px) { .device-item { grid-template-columns: 1fr; gap: 14px; padding: 20px 16px; } .version-info, .agent-actions { grid-column: auto; grid-row: auto; } .agent-actions { justify-content: flex-start; } }
 </style>
 
 <style>

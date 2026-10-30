@@ -1,6 +1,6 @@
 <template>
-  <div class="welcome">
-    <HeaderBar />
+  <div class="welcome admin-page">
+    
 
     <div class="operation-bar">
       <h2 class="page-title">{{ $t("roleConfig.title") }}</h2>
@@ -478,9 +478,7 @@
         :current-version-no="currentVersionNo"
         @restored="handleSnapshotRestored"
       />
-    <el-footer>
-      <version-footer />
-    </el-footer>
+    
   </div>
 </template>
 
@@ -492,14 +490,12 @@ import FunctionDialog from "@/components/FunctionDialog.vue";
 import ContextProviderDialog from "@/components/ContextProviderDialog.vue";
 import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
 import AgentSnapshotDialog from "@/components/AgentSnapshotDialog.vue";
-import HeaderBar from "@/components/HeaderBar.vue";
 import i18n from "@/i18n";
 import featureManager from "@/utils/featureManager"; 
-import VersionFooter from "@/components/VersionFooter.vue";
 
 export default {
   name: "RoleConfigPage",
-  components: { HeaderBar, FunctionDialog, ContextProviderDialog, TtsAdvancedSettings, AgentSnapshotDialog, VersionFooter },
+  components: { FunctionDialog, ContextProviderDialog, TtsAdvancedSettings, AgentSnapshotDialog},
   data() {
     return {
       showContextProviderDialog: false,
@@ -1921,8 +1917,8 @@ export default {
   }
 }
 .welcome {
-  min-width: 900px;
-  height: 100vh;
+  min-width: 0;
+  height: 100%;
   display: flex;
   position: relative;
   flex-direction: column;
@@ -1947,7 +1943,9 @@ export default {
 }
 
 .main-wrapper {
-  height: calc(100vh - 63px - 35px - 60px);
+  flex: 1;
+  min-height: 0;
+  height: auto;
   margin: 0 22px;
   border-radius: 15px;
   position: relative;
@@ -1968,7 +1966,7 @@ export default {
 .content-area {
   flex: 1;
   height: 100%;
-  min-width: 600px;
+  min-width: 0;
   overflow: auto;
   background-color: white;
   display: flex;
@@ -2413,5 +2411,19 @@ export default {
 .custom-tooltip {
   max-width: 400px !important;
   word-break: break-word;
+}
+</style>
+
+<style scoped>
+.admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
+.admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
+.admin-page .right-operations { flex-wrap: wrap; }
+.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
+.admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
+.admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
+@media (max-width: 760px) {
+  .admin-page .right-operations { margin-left: 0; width: 100%; }
+  .admin-page .search-input { max-width: 100%; }
 }
 </style>

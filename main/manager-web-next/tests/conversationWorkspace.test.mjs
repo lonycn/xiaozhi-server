@@ -310,4 +310,18 @@ describe('B4 annotation reply integration', () => {
     vm.selected.state='RESOLVED';await vm.$nextTick();expect(editor.props('writable')).toBe(false);expect(editor.vm.error).toBe('annotations.denied');
   });
 
+  it('sends text through the existing save hook during realtime and retains all attachment drafts', async () => {
+    vm.selected={id:'one',state:'AI_ACTIVE'};await vm.$nextTick();vm.realtimeState={session:{id:'s',status:'active'},injections:[]};vm.draft='实时补充文字';const row={clientUploadId:'keep',kind:'image',status:'failed',attachment:{id:'9',status:'failed'}};vm.attachmentRows=[row];api.send.mockResolvedValue({id:'saved',parts:[{type:'text',text:'实时补充文字'}]});await vm.sendMessage();expect(api.send.mock.calls[0][1].parts).toEqual([{type:'text',text:'实时补充文字'}]);expect(vm.draft).toBe('');expect(vm.attachmentRows).toEqual([row]);
+  });
+  it('shows audio transcription placeholders and actionable long-audio failure without an endless retry button', async () => {
+    vm.selected={id:'one',state:'AI_ACTIVE'};vm.messages=[{id:'user-audio',sender_type:'user',status:'transcribing',parts:[]},{id:'failed',sender_type:'assistant',status:'failed',parts:[]}];vm.runs=[{run_id:'run',output_message_id:'failed',status:'failed',error_code:'OMNI_AUDIO_LIMIT'}];await vm.$nextTick();expect(wrapper.text()).toContain('realtime.input_transcribing');expect(wrapper.text()).toContain('ai.omniAudioLimit');expect(wrapper.text()).not.toContain('ai.retry');vm.messages[0].status='failed';await vm.$nextTick();expect(wrapper.text()).toContain('realtime.input_failed');
+  });
+  it('keeps saved text distinct from provider synchronization and ignores a human room from a previous conversation', async () => {
+    vm.selected={id:'one',state:'AI_ACTIVE'};await vm.$nextTick();vm.messages=[{id:'saved',sender_type:'user',parts:[{type:'text',text:'already saved'}]}];vm.realtimeState={session:{id:'s',status:'active'},injections:[{id:'i',message_id:'saved',status:'queued'}]};await vm.$nextTick();expect(wrapper.text()).toContain('已保存');expect(wrapper.text()).toContain('realtime.injection_queued');vm.humanMediaChanged({id:'human',conversation_id:'other',status:'active'});expect(vm.humanMedia).toBeNull();vm.humanMediaChanged({id:'human',conversation_id:'one',status:'invited'});expect(vm.realtimeAllowed).toBe(false);
+  });
+
+  it('retries an uncertain realtime text save with the same message ID after realtime ends, without adding attachment drafts', async () => {
+    vm.selected={id:'one',state:'AI_ACTIVE'};await vm.$nextTick();vm.realtimeState={session:{id:'s',status:'active'},injections:[]};vm.draft='同一条文字';const row={clientUploadId:'retained',kind:'image',status:'failed',attachment:{id:'9',status:'failed'}};vm.attachmentRows=[row];api.send.mockRejectedValueOnce(new Error('uncertain'));await vm.sendMessage();const first=api.send.mock.calls[0][1];vm.realtimeState={session:{id:'s',status:'ended'},injections:[]};api.send.mockResolvedValueOnce({id:'saved',parts:first.parts});await vm.sendMessage();expect(api.send.mock.calls[1][1]).toEqual(first);expect(vm.attachmentRows).toEqual([row]);expect(vm.draft).toBe('');
+  });
+
 });

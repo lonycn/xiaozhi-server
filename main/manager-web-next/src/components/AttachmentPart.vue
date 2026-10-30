@@ -6,7 +6,7 @@
     <img v-if="url && part.type === 'image'" :src="url" :alt="attachment?.filename || $t('attachments.image')" referrerpolicy="no-referrer" @error="invalidate" />
     <video v-else-if="url && part.type === 'video'" :key="url" :src="url" controls preload="none" controlslist="nodownload" @error="invalidate" />
     <audio v-else-if="url && part.type === 'audio'" :key="url" :src="url" controls preload="none" @error="invalidate" />
-    <div class="media-actions"><button v-if="part.type !== 'file'" type="button" :disabled="busy" @click="open(false)">{{ $t(expired ? 'attachments.reauthorize' : 'attachments.view') }}</button><button type="button" :disabled="busy" @click="open(true)">{{ $t('attachments.download') }}</button><button v-if="attachment?.metadata?.artifacts?.includes('transcript')" type="button" :disabled="busy" @click="open(true, 'transcript')">{{ $t('attachments.transcript') }}</button></div>
+    <div class="media-actions"><button v-if="part.type !== 'file'" type="button" :disabled="busy" @click="open(false)">{{ $t(expired ? 'attachments.reauthorize' : 'attachments.view') }}</button><button type="button" :disabled="busy" @click="open(true)">{{ $t('attachments.download') }}</button><button v-if="['image', 'video'].includes(part.type) && canAnnotate" type="button" :disabled="busy" @click="$emit('annotate', { attachmentId: part.attachment_id })">{{ $t('annotations.annotate') }}</button><button v-if="attachment?.metadata?.annotation_id" type="button" :disabled="busy" @click="$emit('snapshot', String(attachment.metadata.annotation_id))">{{ $t('annotations.sourceScene') }}</button><button v-if="attachment?.metadata?.artifacts?.includes('transcript')" type="button" :disabled="busy" @click="open(true, 'transcript')">{{ $t('attachments.transcript') }}</button></div>
     <small v-for="job in transcriptionJobs" :key="job.id">{{ $t('attachments.transcription') }}: {{ $t('attachments.job_' + job.status) }}<template v-if="job.error_code"> · {{ $t('attachments.transcriptionFailed') }}</template></small>
     <small v-if="url">{{ $t('attachments.privateLink') }}</small>
   </div>
@@ -16,7 +16,8 @@ import attachmentApi from '../apis/module/attachment';
 import { attachmentErrorKey } from '../utils/attachments.mjs';
 export default {
   name: 'AttachmentPart',
-  props: { part: { type: Object, required: true }, scopeKey: { type: String, required: true } },
+  props: { part: { type: Object, required: true }, scopeKey: { type: String, required: true }, canAnnotate: Boolean },
+  emits: ['annotate', 'snapshot'],
   data: () => ({ attachment: null, url: '', error: '', expired: false, busy: false, controller: null, version: 0, expiryTimer: null }),
   computed: { transcriptionJobs() { return (this.attachment?.jobs || []).filter(job => job.job_type === 'audio_transcription'); }, context() { return JSON.stringify([this.scopeKey, this.part.attachment_id]); } },
   watch: { context: { flush: 'sync', handler() { this.reset(); } } },

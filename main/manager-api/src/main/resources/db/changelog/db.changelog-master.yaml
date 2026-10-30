@@ -778,3 +778,6 @@ databaseChangeLog:
   - include:
       file: realtime-ai.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: support-summary.changelog.yaml
+      relativeToChangelogFile: true

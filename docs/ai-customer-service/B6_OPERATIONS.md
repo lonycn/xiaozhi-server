@@ -1,6 +1,6 @@
 # B6 配置、来源接入与隔离验证
 
-本模块默认关闭；本轮只实现manager-api接收面、独立身份/会话和失败关闭的业务adapter契约。未更改aimeet、Laravel、Kuikly、Vue、Python或B5，未启动业务服务，未接入任何外部设备/工单/知识网络端点。原有aimeet v1继续独立使用。
+本模块默认关闭；独立身份/会话和失败关闭的业务 adapter 契约不改变原有 aimeet v1。外部设备、工单和知识真实网络端点的接入仍需单独确认；新增外部媒体和自动听音的配置与验证边界见 [外部媒体与 VAD 运维](EXTERNAL_MEDIA_VAD_OPERATIONS.md)。
 
 ## 启用所需配置
 
@@ -36,7 +36,7 @@ issue body仅external_subject、source_session_id、source_expires_at、display_
 
 外部客户端读取媒体使用新/api/v1/external/attachments/{id}/access及其content短票；原/api/v1/ai/attachments/{id}/access/content对external Bearer拒绝。代理短票绑定当前Bearer，读取时重验来源和原AttachmentService资源授权，不返回原actor-only短票。SSE在每批写前重验捕获的source，媒体长输出每秒及慢读返回后重验；本地Bearer不增加该guard。
 
-RTC/media-session/transfer路径返回SOURCE_SESSION_RTC_UNAVAILABLE。本分支不含B5，不能声称来源会话撤销已解决LiveKit旧JWT；后续必须绑定member/token/ready到source并采用房间generation隔离。
+外部媒体默认关闭；开启 `features.external-realtime-media-enabled` 后，精确白名单中的 AI 实时与人工媒体路径受原功能开关和绑定的来源/Bearer 双重约束。客户可操作已绑定转接的指定方法，创建转接及坐席接受等未列出路径仍拒绝；只读 `media-drain` 在媒体开关关闭时仍可由有效外部身份查询本人来源/Bearer 的清理状态。旧 LiveKit JWT 不会瞬时失效；新房代次隔离及清理边界见 [外部媒体与 VAD 运维](EXTERNAL_MEDIA_VAD_OPERATIONS.md)。
 
 设备/工单/知识仅有ExternalBusinessAdapter只读契约，未安装真实网络实现，允许的请求返回BUSINESS_NOT_CONFIGURED。未来adapter必须按真实来源用户/来源会话/租户重新验证具体记录归属，不能使用Workbench服务权限冒充用户。结果须有issuer、tenant、资源类型、真实来源记录ID及观察时间；不接正式工单提交、设备控制或模型自报事实。
 

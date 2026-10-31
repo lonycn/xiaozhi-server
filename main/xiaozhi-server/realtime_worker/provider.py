@@ -37,9 +37,11 @@ class Provider:
             raise Fault('PROVIDER_UNAVAILABLE') from None
 
     @staticmethod
-    def session_update():
+    def session_update(turn_detection_mode="manual"):
         return dict(type='session.update', session={
-            'modalities': ['text', 'audio'], 'turn_detection': None,
+            'modalities': ['text', 'audio'], 'turn_detection':
+                {'type': 'server_vad', 'threshold': 0.5, 'silence_duration_ms': 800}
+                if turn_detection_mode == 'server_vad' else None,
             'input_audio_transcription': {'model': 'qwen3-asr-flash-realtime'},
             'instructions': 'You are a maintenance assistant. Distinguish audible/visible evidence from hypotheses. '
                             'Sound or sampled images alone cannot establish a definite fault or safe operation. '

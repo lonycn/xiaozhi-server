@@ -28,10 +28,11 @@ public final class ExternalBoundaryFilter extends OncePerRequestFilter {
         if(!external){chain.doFilter(request,response);return;}
         try {
             if(headers.size()!=1 || authorization==null || !authorization.matches("Bearer xext_[a-f0-9]{64}"))throw new ExternalProblem(401,"EXTERNAL_TOKEN_INVALID");
-            if(ExternalPathPolicy.rtc(path))throw new ExternalProblem(403,"SOURCE_SESSION_RTC_UNAVAILABLE");
+            if(ExternalPathPolicy.rtc(path) && !ExternalPathPolicy.mediaAllowed(request.getMethod(),path))throw new ExternalProblem(403,"EXTERNAL_ROUTE_DENIED");
             if(!ExternalPathPolicy.allowed(request.getMethod(),path))throw new ExternalProblem(403,"EXTERNAL_ROUTE_DENIED");
             if(!ExternalPathPolicy.queryKeys(request.getMethod(),path).containsAll(request.getParameterMap().keySet()))throw new ExternalProblem(400,"UNTRUSTED_CONTEXT_PARAMETER");
             ExternalIdentityService service=services.get();if(service==null)throw new ExternalProblem(503,"IDENTITY_NOT_CONFIGURED");
+            if(ExternalPathPolicy.mediaAllowed(request.getMethod(),path) && !path.equals("/api/v1/support/media-drain") && !service.mediaEnabled())throw new ExternalProblem(403,"EXTERNAL_MEDIA_DISABLED");
             request.setAttribute(ExternalIdentityService.ATTRIBUTE,service.authenticate(authorization.substring(7)));
             chain.doFilter(request,response);
         } catch(ExternalProblem failure) {error(response,failure.status(),failure.getMessage());}

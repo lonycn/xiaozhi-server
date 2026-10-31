@@ -14,6 +14,7 @@ import xiaozhi.modules.security.user.SecurityUser;
 public class RealtimeController {
     private final RealtimeService service;private final ConversationService requests;
     public RealtimeController(RealtimeService service,ConversationService requests){this.service=service;this.requests=requests;}
+    @GetMapping("/capabilities") public Result<?> capabilities(){return new Result<>().ok(service.capabilities());}
     @PostMapping("/sessions") public Result<Session> create(@RequestBody JsonNode body){return new Result<Session>().ok(service.create(SecurityUser.getUserId(),requests.request(body,Create.class)));}
     @GetMapping("/sessions/current") public Result<Session> current(@RequestParam("conversation_id") String conversationId){return new Result<Session>().ok(service.current(SecurityUser.getUserId(),conversationId));}
     @GetMapping("/sessions/{id}") public Result<Session> get(@PathVariable String id){return new Result<Session>().ok(service.get(SecurityUser.getUserId(),id));}

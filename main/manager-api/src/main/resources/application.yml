@@ -74,7 +74,9 @@ features:
   annotations-enabled: false
   support-media-enabled: false
   external-identity-enabled: false
+  external-realtime-media-enabled: false
   realtime-ai-enabled: false
+  realtime-server-vad-enabled: false
   support-summary-assistance-enabled: false
 
 # Worker credential is dedicated to this execution protocol and never a user/server token.

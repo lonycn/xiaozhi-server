@@ -6,15 +6,22 @@
 
 - B1/B2 人工及 AI 文字、账本和事件流已实现；B3/B4 的私有附件、派生、截图和标注已有 Dev 技术样本。原设备历史桥接只读，细节见 [B1](./SUPPORT_B1_VALIDATION.md)、[B2](./B2_VALIDATION.md)、[B3](./B3_VALIDATION.md)、[B4](./B4_VALIDATION.md)。
 - 非实时 Omni：原 Docker Dev/S3 已恢复，录音与有声视频重新完成真实上传、音轨派生、Omni、SSE和持久回复；usage分别183/81/264（input audio44）、830/79/909（input audio16）。成功依据为 `/Users/lengwang/code/esp32/work/omni-dev-e2e-proof-r3.json`。早期S3中断、旧run重试耗尽、r2时钟回退失败和独立文件系统成功证据均保留；技术样本不等于设备故障诊断。
-- P3 已合并；真实 Java、Python、百炼 provider R6 全链 23 项通过，覆盖真实音频、ASR、usage、历史顺序、文字注入的真实 provider 分配 ID 与 ACK、打断、命令 ACK、结束后恢复 B2、携历史新 session、人工交接不超过 6 秒、旧 lease 409 且无迟到写入。最终 ACK 补丁已合并，不据此宣称已部署。恢复副本真实音频+两帧JPEG同轮问答也已通过，模型正确描述技术图标的形状、白/蓝色和青蓝眼睛；非真人摄像头验收。当前手动录音和有界 JPEG 采样不等同自动 VAD、WebRTC 或连续视频。追加纯文字不带新画面，历史帧追问未获可靠结果，界面已提示在本段录音中问画面。
+- P3 已合并；真实 Java、Python、百炼 provider R6 全链 23 项通过，覆盖真实音频、ASR、usage、历史顺序、文字注入的真实 provider 分配 ID 与 ACK、打断、命令 ACK、结束后恢复 B2、携历史新 session、人工交接不超过 6 秒、旧 lease 409 且无迟到写入。最终 ACK 补丁已合并，不据此宣称已部署。恢复副本真实音频+两帧JPEG同轮问答也已通过，模型正确描述技术图标的形状、白/蓝色和青蓝眼睛；非真人摄像头验收。现已另增 provider server_vad 自动语音检测并完成技术链路，仍不等于 WebRTC 或连续视频。追加纯文字不带新画面，历史帧追问未获可靠结果，界面已提示在本段录音中问画面。
 - B5 已合并，真实 native SDK R3 双向 RTP、新房转接、原客服 403 和历史 cutoff、旧 JWT 只能进入旧空房、结束后的 drain 均有证据。视频实收 22 帧，实际解码 JPEG 经 B3/B5、挂断后 B4 标注和消息发送，原件、frame、render 三项证据关联得到验证。详见 [B5 验证](./B5_RUNTIME_VALIDATION.md)。原Dev恢复后另完成双浏览器首轮技术音视频（192帧）及S3抓帧；编辑器poll问题已修复，第二轮跨poll/挂断编辑、2元素标注ready预览和加入草稿通过；实际发送/客户UI可见及source/frame/render同消息、scene2元素和三S3 GET SHA已通过；浏览器独立新房gen2转接、目标真实RTP（视频105帧）、B接续历史并回复和原A写403通过；gen1/2房间cleaned、12member席位释放通过；5条queued为15分钟墓碑补偿，空video修复后新通话挂断DOM/audio/video清零/全track结束、390px手机历史200px及composer可达/无溢出均通过。上述结果均非真人或现场设备验收。
 - 结构化交接摘要 `4c324ed` 已合并：九字段确定性原文草稿，并非 AI 语义总结；包含证据、版本和客服 cutoff。真实 MySQL REPEATABLE READ、Spring 默认关闭、Java 28 项和 Vue 10 contract + 368 unit 的范围见 [交接摘要验证](./HANDOFF_SUMMARY_VALIDATION.md)。
-- B6 身份边界默认关闭；新增可配置的只读 HTTP adapter，独立双向签名、来源/租户/项目授权、逐条知识引用、撤销与完整响应超时已验证。当前 Laravel 尚无委托查询生产者，仍未接通真实业务；外部 RTC/P3 仍禁用。见 [来源协议](./B6_READONLY_HTTP_PROTOCOL.md)。
+- B6 身份边界默认关闭；新增可配置的只读 HTTP adapter，独立双向签名、来源/租户/项目授权、逐条知识引用、撤销与完整响应超时已验证。当前 Laravel 尚无委托查询生产者，仍未接通真实业务；外部 RTC/P3 已增具体来源/Bearer绑定及撤销，原Dev入口仍默认关闭，独立技术环境验证见 [来源媒体与VAD](EXTERNAL_MEDIA_VAD_VALIDATION_20261031.md)。见 [来源协议](./B6_READONLY_HTTP_PROTOCOL.md)。
 - 已移除启动时因 Redis 版本变化而执行的 `FLUSHDB`，有 4 项回归；AI worker delta 的 literal 文本修复已合并，保留精确路由和请求体限制。默认 feature 开关仍关闭。
 
 - 模型辅助交接已实现并在原 Dev 显式启用：独立摘要 worker、九字段模型整理、内部建议、证据校验、真实 usage/失败尝试、人工编辑及草稿加入均有记录；新消息/版本/转接/撤权会使旧结果过期。技术样本真实百炼第3次通过，前两次结构校验失败完整保留；没有自动发送给客户。见 [辅助验收](./HANDOFF_ASSISTANCE_VALIDATION.md)。
 
 ## 核心剩余工作
+
+### 本批已完成的 Server 扩展（2026-10-31）
+
+- [x] 外部 App P3/B5 按可信 source 与具体 Bearer 绑定；票据、回调、token、ready 和转接客户审批动态重验；logout/source revoke/到期/开关关闭收敛运行媒体，保留聊天和人工服务。
+- [x] 服务端自动语音检测、真实轮次与取消确认、显式听音/暂停、65秒静音、未提交片段清理及文字注入排序；保留手动模式和旧客户端幂等重试。
+- [x] 原Dev追加迁移117→120并启用VAD；Java最终508、Vue415+10contract+13snapshot、Python38 realtime/48 AI、Dev45均通过。真实百炼、LiveKit和Vue技术验证及限制见 [本批验证](EXTERNAL_MEDIA_VAD_VALIDATION_20261031.md)。
+- [ ] 真实来源 App、物理设备声学/画面、HTTPS/WSS、TURN、弱网及长通话验收；真实业务API相关项仍保留在下方。
 
 ### 非实时声音与证据理解
 
@@ -39,7 +46,7 @@
 
 - [x] 实现 Server 只读 HTTP adapter，36项定向协议/撤销/超时检查通过；默认关闭，不将合成源协议测试视为真实业务连通。
 
-- [ ] 与真实 Laravel/Kuikly 来源联调身份、签名、短票据、防重放、撤销、租户和 scope；撤销故障不能静默放行，不按手机号合并账号。source-bound RTC 的设计和撤权 fencing 完成前继续禁止外部身份 RTC。
+- [ ] 与真实 Laravel/Kuikly 来源联调身份、签名、短票据、防重放、撤销、租户和 scope；撤销故障不能静默放行，不按手机号合并账号。Server来源媒体绑定及撤权 fencing 已完成；真实来源投递、App媒体接入和现场联调仍待完成，原Dev未配置来源密钥。
 - [ ] 基于可信来源建立设备归属、温度、历史报警、工单、项目位置、专家和知识检索等只读授权与可追溯引用；现有未配置返回 `BUSINESS_NOT_CONFIGURED`。记录来源、权限、时间、真实记录 ID 和审计，标识陈旧数据。
 - [ ] 真实业务 MCP/工具、模型辅助建议及授权后工单草稿/提交/派单均需实现和验收；危险设备控制首期禁止 AI 自动执行。接口或 mock 不构成业务闭环。
 

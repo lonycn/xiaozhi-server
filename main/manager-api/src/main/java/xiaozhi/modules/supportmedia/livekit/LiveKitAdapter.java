@@ -158,6 +158,9 @@ public final class LiveKitAdapter implements AutoCloseable {
      * never unvalidated client grants. Consent changes require the caller's generation fence.
      */
     public JoinToken issueToken(OwnedRoom room,String identity,boolean microphone,boolean camera) {
+        return issueToken(room,identity,microphone,camera,null);
+    }
+    public JoinToken issueToken(OwnedRoom room,String identity,boolean microphone,boolean camera,Instant authorityExpiresAt) {
         authorizeIdentity(room,Operation.TOKEN,identity);
         ObjectNode grants=json.createObjectNode().put("room",room.roomName()).put("roomJoin",true)
             .put("canSubscribe",true).put("canPublish",microphone||camera).put("canPublishData",false)
@@ -167,6 +170,7 @@ public final class LiveKitAdapter implements AutoCloseable {
         ArrayNode sources=grants.putArray("canPublishSources");
         if(microphone)sources.add("microphone");if(camera)sources.add("camera");
         long expiry=clock.instant().getEpochSecond()+config.tokenTtlSeconds();
+        if(authorityExpiresAt!=null){expiry=Math.min(expiry,authorityExpiresAt.getEpochSecond());if(expiry<=clock.instant().getEpochSecond())throw new LiveKitFailure(LiveKitFailure.Code.OWNERSHIP_DENIED);}
         return new JoinToken(config.publicUrl(),sign(claims(identity,expiry).set("video",grants)),Instant.ofEpochSecond(expiry));
     }
     private ObjectNode claims(String identity,long expiry) {

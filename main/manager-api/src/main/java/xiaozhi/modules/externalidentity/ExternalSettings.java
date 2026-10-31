@@ -8,6 +8,9 @@ import com.fasterxml.jackson.databind.*;
 @Component
 public class ExternalSettings {
     private boolean enabled;
+    private boolean mediaEnabled;
+    @Value("${features.external-realtime-media-enabled:false}") public void setMediaEnabled(boolean value){mediaEnabled=value;}
+    public boolean mediaEnabled(){return enabled && mediaEnabled;}
     private String keysJson="";
     private int tokenSeconds=300;
     public record Key(String issuer,byte[] secret) { @Override public String toString(){return "ExternalKey[redacted]";} }

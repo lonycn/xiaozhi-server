@@ -45,7 +45,9 @@ python3 dev/manage.py up --build --seed-local-console
 
 新建/选择/分页读取自己的会话，发送文字，刷新读取持久历史，展示原有位置消息。不同会话分别保留未发送草稿；网络失败时保留内容，重试沿用同一个幂等编号。中文输入法确认候选词不会触发发送。
 
-统一对话页已接入转人工、排队取消、客服回复和结束后恢复 AI。B2 提供实际 AI 文字执行、流式回复、停止、失败重试与持久用量。B3/B4 提供私有附件及截图标注；B5 提供真人音视频与换房转接；P3 提供手动分段实时AI和摄像头采样；客服工作台增加内部证据摘要草稿。各模块按对应开关及私有配置启用，发布配置默认关闭。操作方式见 [B5](../docs/ai-customer-service/B5_DEV_OPERATIONS.md)、[实时AI](../docs/ai-customer-service/REALTIME_DEV_OPERATIONS.md) 和 [剩余验收](../docs/ai-customer-service/REMAINING_WORK.md)，源码存在不等于现场或外部业务已验收。
+统一对话页已接入转人工、排队取消、客服回复和结束后恢复 AI。B2 提供实际 AI 文字执行、流式回复、停止、失败重试与持久用量。B3/B4 提供私有附件及截图标注；B5 提供真人音视频与换房转接；P3 提供手动分段、服务端自动语音检测和有界摄像头采样；客服工作台增加内部证据摘要草稿。各模块按对应开关及私有配置启用，发布配置默认关闭。操作方式见 [B5](../docs/ai-customer-service/B5_DEV_OPERATIONS.md)、[实时AI](../docs/ai-customer-service/REALTIME_DEV_OPERATIONS.md) 和 [剩余验收](../docs/ai-customer-service/REMAINING_WORK.md)，源码存在不等于现场或外部业务已验收。
+
+本 Dev 可执行 `python3 dev/manage.py realtime-enable --server-vad` 开启自动听音能力，使用 `--no-server-vad` 关闭该模式；省略参数保留原设置。命令重启本 Dev API 和 realtime worker，保留会话历史。通过 `realtime-status` 查看状态。页面选择自动语音检测、同意麦克风后连接，再点击开始听音；连接本身不打开麦克风。暂停丢弃尚未提交的发言，自动听音期间文字注入排队，暂停确认后派发。外部 App 仍需独立可信来源密钥及 `features.external-realtime-media-enabled`，原 Dev 未配置或启用该来源入口。详见 [授权和自动听音运维](../docs/ai-customer-service/EXTERNAL_MEDIA_VAD_OPERATIONS.md)。
 
 后端 B1 人工文字服务已提供独立 API，详见 [接口契约](../docs/ai-customer-service/SUPPORT_B1_API.md)；Vue 3 工作台位于 `/#/support`，启用的客服及管理员会在智控台看到入口。管理员须先给已有账号配置客服/专家档案，客服随后刷新在线租约才能接单。现有管理员身份不会自动赋予任意会话的读取权。
 

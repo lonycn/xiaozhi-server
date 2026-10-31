@@ -31,7 +31,9 @@ public final class RealtimeModels {
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Consent(@JsonDeserialize(using=BooleanReader.class) Boolean microphone,@JsonDeserialize(using=BooleanReader.class) Boolean camera) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Create(String conversationId,String clientSessionId,Consent consent) { }
+    public record Create(String conversationId,String clientSessionId,Consent consent,String turnDetectionMode) {
+        public Create(String conversationId,String clientSessionId,Consent consent){this(conversationId,clientSessionId,consent,null);}
+    }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Epoch(@JsonDeserialize(using=IntegerReader.class) Long expectedEpoch) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -57,7 +59,7 @@ public final class RealtimeModels {
     public record Session(String id,String conversationId,String status,@JsonSerialize(using=NumberSerializer.class) long controlEpoch,
             String model,Consent consent,String providerSessionId,@JsonSerialize(using=NumberSerializer.class) long lastEventSequence,
             String activeResponseId,String activeMessageId,String errorCode,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant createdAt,
-            @JsonFormat(shape=JsonFormat.Shape.STRING) Instant connectedAt,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant endedAt) { }
+            @JsonFormat(shape=JsonFormat.Shape.STRING) Instant connectedAt,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant endedAt,String turnDetectionMode) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Ticket(String sessionId,@JsonSerialize(using=NumberSerializer.class) long controlEpoch,String websocketUrl,String ticket,
             @JsonFormat(shape=JsonFormat.Shape.STRING) Instant expiresAt) {
@@ -72,7 +74,7 @@ public final class RealtimeModels {
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Task(String sessionId,String conversationId,@JsonSerialize(using=NumberSerializer.class) long controlEpoch,String leaseToken,String serverId,
             int leaseSeconds,String model,Consent consent,List<Context> context,@JsonSerialize(using=NumberSerializer.class) long contextSeq,
-            Limits limits,AudioFormat inputAudio,AudioFormat outputAudio) {
+            Limits limits,AudioFormat inputAudio,AudioFormat outputAudio,String turnDetectionMode) {
         @Override public String toString(){return "Task[sessionId="+sessionId+", lease=REDACTED]";}
     }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

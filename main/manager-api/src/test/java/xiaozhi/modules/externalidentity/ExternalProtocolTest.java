@@ -62,8 +62,11 @@ class ExternalProtocolTest {
     @Test void whitelistAllowsOwnChatMediaAndHandoffButRejectsLegacyStaffRtcAndUnknown() {
         String id="a".repeat(32);
         for(String path:List.of("/api/v1/ai/conversations","/api/v1/ai/conversations/"+id+"/messages","/api/v1/ai/conversations/"+id+"/handoff","/api/v1/ai/uploads/init","/api/v1/support/annotations"))assertTrue(ExternalPathPolicy.allowed("POST",path),path);
+        assertTrue(ExternalPathPolicy.allowed("POST","/api/v1/support/media-sessions/123/token"));
+        assertFalse(ExternalPathPolicy.allowed("GET","/api/v1/support/media-sessions/123/token"));
+        assertFalse(ExternalPathPolicy.allowed("POST","/api/v1/support/media-transfers/123/accept"));
         assertTrue(ExternalPathPolicy.allowed("PUT","/api/v1/ai/uploads/123/content"));
-        for(String path:List.of("/user/refresh","/user/logout","/config/anything","/api/v1/support/agents","/api/v1/support/requests/"+id+"/claim","/internal/ai-worker/claim","/api/v1/ai/attachments/123/access","/api/v1/ai/attachments/123/content","/api/v1/ai/new-admin-api","/api/v1/support/media-sessions/123/token"))
+        for(String path:List.of("/user/refresh","/user/logout","/config/anything","/api/v1/support/agents","/api/v1/support/requests/"+id+"/claim","/internal/ai-worker/claim","/api/v1/ai/attachments/123/access","/api/v1/ai/attachments/123/content","/api/v1/ai/new-admin-api"))
             assertFalse(ExternalPathPolicy.allowed("POST",path)||ExternalPathPolicy.allowed("GET",path),path);
         assertFalse(ExternalPathPolicy.allowed("GET","/api/v1/ai/conversations/%61"+id.substring(1)));
     }

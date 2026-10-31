@@ -13,6 +13,7 @@ public final class ExternalPathPolicy {
     public static boolean rtc(String path){return path.startsWith("/api/v1/support/media-") || path.contains("/media-transfers") || path.endsWith("/token");}
     public static boolean allowed(String method,String path) {
         if(path.contains("%") || path.contains(";") || path.contains("\\") || path.contains("//"))return false;
+        if(mediaAllowed(method,path))return true;
         if(method.equals("GET")) {
             return path.equals("/api/v1/ai/conversations")
                 || path.matches("/api/v1/ai/conversations/"+C+"(?:/(?:messages|events|runs|stream))?")
@@ -38,8 +39,22 @@ public final class ExternalPathPolicy {
             || path.equals("/api/v1/external/identity/logout");
         return method.equals("PUT") && path.matches("/api/v1/ai/uploads/"+N+"/content");
     }
+    public static boolean mediaAllowed(String method,String path) {
+        if(method.equals("GET"))return path.equals("/api/v1/support/media-drain") || path.matches("/api/v1/support/media-transfers/"+N) || path.equals("/api/v1/ai/realtime/capabilities") || path.matches("/api/v1/ai/realtime/sessions/(?:"+C+"|current)")
+            || path.matches("/api/v1/ai/realtime/sessions/"+C+"/injections")
+            || path.matches("/api/v1/support/media-sessions/(?:"+N+"|current)");
+        if(method.equals("POST"))return path.equals("/api/v1/ai/realtime/sessions")
+            || path.matches("/api/v1/ai/realtime/sessions/"+C+"/(?:connect-ticket|messages|interrupt|end)")
+            || path.matches("/api/v1/support/media-transfers/"+N+"/(?:approve|reject|cancel)")
+            || path.equals("/api/v1/support/media-sessions")
+            || path.matches("/api/v1/support/media-sessions/"+N+"/(?:accept|reject|token|ready|end)");
+        return false;
+    }
     public static Set<String> queryKeys(String method,String path) {
         if(!method.equals("GET"))return Set.of();
+        if(path.equals("/api/v1/support/media-drain"))return Set.of("conversation_id");
+        if(path.endsWith("/sessions/current") || path.equals("/api/v1/support/media-sessions/current"))return Set.of("conversation_id");
+        if(path.matches("/api/v1/ai/realtime/sessions/"+C+"/injections"))return Set.of("after","limit");
         if(path.endsWith("/access"))return Set.of("variant");
         if(path.equals("/api/v1/external/business/knowledge"))return Set.of("q");
         if(path.equals("/api/v1/support/annotations"))return Set.of("conversation_id","after","limit");

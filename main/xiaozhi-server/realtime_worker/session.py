@@ -61,6 +61,8 @@ def actual_usage(usage):
 def validate_task(task, config):
     if not isinstance(task, dict) or task.get('model') != MODEL:
         raise Fault('WORKER_ERROR')
+    if task.get('turn_detection_mode', 'manual') not in ('manual', 'server_vad'):
+        raise Fault('WORKER_ERROR')
     for key in ('session_id', 'conversation_id'):
         if not isinstance(task.get(key), str) or not re.fullmatch(r'[a-f0-9]{32}', task[key]):
             raise Fault('WORKER_ERROR')
@@ -100,6 +102,13 @@ class Session:
         self.config, self.manager, self.provider_factory, self.browser = config, manager, provider, browser
         self.task = validate_task(task, config)
         self.limits = task['limits']
+        self.auto = task.get("turn_detection_mode", "manual") == "server_vad"
+        self.listening = False
+        self.speech_active = False
+        self.suppress_next_response = False
+        self.speech_started = None
+        self.clearing_input = False
+        self.audio_items = OrderedDict()
         self.sequence = 0
         self.queue = asyncio.Queue(maxsize=config.queue_size)
         self.failure = None
@@ -134,7 +143,7 @@ class Session:
         self.tasks = []
 
     def busy(self):
-        return bool(not self.ready or self.turn_audio or self.waiting_commit or self.waiting_response
+        return bool(not self.ready or self.listening or self.clearing_input or self.turn_audio or self.waiting_commit or self.waiting_response
                     or self.response or self.pending_injection)
 
     def enqueue(self, kind, value):
@@ -210,7 +219,8 @@ class Session:
                 continue
             if not self.response or rid != self.response['id'] or self.interrupt: raise Fault('WORKER_ERROR')
             self.interrupt = command
-            await self.send_provider({'type': 'response.cancel'})
+            if not (self.auto and self.response.get('suppressed')):
+                await self.send_provider({'type': 'response.cancel'})
             self.pending_since = time.monotonic()
             await self.send_browser('response.canceled', authorize=False, response_id=self.response['id'],
                                     status='interrupting', clear_audio=True)
@@ -317,7 +327,8 @@ class Session:
             await self.send_provider({'type':'response.create'})
         elif (item.get('type') == 'message' and
                 (item.get('role') == 'assistant' and self.response is not None
-                 or item.get('role') == 'user' and (self.waiting_commit or self.turn_audio > 0)
+                 or item.get('role') == 'user' and (self.waiting_commit or self.turn_audio > 0
+                        or self.auto and (self.listening or item_id in self.audio_items))
                     and isinstance(item.get('content'),list) and item['content']
                     and all(isinstance(part,dict) and part.get('type') == 'input_audio' for part in item['content']))):
             self.remember_item(item_id,fingerprint)
@@ -328,16 +339,35 @@ class Session:
         if not isinstance(event, dict): raise Fault('INPUT_LIMIT')
         kind = event.get('type')
         allowed = {'audio.append': {'type','audio'}, 'audio.commit': {'type'},
-                   'frame.append': {'type','image','mime_type'}}
+                   'frame.append': {'type','image','mime_type'},
+                   'listening.start': {'type'}, 'listening.stop': {'type'}}
         if kind not in allowed or set(event) != allowed[kind]: raise Fault('INPUT_LIMIT')
         await self.authorize(force_busy=True)
-        if self.response or self.waiting_response or self.waiting_commit or self.pending_injection:
+        if kind in ('listening.start', 'listening.stop'):
+            if not self.auto: raise Fault('INPUT_LIMIT')
+            if kind == 'listening.start':
+                if self.clearing_input or self.pending_injection:
+                    await self.send_browser('error', authorize=False, code='RESPONSE_IN_PROGRESS')
+                    return
+                self.listening = True
+                await self.send_browser('listening.started', authorize=False)
+            elif not self.clearing_input:
+                self.listening = False
+                self.clearing_input = True
+                self.pending_since = time.monotonic()
+                await self.send_provider({'type': 'input_audio_buffer.clear'})
+            return
+        if self.auto and (not self.listening or kind == 'audio.commit'):
+            raise Fault('INPUT_LIMIT')
+        if self.pending_injection or not self.auto and (self.response or self.waiting_response or self.waiting_commit):
             await self.send_browser('error', authorize=False, code='RESPONSE_IN_PROGRESS')
             return
         if kind == 'audio.append':
             data = decoded(event['audio'], self.limits['max_audio_chunk_bytes'])
             if len(data) % 2: raise Fault('INPUT_LIMIT')
-            self.turn_audio += len(data); self.input_audio += len(data)
+            # In continuous mode silence is streamed, never accumulated as a 60s utterance.
+            if not self.auto or self.speech_active: self.turn_audio += len(data)
+            self.input_audio += len(data)
             if self.turn_audio > self.limits['max_audio_turn_bytes'] or self.input_audio > self.config.max_input_audio_bytes:
                 raise Fault('INPUT_LIMIT')
             await self.send_provider({'type':'input_audio_buffer.append','audio':event['audio']})
@@ -347,7 +377,7 @@ class Session:
             self.pending_since = time.monotonic()
             await self.send_provider({'type':'input_audio_buffer.commit'})
         else:
-            if (not self.task['consent']['camera'] or not self.turn_audio or event['mime_type'] != 'image/jpeg'
+            if (not self.task['consent']['camera'] or not (self.turn_audio or self.auto and self.listening and self.input_audio) or event['mime_type'] != 'image/jpeg'
                     or not isinstance(event['image'], str) or len(event['image']) > 256000): raise Fault('INPUT_LIMIT')
             data = decoded(event['image'], self.limits['max_frame_bytes'])
             now = time.monotonic()
@@ -385,21 +415,57 @@ class Session:
         if kind == 'session.created':
             if self.created: raise Fault('PROVIDER_ERROR')
             self.created = True
-            await self.send_provider(self.provider_factory.session_update())
+            await self.send_provider(self.provider_factory.session_update(self.task.get("turn_detection_mode", "manual")))
         elif kind == 'session.updated':
             if not self.created or self.updated: raise Fault('PROVIDER_ERROR')
+            if self.auto and (not isinstance(event.get('session', {}).get('turn_detection'), dict)
+                    or event['session']['turn_detection'].get('type') != 'server_vad'):
+                raise Fault('PROVIDER_ERROR')
             self.updated = True
             self.provider_session_id = safe_id(event.get('session', {}).get('id'))
             await self.seed_context(event)
         elif kind == 'conversation.item.created':
             await self.item_created(event)
+        elif kind == 'input_audio_buffer.speech_started':
+            if not self.auto or not (self.listening or self.clearing_input) or self.speech_active:
+                raise Fault('PROVIDER_ERROR')
+            self.speech_active = True
+            self.speech_started = time.monotonic()
+            self.turn_audio = 0
+            if self.waiting_response: self.suppress_next_response = True
+            if self.response:
+                # Qwen VAD itself cancels the response. Do not race that with an
+                # extra response.cancel (which errors when there is no response).
+                self.response['suppressed'] = True
+                await self.send_browser('response.canceled', authorize=False,
+                    response_id=self.response['id'], status='interrupting', clear_audio=True)
+            await self.send_browser('speech.started', authorize=False)
+        elif kind == 'input_audio_buffer.speech_stopped':
+            if not self.auto or not self.speech_active: raise Fault('PROVIDER_ERROR')
+            self.speech_active = False
+            self.speech_started = None
+            self.waiting_commit = True
+            self.pending_since = time.monotonic()
+            await self.send_browser('speech.stopped', authorize=False)
+        elif kind == 'input_audio_buffer.cleared':
+            if not self.auto or not self.clearing_input: raise Fault('PROVIDER_ERROR')
+            self.clearing_input = False
+            self.speech_active = False
+            self.speech_started = None
+            self.turn_audio = 0
+            self.waiting_commit = False
+            if not (self.response or self.waiting_response or self.pending_injection): self.pending_since = None
+            await self.send_browser('listening.stopped', authorize=False)
         elif kind == 'input_audio_buffer.committed':
             if not self.waiting_commit: raise Fault('PROVIDER_ERROR')
+            item_id = safe_id(event.get('item_id'))
+            self.audio_items[item_id] = True
+            if len(self.audio_items) > 256: self.audio_items.popitem(last=False)
             await self.canonical(event, 'input.committed', provider_item_id=safe_id(event.get('item_id')))
             self.waiting_commit = False; self.turn_audio = 0
             self.waiting_response = True
             self.pending_since = time.monotonic()
-            await self.send_provider({'type':'response.create'})
+            if not self.auto: await self.send_provider({'type':'response.create'})
         elif kind == 'conversation.item.input_audio_transcription.failed':
             raise Fault('PROVIDER_ERROR')
         elif kind == 'conversation.item.input_audio_transcription.completed':
@@ -412,6 +478,9 @@ class Session:
                 raise Fault('PROVIDER_ERROR')
             self.responses.add(rid)
             self.response = dict(id=rid, channel=None, text='', final=None)
+            if self.suppress_next_response:
+                self.response['suppressed'] = True
+                self.suppress_next_response = False
             self.waiting_response = False
             self.pending_since = time.monotonic()
             receipt = await self.canonical(event, 'response.started', response_id=rid)
@@ -511,11 +580,13 @@ class Session:
                     await self.send_browser('response.completed', response_id=rid, text=text, finish_reason=finish, usage=usage)
             else:
                 raise Fault(provider_error(response.get('status_details') or {}))
-            self.response = None; self.interrupt = None; self.pending_since = None
+            self.response = None; self.interrupt = None
+            if not (self.waiting_commit or self.waiting_response or self.clearing_input): self.pending_since = None
 
     def check_deadlines(self):
         now = time.monotonic()
         if now-self.started > self.limits['max_session_seconds']: raise Fault('INPUT_LIMIT')
+        if self.speech_started and now-self.speech_started >= 60: raise Fault('AUDIO_TURN_LIMIT')
         if not self.ready and now > self.setup_deadline: raise Fault('PROVIDER_TIMEOUT')
         if self.early_since and now-self.early_since > 2: raise Fault('PROVIDER_ERROR')
         if self.pending_since and now-self.pending_since > self.config.ack_timeout_seconds:

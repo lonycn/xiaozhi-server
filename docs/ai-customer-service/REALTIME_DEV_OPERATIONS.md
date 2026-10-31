@@ -1,6 +1,12 @@
 # P3 Realtime AI Dev 操作
 
-本功能默认关闭；Java 控制面与 Python bridge 契约见 [REALTIME_AI_CONTRACT.md](./REALTIME_AI_CONTRACT.md)，worker 的协议与限制见 `main/xiaozhi-server/realtime_worker/README.md`。以下命令针对本 checkout 的 Dev，使用已构建的 API JAR 和独立 Python 环境；不会导入、重建或清空数据库，也不修改原设备、旧控制台或共享 LiveKit 配置。执行命令会重建 Dev API、启动或停止本 checkout 的 worker；仅在确认目标环境后运行。
+## 自动语音检测与来源授权更新（2026-10-31）
+
+本 Dev 已启用 `server_vad`，默认创建模式仍为 `manual`。使用 `python3 dev/manage.py realtime-enable --server-vad` 显式启用能力；`--no-server-vad` 关闭，省略保留原设置。切换命令会重启本 Dev API 和 worker，保留历史，不能用作无中断通话切换。页面先选模式和授权、连接，再点击开始听音；暂停立即关闭采集，并等待 provider 清缓冲 ACK，未提交片段丢弃。监听期间文字注入先排队，暂停确认后执行。发现已有会话、刷新和身份切换不自动开启设备。
+
+能力发现为 `GET /api/v1/ai/realtime/capabilities`，创建增加不可变 `turn_detection_mode=manual|server_vad`。自动轮次由 provider 实际 speech/commit/response 事件推动，不手动重复提交；打断记录等待 provider 实际终态。旧三字段 manual Create 的严格幂等重试保持兼容。外部媒体新增来源与具体 Bearer 的持久绑定，默认关闭；配置、精确路由、短凭据和撤销限制见 [运维契约](EXTERNAL_MEDIA_VAD_OPERATIONS.md)，已完成范围见 [验证记录](EXTERNAL_MEDIA_VAD_VALIDATION_20261031.md)。下文为原 P3 手动模式基础说明，其手动操作限制不适用于新增自动模式。
+
+发布配置默认关闭；Java 控制面与 Python bridge 契约见 [REALTIME_AI_CONTRACT.md](./REALTIME_AI_CONTRACT.md)，worker 的协议与限制见 `main/xiaozhi-server/realtime_worker/README.md`。以下命令针对本 checkout 的 Dev，使用已构建的 API JAR 和独立 Python 环境；不会导入、重建或清空数据库，也不修改原设备、旧控制台或共享 LiveKit 配置。执行命令会重建 Dev API、启动或停止本 checkout 的 worker；仅在确认目标环境后运行。
 
 启用前需准备含 `RealtimeController` 与 `RealtimeMaintenance` 的 API JAR，以及 `ROOT.parent/.realtime-venv/bin/python`（可用 `XIAOZHI_REALTIME_WORKER_PYTHON` 指向已准备的独立环境）和 worker requirements。`dev/.runtime/ai-worker.json` 须为 0600 且已有可用的百炼 API key 和 workspace 端点，或支持的公共地域端点加 workspace ID。此处仅显式复用其私有凭据配置，不读取 `.env`、查询或改写数据库；模型授权和网络可用性仍以实际调用为准。
 

@@ -1,5 +1,15 @@
 # P3 realtime AI execution contract (frozen v1)
 
+## Additive VAD and external source update
+
+The original v1 details below remain the **manual** protocol; its browser input/output allowlists and session/task examples are extended by this section. `manual` remains the default. `features.realtime-server-vad-enabled` defaults to `false`. `GET /api/v1/ai/realtime/capabilities` returns `turn_detection_modes` and `default_turn_detection_mode`; session creation accepts `turn_detection_mode: "manual" | "server_vad"`. The stored Session and claimed worker Task carry that immutable mode. End the current session before changing modes.
+
+In `server_vad` mode, an explicitly consented user starts and stops capture through browser frames `listening.start` and `listening.stop`; the worker emits `listening.started`, `listening.stopped`, `speech.started` and `speech.stopped` in addition to the v1 output allowlist. Stop sends `input_audio_buffer.clear` to the provider and only acknowledges `listening.stopped` after the real clear event. Automatic provider VAD commits the speech and starts its response, so an automatic audio turn does not use the manual `audio.commit` or manual `response.create` sequence described below. Speech during a response flushes local playback, while canonical cancellation awaits real provider termination. Ready, discovery and reconnect do not automatically activate the microphone.
+
+While listening, text injection remains queued; after pause and the clear acknowledgement it may be dispatched under the existing provider item correlation and acknowledgement rules. Saved text is not the same as provider acknowledgement, and uncertain dispatched text is not replayed. The original limits, authorization checks and manual workflow remain applicable as described below.
+
+External AI media requires the independently default-off `features.external-realtime-media-enabled` gate as well as the existing feature gates. Java captures and binds both external source session and the specific Bearer, checking them on requests and worker callbacks. Logout, source revocation, expiry, issuer or account loss terminates the affected authorization; another Bearer cannot take over the old media session. Follow [external media and VAD operations](EXTERNAL_MEDIA_VAD_OPERATIONS.md) for the exact external paths, cleanup limits and verification boundaries.
+
 2026-10-30. Additive to B1–B5; existing conversation/message/history and human LiveKit APIs remain authoritative. Default `features.realtime-ai-enabled: false`. This Java API uses an independently authenticated Python WebSocket bridge, never a provider credential in the browser. No second production AI transport is introduced.
 
 ## Public HTTP API

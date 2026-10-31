@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from aiohttp import web, ClientSession, WSServerHandshakeError, WSMsgType
 from PIL import Image
@@ -48,7 +49,7 @@ class Harness:
         self.task = task(); self.active=True; self.used=False; self.events=[]; self.bodies=[]
         self.provider_sent=[]; self.provider_clients=set(); self.response_tasks=set(); self.callback_seen={}
         self.pending_injections=[]; self.pending_commands=[]; self.browsers=[]
-        self.sequence=0; self.mode='normal'; self.ack_items=True; self.lost_event_ack=False
+        self.silent=False; self.sequence=0; self.mode='normal'; self.ack_items=True; self.lost_event_ack=False
         self.false_heartbeat=False; self.error_http=False; self.callback_interrupt=False; self.delta_fence=False; self.force_canceled=False; self.terminal_receipt=False; self.reject_commit=False
         self.response_number=0; self.provider_count=0; self.input_number=0; self.audio_open=False; self.current_audio_item=None; self.last_item=None; self.ack_mode='allocated'; self.old_ack=None; self.provider_closed=asyncio.Event()
         self.media_received=asyncio.Event(); self.hold_response=asyncio.Event()
@@ -183,7 +184,7 @@ class Harness:
                 kind=event['type']
                 if kind=='session.update':
                     self.updated=event
-                    await self.emit(ws,'session.updated',session=dict(id='provider-session'))
+                    await self.emit(ws,'session.updated',session=dict(id='provider-session',turn_detection=event['session'].get('turn_detection')))
                 elif kind=='conversation.item.create':
                     if self.ack_items:
                         item=copy.deepcopy(event['item']);item['id']='allocated-item-'+str(self.provider_count+1)
@@ -202,11 +203,17 @@ class Harness:
                             await ws.send(json.dumps(duplicate))
                 elif kind=='input_audio_buffer.append':
                     self.media_received.set()
+                    if self.silent: continue
                     if not self.audio_open:
                         self.input_number+=1;self.audio_open=True
                         self.current_audio_item='audio-input-'+str(self.input_number)
+                        if self.task.get('turn_detection_mode') == 'server_vad':
+                            await self.emit(ws,'input_audio_buffer.speech_started',item_id=self.current_audio_item,audio_start_ms=0)
                         await self.emit(ws,'conversation.item.created',item={'id':self.current_audio_item,'type':'message','role':'user','content':[{'type':'input_audio'}]},previous_item_id=self.last_item)
                         self.last_item=self.current_audio_item
+                elif kind=='input_audio_buffer.clear':
+                    self.audio_open=False
+                    await self.emit(ws,'input_audio_buffer.cleared')
                 elif kind=='input_audio_buffer.commit':
                     audio_item=self.current_audio_item;self.audio_open=False
                     if self.mode!='late_asr': await self.emit(ws,'conversation.item.input_audio_transcription.completed',item_id=audio_item,transcript='technical speech')
@@ -222,6 +229,15 @@ class Harness:
             pass
         finally:
             self.provider_clients.discard(ws);self.provider_closed.set()
+
+    async def vad_commit(self):
+        ws=next(iter(self.provider_clients))
+        audio_item=self.current_audio_item;self.audio_open=False
+        await self.emit(ws,'input_audio_buffer.speech_stopped',item_id=audio_item,audio_end_ms=100)
+        await self.emit(ws,'input_audio_buffer.committed',item_id=audio_item)
+        await self.emit(ws,'conversation.item.input_audio_transcription.completed',item_id=audio_item,transcript='automatic speech')
+        self.response_number+=1
+        job=asyncio.create_task(self.response(ws,'response-'+str(self.response_number)));self.response_tasks.add(job)
 
     async def connect(self, ready=True, ticket=TICKET):
         ws=await self.client.ws_connect(self.url,origin=ORIGIN)
@@ -244,6 +260,96 @@ async def receive(ws, kind, timeout=4):
 class NetworkTests(unittest.IsolatedAsyncioTestCase):
     async def harness(self, **kwargs):
         value=await Harness(**kwargs).start(); self.addAsyncCleanup(value.close); return value
+
+    async def test_server_vad_waits_for_real_turn_events_and_never_creates_duplicate_response(self):
+        h=await self.harness();h.task['turn_detection_mode']='server_vad'
+        ws=await h.connect()
+        self.assertEqual(h.updated['session']['turn_detection'],dict(type='server_vad',threshold=.5,silence_duration_ms=800))
+        self.assertNotIn('create_response',h.updated['session']['turn_detection'])
+        await ws.send_json(dict(type='listening.start'));await receive(ws,'listening.started')
+        for turn in range(2):
+            await ws.send_json(audio());await receive(ws,'speech.started')
+            await h.vad_commit();await receive(ws,'speech.stopped');await receive(ws,'response.completed')
+        self.assertEqual(len([e for e in h.events if e['type']=='input.committed']),2)
+        self.assertEqual(len([e for e in h.events if e['type']=='response.completed']),2)
+        self.assertFalse(any(e['type'] in ('response.create','input_audio_buffer.commit') for e in h.provider_sent))
+        await ws.send_json(dict(type='listening.stop'));await receive(ws,'listening.stopped')
+        self.assertEqual(len([e for e in h.provider_sent if e['type']=='input_audio_buffer.clear']),1)
+
+    async def test_server_vad_silence_does_not_consume_utterance_limit_and_injections_wait_for_pause(self):
+        h=await self.harness();h.task['turn_detection_mode']='server_vad';h.silent=True
+        ws=await h.connect();await ws.send_json(dict(type='listening.start'));await receive(ws,'listening.started')
+        h.pending_injections=[dict(id='injection-auto',message_id='message-auto',provider_item_id='text-auto',text='queued text')]
+        for _ in range(31): await ws.send_json(audio(b'\0\0'*32000))
+        await asyncio.sleep(.15)
+        self.assertFalse(any(e['type']=='response.create' for e in h.provider_sent))
+        self.assertFalse(any(e['type']=='conversation.item.create' for e in h.provider_sent))
+        await ws.send_json(dict(type='listening.stop'));await receive(ws,'listening.stopped')
+        await receive(ws,'injection.status');await receive(ws,'response.completed')
+        self.assertEqual(len([e for e in h.events if e['type']=='injection.ack']),1)
+
+    async def test_server_vad_barge_in_clears_output_and_waits_for_provider_terminal_ack(self):
+        h=await self.harness();h.task['turn_detection_mode']='server_vad';h.mode='hold'
+        ws=await h.connect();await ws.send_json(dict(type='listening.start'));await receive(ws,'listening.started')
+        await ws.send_json(audio());await receive(ws,'speech.started');await h.vad_commit();await receive(ws,'audio.delta')
+        await ws.send_json(audio());event=await receive(ws,'response.canceled')
+        self.assertEqual(event['status'],'interrupting');self.assertTrue(event['clear_audio'])
+        self.assertFalse(any(e['type']=='response.canceled' for e in h.events))
+        provider=next(iter(h.provider_clients))
+        await h.emit(provider,'response.audio.delta',response_id='response-1',delta=base64.b64encode(b'\0\0').decode())
+        await h.emit(provider,'response.done',response=dict(id='response-1',status='cancelled'))
+        self.assertEqual((await receive(ws,'response.canceled'))['status'],'canceled')
+        self.assertEqual(len([e for e in h.events if e['type']=='response.canceled']),1)
+        self.assertFalse(any(e['type']=='response.cancel' for e in h.provider_sent))
+        h.mode='normal';await h.vad_commit();await receive(ws,'response.completed')
+
+    async def test_server_vad_barge_in_before_response_created_suppresses_late_old_turn(self):
+        h=await self.harness();h.task['turn_detection_mode']='server_vad'
+        ws=await h.connect();await ws.send_json(dict(type='listening.start'));await receive(ws,'listening.started')
+        await ws.send_json(audio());await receive(ws,'speech.started')
+        provider=next(iter(h.provider_clients));item=h.current_audio_item;h.audio_open=False
+        await h.emit(provider,'input_audio_buffer.speech_stopped',item_id=item)
+        await h.emit(provider,'input_audio_buffer.committed',item_id=item)
+        await ws.send_json(audio());await receive(ws,'speech.started')
+        h.response_number=1
+        await h.emit(provider,'response.created',response=dict(id='response-1'))
+        await h.emit(provider,'response.audio.delta',response_id='response-1',delta=base64.b64encode(b'\0\0').decode())
+        await h.emit(provider,'response.done',response=dict(id='response-1',status='cancelled'))
+        self.assertEqual((await receive(ws,'response.canceled'))['status'],'canceled')
+        self.assertEqual([e['type'] for e in h.events if e['type'].startswith('response.')],['response.started','response.canceled'])
+
+    async def test_server_vad_command_during_automatic_cancel_is_acked_without_duplicate_cancel(self):
+        h=await self.harness();h.task['turn_detection_mode']='server_vad';h.mode='hold'
+        ws=await h.connect();await ws.send_json(dict(type='listening.start'));await receive(ws,'listening.started')
+        await ws.send_json(audio());await receive(ws,'speech.started');await h.vad_commit();await receive(ws,'audio.delta')
+        await ws.send_json(audio());await receive(ws,'speech.started')
+        h.pending_commands=[dict(id='command-vad',type='interrupt',response_id='response-1')]
+        provider=next(iter(h.provider_clients))
+        await h.emit(provider,'response.done',response=dict(id='response-1',status='cancelled'))
+        await receive(ws,'response.canceled')
+        await asyncio.sleep(.05)
+        self.assertFalse(any(e['type']=='response.cancel' for e in h.provider_sent))
+        self.assertEqual(len([e for e in h.events if e['type']=='command.ack']),1)
+
+    def test_server_vad_duration_limit_is_speech_based_and_mode_is_validated(self):
+        from realtime_worker.session import Session
+        from realtime_worker.control import Fault
+        cfg=Config(manager_url='http://127.0.0.1',worker_key='w'*48,provider_url='wss://test.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime',api_key='test')
+        job=task();job['turn_detection_mode']='semantic_vad'
+        with self.assertRaises(Fault): Session(cfg,None,None,None,job)
+        job['turn_detection_mode']='server_vad';session=Session(cfg,None,None,None,job)
+        session.ready=True;session.turn_audio=0;session.check_deadlines()
+        session.speech_started=time.monotonic()-61
+        with self.assertRaises(Fault) as failure: session.check_deadlines()
+        self.assertEqual(failure.exception.code,'AUDIO_TURN_LIMIT')
+
+    async def test_server_vad_revocation_and_no_audio_before_explicit_listening(self):
+        h=await self.harness();h.task['turn_detection_mode']='server_vad'
+        ws=await h.connect();await ws.send_json(audio());self.assertEqual((await receive(ws,'error'))['code'],'INPUT_LIMIT')
+        second=await self.harness();second.task['turn_detection_mode']='server_vad'
+        ws=await second.connect();await ws.send_json(dict(type='listening.start'));await receive(ws,'listening.started')
+        second.active=False;await ws.send_json(audio());await asyncio.wait_for(second.provider_closed.wait(),2)
+        self.assertFalse(any(e['type']=='input_audio_buffer.append' for e in second.provider_sent))
 
     async def test_audio_roundtrip_authoritative_history_usage_and_private_keys(self):
         h=await self.harness();ws=await h.connect()

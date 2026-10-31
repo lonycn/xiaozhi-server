@@ -109,6 +109,8 @@ def configure():
         properties.update({"features.realtime-ai-enabled": "true",
                            "realtime.worker.key": realtime["worker_key"],
                            "realtime.worker.public-url": realtime["public_url"]})
+        if realtime.get("server_vad_enabled") is True:
+            properties["features.realtime-server-vad-enabled"] = "true"
     (RUNTIME / "application-dev.properties").write_text("\n".join(f"{key}={value}" for key, value in properties.items()) + "\n")
     for name in ("credentials.json", "compose.env", "application-dev.properties"):
         (RUNTIME / name).chmod(0o600)
@@ -354,6 +356,8 @@ def realtime_public_url(value):
 
 
 def validate_realtime_settings(settings):
+    if type(settings.get("server_vad_enabled", False)) is not bool:
+        raise RuntimeError("Invalid realtime server VAD setting")
     key = settings.get("worker_key")
     if not isinstance(key, str) or not 32 <= len(key) <= 512 or not re.fullmatch(r"[A-Za-z0-9_-]+", key):
         raise RuntimeError("Invalid realtime worker key")
@@ -362,13 +366,15 @@ def validate_realtime_settings(settings):
     realtime_public_url(settings.get("public_url"))
 
 
-def realtime_jar_check():
+def realtime_jar_check(require_vad=False):
     marker = "BOOT-INF/classes/xiaozhi/modules/realtime/RealtimeController.class"
     maintenance = "BOOT-INF/classes/xiaozhi/modules/realtime/RealtimeMaintenance.class"
     try:
         with zipfile.ZipFile(API / "target/xiaozhi-esp32-api.jar") as archive:
             if not {marker, maintenance}.issubset(archive.namelist()):
                 raise RuntimeError("Realtime requires a built API with realtime and maintenance support")
+            if require_vad and "BOOT-INF/classes/db/changelog/realtime-vad.changelog.yaml" not in archive.namelist():
+                raise RuntimeError("Server VAD requires a freshly built API with the VAD migration")
     except (OSError, zipfile.BadZipFile):
         raise RuntimeError("Realtime requires a built API with realtime and maintenance support") from None
 
@@ -401,13 +407,17 @@ def realtime_provider_config():
         raise RuntimeError("Realtime needs a valid private workspace Bailian AI worker configuration") from None
 
 
-def prepare_realtime(public_url=None):
+def prepare_realtime(public_url=None, server_vad=None):
     realtime_jar_check()
     provider_url, api_key = realtime_provider_config()
     existing = realtime_settings()
+    realtime_jar_check(server_vad is True or server_vad is None and existing.get("server_vad_enabled") is True)
+    if server_vad is not None and type(server_vad) is not bool:
+        raise RuntimeError("Invalid realtime server VAD setting")
     key = existing.get("worker_key") or secrets.token_urlsafe(48)
     server_id = existing.get("server_id") or "dev-realtime-" + secrets.token_hex(12)
     settings = {"enabled": True, "worker_key": key, "server_id": server_id,
+                "server_vad_enabled": existing.get("server_vad_enabled", False) if server_vad is None else server_vad,
                 "public_url": realtime_public_url(public_url or existing.get("public_url") or "ws://127.0.0.1:18899/realtime")}
     validate_realtime_settings(settings)
     if key == api_key:
@@ -876,6 +886,8 @@ def main():
     parser.add_argument("--rtc-env", help="Existing private LiveKit configuration file")
     parser.add_argument("--rtc-public-url", help="Client-reachable LiveKit URL")
     parser.add_argument("--realtime-public-url", help="Client-reachable realtime WebSocket URL")
+    parser.add_argument("--server-vad", action=argparse.BooleanOptionalAction, default=None,
+                        help="Enable/disable automatic realtime speech detection; omitted preserves current setting")
     args = parser.parse_args()
     configure()
     if args.action == "summary-enable":
@@ -944,13 +956,13 @@ def main():
     elif args.action == "rtc-status":
         print("RTC enabled:", rtc_settings().get("enabled") is True)
     elif args.action == "realtime-enable":
-        realtime_jar_check()
+        realtime_jar_check(args.server_vad is True or args.server_vad is None and realtime_settings().get("server_vad_enabled") is True)
         realtime_provider_config()
         realtime_python()
         if args.realtime_public_url:
             realtime_public_url(args.realtime_public_url)
         stop_realtime_worker()
-        prepare_realtime(args.realtime_public_url)
+        prepare_realtime(args.realtime_public_url, args.server_vad)
         configure()
         recreate_api()
         start_realtime_worker()
@@ -966,6 +978,7 @@ def main():
         print("Realtime disabled; session history retained and leases expire asynchronously")
     elif args.action == "realtime-status":
         print("Realtime enabled:", realtime_settings().get("enabled") is True)
+        print("Realtime server VAD enabled:", realtime_settings().get("enabled") is True and realtime_settings().get("server_vad_enabled") is True)
         print("Realtime worker running:", bool(realtime_process()))
     elif args.action == "ai-enable":
         model = export_ai_config() if args.omni_model is None else export_ai_config(args.omni_model)
@@ -1025,7 +1038,7 @@ def main():
         if args.seed_local_console:
             seed_local_console()
         if realtime_settings().get("enabled") is True:
-            realtime_jar_check()
+            realtime_jar_check(realtime_settings().get("server_vad_enabled") is True)
         if summary_settings().get("enabled") is True and ai_settings().get("enabled") is True:
             summary_jar_check()
         stage_api_jar()

@@ -19,8 +19,8 @@ public class MediaMaintenance {
     @Scheduled(fixedDelayString="${support-media.maintenance-delay-ms:3000}")
     public void tick(){expire();if(livekit.configured()){processOutbox();poll();advanceTransfers();}}
     public void expire(){
-        for(var hint:store.rows("SELECT id FROM support_media_session WHERE active_slot=1 ORDER BY id LIMIT 50"))try{store.tx(()->{
-            var s=policy.lock(number(hint,"id"),null);String state=string(s,"status");if(state.equals("ending"))return null;
+        for(var hint:store.rows("SELECT id FROM support_media_session WHERE active_slot=1 AND status<>'ending' ORDER BY COALESCE(authorization_checked_at,created_at),id LIMIT 50"))try{store.tx(()->{
+            var s=policy.lock(number(hint,"id"),null);String state=string(s,"status");if(state.equals("ending"))return null;store.jdbc().update("UPDATE support_media_session SET authorization_checked_at=CURRENT_TIMESTAMP(3) WHERE id=?",s.get("id"));
             if(!service.enabled()){service.finish(s,"ending","MEDIA_DISABLED_DRAINING");return null;}
             try{policy.currentRequired(s);}catch(ConversationProblem revoked){service.finish(s,"ending","AUTHORIZATION_REVOKED");return null;}
             if(state.equals("invited") && !instant(s,"expires_at").isAfter(Instant.now())){service.finish(s,"expired","INVITATION_EXPIRED");return null;}

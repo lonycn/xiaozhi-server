@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202610310600-realtime-source-binding
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202610310600.sql
+            relativeToChangelogFile: true

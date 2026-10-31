@@ -32,7 +32,7 @@ issue/exchange/revoke首先锁同一(issuer,subject,source_session_id)行。revo
 
 同步SSE在初始取数和每批写前重新检查捕获的外部Bearer/source，撤销或依赖失败即停止，local请求guard为空操作，保留现有503/游标恢复语义。附件长输出同样逐周期重查source。仅actor检查不构成来源会话授权。
 
-本轮不含B5，external的media-session/transfer/RTC/token路径明确拒绝SOURCE_SESSION_RTC_UNAVAILABLE。未来必须将member/token/ready绑定external source session并解决generation fencing与来源撤销；当前不签发RTC token，不能假称旧LiveKit JWT即时撤销。
+外部媒体默认关闭；开启 `features.external-realtime-media-enabled` 后，仅允许明确列出的 AI 实时和人工媒体方法与路径，媒体会话、member、token 和 ready 绑定服务端捕获的 source 与具体 Bearer。客户可以操作已绑定转接的指定方法，创建转接及坐席接受等未列出路径仍拒绝；只读 `media-drain` 在媒体开关关闭时仍可由有效外部身份查询本人来源/Bearer 的清理状态。旧 LiveKit JWT 不会瞬时失效。配置、精确路由、撤销和新房代次隔离见 [外部媒体与 VAD 运维](EXTERNAL_MEDIA_VAD_OPERATIONS.md)。
 
 ## 只读业务适配
 

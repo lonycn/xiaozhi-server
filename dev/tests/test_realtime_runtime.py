@@ -26,10 +26,12 @@ class RealtimeConfigTest(unittest.TestCase):
             self.addCleanup(override.stop)
         self.jar = self.api / 'target/xiaozhi-esp32-api.jar'
 
-    def jar_with_realtime(self):
+    def jar_with_realtime(self, vad=True):
         with zipfile.ZipFile(self.jar, 'w') as jar:
             for name in ('RealtimeController', 'RealtimeMaintenance'):
                 jar.writestr('BOOT-INF/classes/xiaozhi/modules/realtime/' + name + '.class', b'test')
+            if vad:
+                jar.writestr('BOOT-INF/classes/db/changelog/realtime-vad.changelog.yaml', b'test')
 
     def source(self, base='https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', **extra):
         manage.private_json('ai-worker.json', {'base_url': base, 'api_key': 'synthetic-provider-key', **extra})
@@ -80,6 +82,39 @@ class RealtimeConfigTest(unittest.TestCase):
         self.source('https://untrusted.example.test/v1')
         with self.assertRaisesRegex(RuntimeError, 'private workspace'):
             manage.prepare_realtime()
+        self.assertEqual((self.runtime / 'realtime-settings.json').read_bytes(), before)
+
+    def test_server_vad_explicit_enable_preserve_disable_and_invalid_value(self):
+        self.jar_with_realtime()
+        self.source()
+        manage.prepare_realtime()
+        manage.configure()
+        props = self.runtime / 'application-dev.properties'
+        self.assertNotIn('features.realtime-server-vad-enabled=true', props.read_text())
+        manage.prepare_realtime(server_vad=True)
+        manage.prepare_realtime('wss://rt.example.test/realtime')
+        self.assertTrue(manage.realtime_settings()['server_vad_enabled'])
+        manage.configure()
+        self.assertIn('features.realtime-server-vad-enabled=true', props.read_text())
+        before = (self.runtime / 'realtime-settings.json').read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'server VAD'):
+            manage.prepare_realtime(server_vad='true')
+        self.assertEqual((self.runtime / 'realtime-settings.json').read_bytes(), before)
+        manage.prepare_realtime(server_vad=False)
+        manage.configure()
+        self.assertNotIn('features.realtime-server-vad-enabled=true', props.read_text())
+        settings = manage.realtime_settings()
+        settings['server_vad_enabled'] = 'true'
+        with self.assertRaisesRegex(RuntimeError, 'server VAD'):
+            manage.validate_realtime_settings(settings)
+
+    def test_old_realtime_jar_cannot_silently_enable_vad_or_mutate_settings(self):
+        self.jar_with_realtime(vad=False)
+        self.source()
+        manage.prepare_realtime()
+        before = (self.runtime / 'realtime-settings.json').read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'freshly built API'):
+            manage.prepare_realtime(server_vad=True)
         self.assertEqual((self.runtime / 'realtime-settings.json').read_bytes(), before)
 
     def test_stop_rejects_live_process_with_mismatched_identity(self):

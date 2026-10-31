@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202610310602-realtime-vad
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202610310602.sql
+            relativeToChangelogFile: true

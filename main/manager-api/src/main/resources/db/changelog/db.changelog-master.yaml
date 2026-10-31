@@ -784,3 +784,12 @@ databaseChangeLog:
   - include:
       file: support-summary-assistance.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: realtime-source-binding.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: support-media-source-binding.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: realtime-vad.changelog.yaml
+      relativeToChangelogFile: true

@@ -151,6 +151,7 @@ public class ExternalIdentityService {
         if(rows.isEmpty() || rows.getFirst().get("status")==null || ((Number)rows.getFirst().get("status")).intValue()!=1)throw problem(401,"ACCOUNT_DISABLED");
         if(rows.getFirst().get("super_admin")==null || ((Number)rows.getFirst().get("super_admin")).intValue()!=0)throw problem(403,"IDENTITY_PRIVILEGE_CONFLICT");
     }
+    public boolean mediaEnabled(){return settings.mediaEnabled();}
     public Principal authenticate(String token) {
         if(token==null || !token.matches("xext_[a-f0-9]{64}"))throw problem(401,"EXTERNAL_TOKEN_INVALID");
         return authenticateHash(hash(token));
@@ -177,7 +178,7 @@ public class ExternalIdentityService {
     }
     public Map<String,Object> view(Principal actor) {
         return Map.of("user_id",Long.toString(actor.userId()),"issuer",actor.issuer(),"external_subject",actor.subject(),
-                "tenant",actor.tenant(),"scope",actor.scope(),"expires_at",actor.expiresAt(),"rtc_enabled",false,"business_connected",false);
+                "tenant",actor.tenant(),"scope",actor.scope(),"expires_at",actor.expiresAt(),"rtc_enabled",mediaEnabled(),"business_connected",false);
     }
     private Tenant tenant(JsonNode node) {
         exact(node,Set.of("type","id"));String type=text(node,"type",16),id=text(node,"id",19);

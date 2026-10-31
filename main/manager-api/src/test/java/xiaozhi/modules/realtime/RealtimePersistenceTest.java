@@ -29,6 +29,8 @@ import xiaozhi.modules.realtime.RealtimeModels.*;
 @EnabledIfEnvironmentVariable(named="REALTIME_TEST_JDBC_URL",matches=".+")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class RealtimePersistenceTest {
+    record LegacyCreateFixture(String sessionId,String conversationId,String clientId,String requestHash,String status,boolean camera){}
+    static final List<LegacyCreateFixture> LEGACY_CREATES=new ArrayList<>();
     static DriverManagerDataSource source;static JdbcTemplate db;static DataSourceTransactionManager manager;static ObjectMapper json;
     RealtimeStore store;RealtimeService realtime;ConversationService conversations;AiExecutionService ai;SupportService support;MockEnvironment environment;
     final Set<String> created=new HashSet<>();
@@ -37,9 +39,24 @@ class RealtimePersistenceTest {
         String url=System.getenv("REALTIME_TEST_JDBC_URL");guard(url);source=new DriverManagerDataSource(url,"root",System.getenv("REALTIME_TEST_DB_PASSWORD"));db=new JdbcTemplate(source);manager=new DataSourceTransactionManager(source);json=new xiaozhi.modules.security.config.WebMvcConfig().jackson2HttpMessageConverter().getObjectMapper();
         assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Long.class),"Requires brand new empty schema; no cleanup/reuse");
         String zone=Optional.ofNullable(System.getenv("REALTIME_TEST_EXPECTED_ZONE")).orElse("UTC");assertTrue(Set.of("UTC","Asia/Shanghai").contains(zone));assertEquals(zone.equals("UTC")?0:28800,db.queryForObject("SELECT TIMESTAMPDIFF(SECOND,UTC_TIMESTAMP(),NOW())",Integer.class));
-        db.execute("CREATE TABLE sys_user(id BIGINT PRIMARY KEY,status TINYINT NOT NULL,super_admin TINYINT NOT NULL DEFAULT 0,username VARCHAR(80))");db.execute("CREATE TABLE ai_agent(id VARCHAR(32) PRIMARY KEY,user_id BIGINT)");db.execute("CREATE TABLE ai_agent_chat_history(id BIGINT PRIMARY KEY,content VARCHAR(100))");db.update("INSERT INTO ai_agent_chat_history VALUES(1,'P3-legacy-unchanged')");for(long id:new long[]{1,7,8,71})db.update("INSERT INTO sys_user VALUES(?,1,?,?)",id,id==1?1:0,"rt-fixture-"+id);
-        for(String migration:List.of("conversation","support","ai-execution","realtime-ai"))try(var connection=source.getConnection();var liq=new Liquibase("db/changelog/"+migration+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){liq.update(new Contexts());liq.update(new Contexts());}
-        assertEquals(4,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));db.update("INSERT INTO support_agent_profile(user_id,role,enabled,capacity_text,accepting,presence_expires_at) VALUES(71,'expert',1,20,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))");
+        db.execute("CREATE TABLE sys_user(id BIGINT PRIMARY KEY,status TINYINT NOT NULL,super_admin TINYINT NOT NULL DEFAULT 0,username VARCHAR(80))");db.execute("CREATE TABLE ai_agent(id VARCHAR(32) PRIMARY KEY,user_id BIGINT)");db.execute("CREATE TABLE ai_agent_chat_history(id BIGINT PRIMARY KEY,content VARCHAR(100))");db.update("INSERT INTO ai_agent_chat_history VALUES(1,'P3-legacy-unchanged')");for(long id:new long[]{1,7,8,71,79})db.update("INSERT INTO sys_user VALUES(?,1,?,?)",id,id==1?1:0,"rt-fixture-"+id);
+        for(String migration:List.of("conversation","support","ai-execution","realtime-ai","realtime-source-binding","realtime-vad")){
+            try(var connection=source.getConnection();var liq=new Liquibase("db/changelog/"+migration+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){liq.update(new Contexts());liq.update(new Contexts());}
+            if("realtime-ai".equals(migration))seedPreVadCreateRows();
+        }
+        assertEquals(6,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));db.update("INSERT INTO support_agent_profile(user_id,role,enabled,capacity_text,accepting,presence_expires_at) VALUES(71,'expert',1,20,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))");
+    }
+    static void seedPreVadCreateRows()throws Exception {
+        assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='ai_realtime_session' AND column_name='turn_detection_mode'",Long.class));
+        for(String state:List.of("pending","ended")){
+            String conversation=id(),session=id(),client="legacy-"+id();boolean camera=state.equals("ended");
+            // Literal old wire shape is independent of the new Create DTO and its optional fourth field.
+            String oldWire="{\"conversation_id\":\""+conversation+"\",\"client_session_id\":\""+client+"\",\"consent\":{\"microphone\":true,\"camera\":"+camera+"}}";
+            String requestHash=hash(oldWire);
+            db.update("INSERT INTO ai_conversation(id,owner_user_id,title,control_epoch) VALUES(?,79,'pre-vad-existing',1)",conversation);
+            db.update("INSERT INTO ai_realtime_session(id,conversation_id,owner_user_id,client_session_id,request_hash,status,control_epoch,model,consent_microphone,consent_camera,context_seq) VALUES(?,?,79,?,?,?,1,'qwen3.8-omni-flash-realtime',1,?,0)",session,conversation,client,requestHash,state,camera);
+            LEGACY_CREATES.add(new LegacyCreateFixture(session,conversation,client,requestHash,state,camera));
+        }
     }
     static void guard(String url){if(url==null||!url.matches("jdbc:mysql://127\\.0\\.0\\.1:[0-9]+/xiaozhi_realtime_test_[a-z0-9_]+(\\?.*)?"))throw new IllegalArgumentException("Only a new loopback xiaozhi_realtime_test_* schema is allowed");}
     @BeforeEach void services(){
@@ -61,7 +78,29 @@ class RealtimePersistenceTest {
     String key(){return UUID.randomUUID().toString();}
     long count(String table,String session){return db.queryForObject("SELECT COUNT(*) FROM "+table+" WHERE session_id=?",Long.class,session);}
     int error(Runnable action){return assertThrows(ConversationProblem.class,action::run).status();}
-    @Test @Order(1) void migrationSentinelAndEnvironmentGuardRemainAppendOnly(){assertThrows(IllegalArgumentException.class,()->guard("jdbc:mysql://prod:3306/xiaozhi"));assertThrows(IllegalArgumentException.class,()->guard("jdbc:mysql://127.0.0.1:34776/xiaozhi_dev"));assertEquals(4,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));assertEquals("P3-legacy-unchanged",db.queryForObject("SELECT content FROM ai_agent_chat_history WHERE id=1",String.class));}
+    @Test @Order(0) void actualPreVadRowsKeepStrictCreateIdempotencyAfterMigration()throws Exception {
+        environment.withProperty("features.realtime-server-vad-enabled","true");
+        for(var old:LEGACY_CREATES){
+            created.add(old.conversationId());var consent=new Consent(true,old.camera());
+            var omitted=realtime.create(79L,new Create(old.conversationId(),old.clientId(),consent));
+            assertEquals(old.sessionId(),omitted.id());assertEquals(old.status(),omitted.status());assertEquals("manual",omitted.turnDetectionMode());
+            assertEquals(old.sessionId(),realtime.create(79L,new Create(old.conversationId(),old.clientId(),consent,"manual")).id());
+            assertEquals(409,error(()->realtime.create(79L,new Create(old.conversationId(),old.clientId(),new Consent(true,!old.camera())))));
+            assertEquals(409,error(()->realtime.create(79L,new Create(old.conversationId(),old.clientId(),consent,"server_vad"))));
+            assertEquals(old.requestHash(),db.queryForObject("SELECT request_hash FROM ai_realtime_session WHERE id=?",String.class,old.sessionId()),"Retry preserves the existing ledger hash");
+            if("pending".equals(old.status()))assertEquals(409,error(()->realtime.create(79L,new Create(old.conversationId(),old.clientId()+"-other",consent))));
+        }
+        String c=conversation(),client=key();var consent=new Consent(true,false);var fresh=realtime.create(7L,new Create(c,client,consent));
+        assertEquals(hash(json.writeValueAsString(new Create(c,client,consent,"manual"))),db.queryForObject("SELECT request_hash FROM ai_realtime_session WHERE id=?",String.class,fresh.id()));
+        assertEquals(fresh.id(),realtime.create(7L,new Create(c,client,consent,"manual")).id());
+        String differentConversation=conversation();assertNotEquals(LEGACY_CREATES.getFirst().sessionId(),realtime.create(7L,new Create(differentConversation,LEGACY_CREATES.getFirst().clientId(),consent)).id());
+        // A server_vad row must never accept a legacy manual hash, even if ledger content is corrupted.
+        String vadConversation=conversation(),vadClient=key();var vad=realtime.create(7L,new Create(vadConversation,vadClient,consent,"server_vad"));
+        var legacy=json.createObjectNode().put("conversation_id",vadConversation).put("client_session_id",vadClient);legacy.set("consent",json.valueToTree(consent));
+        db.update("UPDATE ai_realtime_session SET request_hash=? WHERE id=?",hash(json.writeValueAsString(legacy)),vad.id());
+        assertEquals(409,error(()->realtime.create(7L,new Create(vadConversation,vadClient,consent))));
+    }
+    @Test @Order(1) void migrationSentinelAndEnvironmentGuardRemainAppendOnly(){assertThrows(IllegalArgumentException.class,()->guard("jdbc:mysql://prod:3306/xiaozhi"));assertThrows(IllegalArgumentException.class,()->guard("jdbc:mysql://127.0.0.1:34776/xiaozhi_dev"));assertEquals(6,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));assertEquals("P3-legacy-unchanged",db.queryForObject("SELECT content FROM ai_agent_chat_history WHERE id=1",String.class));}
     @Test @Order(2) void explicitOwnerConsentCancelsB2ButConnectionIsNotReady(){
         String c=conversation();var old=conversations.send(7L,c,text("before","真实已有文字"));var b2=ai.list(7L,c,0,10).items().getFirst();var lease=ai.claim(new AiModels.Claim("b2-fixture"));assertNotNull(lease);var session=create(c);assertEquals("canceled",ai.get(7L,c,b2.runId()).status());assertEquals("pending",session.status());assertEquals(409,error(()->ai.delta(lease.runId(),new AiModels.Delta(lease.leaseToken(),1L,"late"))));
         var task=connect(session);assertEquals("connecting",realtime.get(7L,session.id()).status());assertTrue(task.context().stream().anyMatch(m->m.content().contains(old.parts().getFirst().text())));assertEquals(16000,task.inputAudio().sampleRate());assertEquals(24000,task.outputAudio().sampleRate());assertEquals(190000,task.limits().maxFrameBytes());emit(task,1,"session.ready",null,null);assertEquals("active",realtime.get(7L,session.id()).status());
@@ -161,7 +200,7 @@ class RealtimePersistenceTest {
     @Test @Order(20) void realSpringGraphConnectsConversationB2SupportAndProxiedRealtimeHooksWithoutCycles(){
         try(var context=new org.springframework.context.annotation.AnnotationConfigApplicationContext()){
             context.getEnvironment().getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("p3-real-graph",Map.of("features.conversation-enabled","true","features.realtime-ai-enabled","true","features.ai-text-enabled","true","realtime.worker.key","p3-synthetic-spring-graph-worker-key","realtime.worker.public-url","ws://fixture.invalid/realtime")));
-            context.getBeanFactory().registerSingleton("jdbc",db);context.getBeanFactory().registerSingleton("manager",manager);context.getBeanFactory().registerSingleton("json",json);context.getBeanFactory().registerSingleton("dao",new ConversationDao(db));context.register(org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor.class,RealtimeStore.class,RealtimeService.class,ConversationService.class,AiExecutionService.class,SupportService.class);context.refresh();
+            context.getBeanFactory().registerSingleton("externalMediaAuthority",org.mockito.Mockito.mock(xiaozhi.modules.externalidentity.ExternalMediaAuthority.class));context.getBeanFactory().registerSingleton("jdbc",db);context.getBeanFactory().registerSingleton("manager",manager);context.getBeanFactory().registerSingleton("json",json);context.getBeanFactory().registerSingleton("dao",new ConversationDao(db));context.register(org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor.class,RealtimeStore.class,RealtimeService.class,ConversationService.class,AiExecutionService.class,SupportService.class);context.refresh();
             assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(RealtimeStore.class)));var cs=context.getBean(ConversationService.class);var rs=context.getBean(RealtimeService.class);String c=cs.create(7L,new CreateConversation("spring-proxy-graph",null)).id();created.add(c);var session=rs.create(7L,new Create(c,key(),new Consent(true,false)));var accepted=rs.send(7L,session.id(),new Send(session.controlEpoch(),key(),"actual spring hook"));assertEquals("queued",accepted.injection().status());assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM ai_run WHERE conversation_id=?",Long.class,c));var request=context.getBean(SupportService.class).handoff(7L,c,new Handoff(key(),"text",null));assertNotNull(request);assertEquals("canceled",rs.get(7L,session.id()).status());
         }
     }

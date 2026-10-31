@@ -12,6 +12,22 @@ import xiaozhi.modules.supportmedia.livekit.LiveKitAdapter.*;
 public class MediaPolicy implements RoomOwnership {
     private final MediaStore store;
     private final ConversationDao conversations;
+    private xiaozhi.modules.externalidentity.ExternalMediaAuthority external;
+    @org.springframework.beans.factory.annotation.Autowired public void setExternal(xiaozhi.modules.externalidentity.ExternalMediaAuthority value){external=value;}
+    public xiaozhi.modules.externalidentity.ExternalModels.Principal externalCaller(){return external==null?null:external.caller();}
+    public void sourceRequired(Map<String,Object> s){if(external!=null)external.validate(s,"customer_user_id");else if(number(s,"external_source_id")!=0)throw problem(503,"EXTERNAL_MEDIA_AUTHORIZATION_UNAVAILABLE");}
+    public java.time.Instant sourceExpiry(Map<String,Object> s){sourceRequired(s);return external==null?null:external.validate(s,"customer_user_id");}
+    public void bindCustomer(Map<String,Object> s,long actor){
+        if(external==null)return;var p=external.checkedCaller(actor);if(p==null)return;
+        if(actor!=number(s,"customer_user_id"))throw problem(403,"EXTERNAL_MEDIA_BINDING_DENIED");
+        if(number(s,"external_source_id")==0){
+            if(!"invited".equals(s.get("status")))throw problem(403,"EXTERNAL_MEDIA_BINDING_DENIED");
+            store.jdbc().update("UPDATE support_media_session SET external_source_id=?,external_token_id=? WHERE id=? AND external_source_id IS NULL",p.sourceId(),p.tokenId(),s.get("id"));
+            store.jdbc().update("UPDATE support_media_member SET external_source_id=?,external_token_id=? WHERE session_id=? AND role='customer'",p.sourceId(),p.tokenId(),s.get("id"));
+            s.put("external_source_id",p.sourceId());s.put("external_token_id",p.tokenId());
+        }
+        external.assertCustomer(s,actor,"customer_user_id");
+    }
     public MediaPolicy(MediaStore store,ConversationDao conversations){this.store=store;this.conversations=conversations;}
     public Map<String,Object> lock(long id,Long extra) {
         Map<String,Object> hint=store.session(id,false),pending=store.pending(id,false);TreeSet<Long> users=new TreeSet<>();
@@ -32,8 +48,9 @@ public class MediaPolicy implements RoomOwnership {
     public boolean current(Map<String,Object> s) {
         return !store.rows("SELECT a.id FROM support_assignment a JOIN support_request r ON r.id=a.request_id WHERE a.id=? AND a.request_id=? AND a.agent_user_id=? AND a.released_at IS NULL AND r.status='active' AND r.assigned_agent_user_id=a.agent_user_id FOR UPDATE",s.get("assignment_id"),s.get("request_id"),s.get("agent_user_id")).isEmpty();
     }
-    public void currentRequired(Map<String,Object> s){account(number(s,"customer_user_id"));profile(number(s,"agent_user_id"),false);if(!current(s))throw problem(409,"MEDIA_ASSIGNMENT_CHANGED");}
+    public void currentRequired(Map<String,Object> s){sourceRequired(s);account(number(s,"customer_user_id"));profile(number(s,"agent_user_id"),false);if(!current(s))throw problem(409,"MEDIA_ASSIGNMENT_CHANGED");}
     public void actor(Map<String,Object> s,long actor,boolean targetAllowed) {
+        if(external!=null)external.assertCustomer(s,actor,"customer_user_id");else if(actor==number(s,"customer_user_id") && number(s,"external_source_id")!=0)throw problem(403,"EXTERNAL_MEDIA_BINDING_DENIED");
         if(actor==number(s,"customer_user_id")){account(actor);return;}
         if(actor==number(s,"agent_user_id") && current(s)){account(actor);profile(actor,false);return;}
         var transfer=targetAllowed?store.pending(number(s,"id"),false):null;
@@ -64,6 +81,7 @@ public class MediaPolicy implements RoomOwnership {
             if(!Set.of("connecting","active","reconnecting").contains(status))return false;
             var pending=store.pending(number(s,"id"),locking);boolean preparation=pending!=null && number(pending,"target_generation")==room.generation() && Set.of("preparing","ready","committing").contains(string(pending,"status")) && pending.get("customer_approved_at")!=null && pending.get("target_accepted_at")!=null;
             if(number(s,"current_generation")!=room.generation() && !preparation)return false;
+            sourceRequired(s);
             if(operation==Operation.CREATE)return "preparing".equals(string(r,"status"));
             if(operation!=Operation.TOKEN || !Set.of("ready","active").contains(string(r,"status")))return false;
             var members=store.rows("SELECT * FROM support_media_member WHERE room_id=? ORDER BY user_id"+currentRead,roomId);var member=members.stream().filter(m->Objects.equals(identity,string(m,"identity"))).findFirst().orElse(null);

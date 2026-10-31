@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202610310601-support-media-source-binding
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202610310601.sql
+            relativeToChangelogFile: true

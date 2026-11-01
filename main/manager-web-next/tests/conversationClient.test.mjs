@@ -26,6 +26,28 @@ describe('conversation transport', () => {
       fetchImpl: vi.fn().mockResolvedValue(response(409, { code: 409, msg: 'CLIENT_MESSAGE_ID_REUSED' })) });
     await expect(client.send('id', {})).rejects.toThrow('消息编号冲突');
   });
+
+  it('classifies an application 404 only for the optional runs list', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response(200, { code: 404, msg: '资源不存在' }));
+    const client = createConversationClient({ baseUrl: '/xiaozhi', getToken: () => '', onUnauthorized: vi.fn(), fetchImpl });
+    await expect(client.runs('c')).rejects.toMatchObject({ status: 404 });
+    await expect(client.detail('c')).rejects.toMatchObject({ status: 200 });
+  });
+
+  it('does not turn authentication, permission, server or network failures into missing runs', async () => {
+    const onUnauthorized = vi.fn();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response(200, { code: 401, msg: 'expired' }))
+      .mockResolvedValueOnce(response(200, { code: 403, msg: 'denied' }))
+      .mockResolvedValueOnce(response(500, { code: 404, msg: 'unavailable' }))
+      .mockRejectedValueOnce(new TypeError('offline'));
+    const client = createConversationClient({ baseUrl: '/xiaozhi', getToken: () => '', onUnauthorized, fetchImpl });
+    await expect(client.runs('c')).rejects.toThrow('登录已过期');
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    await expect(client.runs('c')).rejects.toMatchObject({ status: 200, message: 'denied' });
+    await expect(client.runs('c')).rejects.toMatchObject({ status: 500 });
+    await expect(client.runs('c')).rejects.toThrow('offline');
+  });
 });
 
 describe('AI transport precision and cancellation', () => {

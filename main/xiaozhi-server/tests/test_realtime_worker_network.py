@@ -351,6 +351,28 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         second.active=False;await ws.send_json(audio());await asyncio.wait_for(second.provider_closed.wait(),2)
         self.assertFalse(any(e['type']=='input_audio_buffer.append' for e in second.provider_sent))
 
+    async def test_application_heartbeat_is_authorized_and_never_a_provider_or_canonical_turn(self):
+        h=await self.harness();ws=await h.connect()
+        await ws.send_json(dict(type='ping',id=1));self.assertEqual((await receive(ws,'pong'))['id'],1)
+        self.assertFalse(any(e['type']=='ping' for e in h.provider_sent))
+        self.assertFalse(any(e['type']=='pong' for e in h.events))
+        h.active=False;await ws.send_json(dict(type='ping',id=2));await asyncio.wait_for(h.provider_closed.wait(),2)
+        self.assertEqual([e['type'] for e in h.events],['session.ready'])
+
+    async def test_temporary_manager_failure_closes_old_transport_and_never_replays_after_return(self):
+        h=await self.harness();ws=await h.connect();await ws.send_json(audio());await asyncio.wait_for(h.media_received.wait(),2)
+        before=len([e for e in h.provider_sent if e['type']=='input_audio_buffer.append']);h.error_http=True
+        await ws.send_json(dict(type='ping',id=1));await asyncio.wait_for(h.provider_closed.wait(),2)
+        h.error_http=False;await asyncio.sleep(.1)
+        self.assertEqual(len([e for e in h.provider_sent if e['type']=='input_audio_buffer.append']),before)
+        self.assertEqual([e['type'] for e in h.events],['session.ready'])
+
+    async def test_provider_abrupt_disconnect_closes_both_sockets_without_synthetic_usage(self):
+        h=await self.harness();ws=await h.connect();provider=next(iter(h.provider_clients));provider.transport.abort()
+        self.assertEqual((await receive(ws,'error'))['code'],'PROVIDER_UNAVAILABLE')
+        self.assertEqual([e['type'] for e in h.events],['session.ready','session.error'])
+        self.assertFalse(any(e.get('usage') for e in h.events))
+
     async def test_audio_roundtrip_authoritative_history_usage_and_private_keys(self):
         h=await self.harness();ws=await h.connect()
         await ws.send_json(audio());await ws.send_json(dict(type='audio.commit'))

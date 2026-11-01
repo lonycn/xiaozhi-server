@@ -5,12 +5,13 @@ export async function createLiveKitTransport(options) {
   return createRoomTransport(sdk, options);
 }
 
-export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => {} } = {}) {
+export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => {}, now = () => Date.now() } = {}) {
   const room = new sdk.Room({ adaptiveStream: true, dynacast: true });
   const local = new Map();
   const tracks = new Set(), attachments = new Map(), samples = new Map();
-  let closed = false, foreground = false, connected = false;
-  const update = () => onChange({ connected: connected && room.state === 'connected', state: room.state, hasVideo: foreground && [...tracks].some(track => track.kind === 'video' && !track.isMuted) });
+  let closed = false, foreground = false, connected = false, mediaStalled = false;
+  const flow = new Map();
+  const update = () => onChange({ connected: connected && room.state === 'connected', state: room.state, hasVideo: foreground && [...tracks].some(track => track.kind === 'video' && !track.isMuted), mediaStalled });
   function render(track) {
     if (!foreground || attachments.has(track)) return;
     const element = track.attach(); element.autoplay = true; element.playsInline = true;
@@ -22,12 +23,12 @@ export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => 
     const owned = attachments.get(track);
     for (const element of track.detach()) element.remove();
     // LiveKit may detach first on unsubscribe, leaving its element list empty.
-    owned?.remove(); attachments.delete(track); samples.delete(track.sid);
+    owned?.remove(); attachments.delete(track); samples.delete(track.sid); flow.delete(track.sid);
   }
   room.on(sdk.RoomEvent.TrackSubscribed, track => { if (!closed) { tracks.add(track); render(track); update(); } });
   room.on(sdk.RoomEvent.TrackUnsubscribed, track => { tracks.delete(track); detach(track); update(); });
-  room.on(sdk.RoomEvent.ConnectionStateChanged, () => update());
-  room.on(sdk.RoomEvent.Disconnected, () => { connected = false; for (const track of local.values()) track.stop(); local.clear(); for (const track of tracks) detach(track); update(); });
+  room.on(sdk.RoomEvent.ConnectionStateChanged, () => { if (room.state !== 'connected') { mediaStalled = false; flow.clear(); samples.clear(); } update(); });
+  room.on(sdk.RoomEvent.Disconnected, () => { connected = false; mediaStalled = false; flow.clear(); samples.clear(); for (const track of local.values()) track.stop(); local.clear(); for (const track of tracks) detach(track); update(); });
   async function source(kind, enabled) {
     const old = local.get(kind);
     if (!enabled) { if (old) { old.stop(); local.delete(kind); await room.localParticipant.unpublishTrack(old); } return; }
@@ -64,22 +65,30 @@ export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => 
     async evidence() {
       const participant = [...room.remoteParticipants.values()][0];
       const proof = { participant_sid: room.localParticipant.sid || '', peer_sid: participant?.sid || '', transport_ready: connected && room.state === 'connected', receiving_audio: false, receiving_video: false };
+      let stalled = false;
       for (const track of tracks) {
-        if (!participant || ![...participant.trackPublications.values()].some(pub => pub.track === track) || track.isMuted) continue;
-        const report = await track.getRTCStatsReport();
-        report?.forEach(stat => {
-          if (stat.type !== 'inbound-rtp' || stat.isRemote) return;
-          const bytes = Number(stat.bytesReceived || 0), old = samples.get(track.sid);
-          samples.set(track.sid, bytes);
-          // Require newly received packets, not simply a subscribed track or an old total.
-          if (old !== undefined && bytes > old) proof[track.kind === 'audio' ? 'receiving_audio' : 'receiving_video'] = true;
-        });
+        const publication = participant && [...participant.trackPublications.values()].find(pub => pub.track === track);
+        // A remote user muting, an explicit subscription pause, and adaptive video
+        // suspended in a hidden/preparing view are not network receive failures.
+        const expected = publication && publication.isSubscribed !== false && publication.isEnabled !== false &&
+          !track.isMuted && track.streamState !== 'paused' && track.mediaStreamTrack?.readyState !== 'ended' &&
+          !(track.kind === 'video' && (!foreground || globalThis.document?.hidden));
+        if (!expected || !proof.transport_ready) { samples.delete(track.sid); flow.delete(track.sid); continue; }
+        const report = await track.getRTCStatsReport(); let bytes = 0;
+        report?.forEach(stat => { if (stat.type === 'inbound-rtp' && !stat.isRemote) bytes += Number(stat.bytesReceived || 0); });
+        const previous = samples.get(track.sid), observedAt = now();
+        // Require newly received packets, not simply a subscribed track or an old total.
+        if (previous !== undefined && bytes > previous) proof[track.kind === 'audio' ? 'receiving_audio' : 'receiving_video'] = true;
+        if (previous === undefined || bytes !== previous) flow.set(track.sid, observedAt); // Includes SSRC/counter resets.
+        samples.set(track.sid, bytes);
+        if (observedAt - flow.get(track.sid) >= 6000) stalled = true;
       }
+      if (mediaStalled !== stalled) { mediaStalled = stalled; update(); }
       return proof;
     },
     videoTrack() { return [...tracks].find(track => track.kind === 'video' && !track.isMuted); },
     async close() {
-      if (closed) return; closed = true; connected = false;
+      if (closed) return; closed = true; connected = false; mediaStalled = false; flow.clear(); samples.clear();
       for (const track of tracks) detach(track); tracks.clear();
       // Stop hardware synchronously, including while an async publication is in progress.
       for (const track of local.values()) track.stop(); local.clear();

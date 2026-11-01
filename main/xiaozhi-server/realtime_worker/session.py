@@ -273,7 +273,7 @@ class Session:
             await self.canonical(source, 'session.ready', provider_session_id=self.provider_session_id)
             self.ready = True
             self.pending_since = None
-            await self.send_browser('ready')
+            await self.send_browser('ready', heartbeat_seconds=2, heartbeat_timeout_seconds=6)
 
     def matching_echo(self, event, expected, role):
         """The live provider may allocate its own ID: prove content, role and predecessor."""
@@ -340,9 +340,14 @@ class Session:
         kind = event.get('type')
         allowed = {'audio.append': {'type','audio'}, 'audio.commit': {'type'},
                    'frame.append': {'type','image','mime_type'},
-                   'listening.start': {'type'}, 'listening.stop': {'type'}}
+                   'listening.start': {'type'}, 'listening.stop': {'type'}, 'ping': {'type', 'id'}}
         if kind not in allowed or set(event) != allowed[kind]: raise Fault('INPUT_LIMIT')
         await self.authorize(force_busy=True)
+        if kind == 'ping':
+            if type(event['id']) is not int or not 1 <= event['id'] <= 2**31-1:
+                raise Fault('INPUT_LIMIT')
+            await self.send_browser('pong', authorize=False, id=event['id'])
+            return
         if kind in ('listening.start', 'listening.stop'):
             if not self.auto: raise Fault('INPUT_LIMIT')
             if kind == 'listening.start':

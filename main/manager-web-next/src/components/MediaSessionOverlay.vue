@@ -64,8 +64,8 @@ export default {
     customerPending() { return this.own?.role === 'customer' && !this.transfer?.customer_approved; },
     targetPending() { return this.transfer?.target_agent_user_id === this.userId && !this.transfer?.target_accepted; },
     sourceAgent() { return this.staff && this.state.session?.agent_user_id === this.userId; },
-    statusLabel() { const status = this.state.session?.status; if (status === 'active' && this.state.localState !== 'connected') return this.$t('media.locallyDisconnected'); return this.$t('media.status_' + status); },
-    canCapture() { const s=this.state.session,customer=s?.participants?.find(p => p.role === 'customer' && p.room_generation === s.current_generation); return this.sourceAgent && s.status === 'active' && this.state.localState === 'connected' && customer?.consent?.camera && customer?.consent?.allow_snapshots && this.hasVideo; },
+    statusLabel() { const status = this.state.session?.status; if (status === 'active' && this.state.localState === 'connected' && this.state.mediaStalled) return this.$t('media.waitingForMedia'); if (status === 'active' && this.state.localState !== 'connected') return this.$t('media.locallyDisconnected'); return this.$t('media.status_' + status); },
+    canCapture() { const s=this.state.session,customer=s?.participants?.find(p => p.role === 'customer' && p.room_generation === s.current_generation); return this.sourceAgent && s.status === 'active' && this.state.localState === 'connected' && !this.state.mediaStalled && customer?.consent?.camera && customer?.consent?.allow_snapshots && this.hasVideo; },
   },
   watch:{
     identity:{flush:'sync',handler(){this.reset();}},
@@ -106,7 +106,7 @@ export default {
     async accept(){await this.controller.accept(this.choice);},
     async refreshTransfer(id){const epoch=this.epoch;try{const transfer=await mediaApi.transferGet(id,this.io.signal);if(epoch===this.epoch)this.lastTransfer=transfer;}catch(error){if(epoch===this.epoch&&error.name!=='AbortError')this.localError=mediaErrorKey(error);}},
     async loadExperts(){const epoch=this.epoch;try{const items=[];let after='0',more=true;while(more){const page=await mediaApi.experts(after,this.io.signal);if(epoch!==this.epoch)return;items.push(...page.items);more=page.has_more;if(more&&(!/^\d+$/.test(String(page.next_cursor))||BigInt(page.next_cursor)<=BigInt(after)))throw new Error('INVALID_CURSOR');after=String(page.next_cursor);}this.experts=items;}catch(error){if(epoch===this.epoch&&error.name!=='AbortError')this.localError=mediaErrorKey(error);}},
-    async startTransfer(){if(!/^[1-9][0-9]*$/.test(this.targetId))return;const signature=this.targetId;if(this.transferSignature!==signature){this.transferId=crypto.randomUUID();this.transferSignature=signature;}await this.controller.transfer(this.targetId,this.transferId);if(!this.state.error&&signature===this.targetId){this.targetId='';this.transferId='';}},
+    async startTransfer(){if(!/^[1-9][0-9]*$/.test(this.targetId))return;const signature=this.targetId;if(this.transferSignature!==signature){this.transferId=crypto.randomUUID();this.transferSignature=signature;}await this.controller.transfer(this.targetId,this.transferId);if(!this.state.error&&signature===this.targetId){this.targetId='';this.transferId='';this.transferSignature='';}},
     async capture(){
       if(!this.canCapture||this.captureBusy)return;this.captureBusy=true;this.localError='';this.captureController?.abort();this.captureController=markRaw(new AbortController());const epoch=this.epoch,signal=this.captureController.signal,s=this.state.session;
       try{

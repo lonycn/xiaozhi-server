@@ -72,3 +72,69 @@ ACL 实测：发送前客户读取未发送 frame 返回 404；发送后客户�
 原Dev18894/API18893及原S3恢复后，独立浏览器身份已完成首轮实际双端WebRTC音视频接收（视频192帧），实际截图上传S3并生成B5 frame。媒体为明确的本地合成语音与canvas技术画面，经实际MediaStream/RTP传输；没有物理麦克风、摄像头或扬声器。浏览器证据 `work/browser-dual-media-proof.json`。
 
 抓帧后的标注编辑器被工作台后台poll关闭，不能记作浏览器编辑发送成功。对应poll/invite修复已完成定向检查；第二通实际active，frame `2116191817604976642` 后p2正常挂断complete且人工仍active；编辑器跨多轮poll/挂断保持，箭头和circle共2元素保存annotation `2116191926321336322` 为ready，可视预览及加入回复草稿通过，客服文字草稿保留。实际发送已完成，staff消息 `e0cb32f2e6ca491084e1f518f51bf2ae` 的文字和image附件在客户UI可见；source/frame/render三引用同条消息，scene2元素，三个实际S3 GET SHA匹配，证据 `work/browser-backend-proof.json`。浏览器换房转接现已完成：客户同意、目标B接听后独立新房generation2达服务端active；B实收audio409773bytes/1659packets、video100392bytes/147packets/105frames，客户audio408378bytes/1653packets。原A旧PC断开、UI禁用回复，原身份POST写403 CURRENT_ASSIGNMENT_REQUIRED；B采纳原request并可见AI/标注历史，UI回复客户可见。证据 `work/browser-transfer-proof.json`、`work/browser-stale-expert-proof.json`。45秒旧邀请过期的尝试保留；最终媒体 `2116193127137988610` ended/complete、gen2，transfer `2116193234969350145` completed；gen1/2均cleaned、12member reservation released且busy_slot为空。request仍active/HUMAN_ACTIVE、assignmentB，B消息 `a4fe6ed8394549229aab3bc193cfcc41` completed。5项delete_room queued无running lease，是cleaned墓碑15分钟补偿窗口，不代表房间未清理，也不声称全部outbox done。空video最小修复定向6/6和build通过，实际新通话active时仅1个video（320/ready4），挂断complete后video/audio均0且所有技术track ended，证据 `work/browser-dom-cleanup-proof.json`。390×844手机历史最小200px、纵向滚动后发送可达、无横向溢出；移动CSS改动build通过。这里媒体挂断后人工仍active，不把另一AI会话的文字恢复结果当成人工服务已结束。详见 [恢复与补充验收](./DEV_RECOVERY_VALIDATION_20261030.md)。
+
+## 2026-11-01：31 分钟、受控弱网与恢复补验
+
+本节补充原先未完成的持续通话与恢复边界，不改写前述历史记录。以下均为独立 Dev 技术验收：新 API `127.0.0.1:18902`、新库 `xiaozhi_media_test_resilience_8e4702642371`、专属 LiveKit `17980/17981/17982`；真实人工工作台使用独立前端 origin `18907`。Python LiveKit SDK `1.1.20` 只读复用原虚拟环境，未修改 aimeet 依赖或服务。音频为 440/660 Hz 合成信号；视频为 320×180、15 fps 动态技术画面；浏览器麦克风使用 AudioContext 技术源，没有请求物理麦克风或摄像头。
+
+证据基目录为 `/Users/lengwang/code/esp32/work/media-resilience-20261101/`。本轮只向明确的新测试 schema 追加 fixture 和正常 API 记录；没有删除、清空、重初始化任何已有数据库或卷。故障注入只作用于专属 LiveKit 容器网络命名空间 `net:[4026534437]`，由独立 NET_ADMIN 工具容器执行；没有修改原 `17880` 共享服务、本机全局网络或原 Dev 服务的网络规则。
+
+### 持续双向 RTP 与真实损伤
+
+主会话 `2116753435029012481`，generation 1，正常进入服务端 active 后持续 **1860.872 秒**。双方最终各输出音频解码帧 **186170**；客户、客服分别收到视频解码帧 **27639 / 27547**。这些是解码帧计数，不是 RTP 包数。双方实际接收的技术图像保留为 `customer-decoded.jpg`、`staff-decoded.jpg`，已目视检查。
+
+期间按相互独立的阶段注入并保留了内核与客户端证据：
+
+| 阶段 | 实际作用范围 | 实际观测 |
+| --- | --- | --- |
+| 60 秒 moderate | 专属 namespace egress：120±40 ms 延迟、3% 丢包、1500 kbit/s | `tc` 累计 dropped 321；Native inbound RTP 的 loss/jitter/RTT 增加，视频持续解码 |
+| 8 秒全 egress 黑洞 | 专属 namespace 所有 egress | `tc` dropped 1215；存在一次 B5 ready `503 LIVEKIT_TIMEOUT`，后续恢复，未被写成全程无错误 |
+| 12 秒 UDP-only 黑洞 | IPv4 protocol 17，保留默认 TCP | Native peers 的选中媒体路径为 UDP，实际视频停止后恢复；HTTP 17980 保持 200 |
+| 12 秒 RTC TCP 黑洞 | IPv4 TCP source port 17981，保留 signaling/RPC TCP 17980 | 单独验证浏览器 TCP 媒体；这一阶段不计作 Native UDP 长测的媒体损伤 |
+
+不能把“配置了 UDP 丢包”直接等同于浏览器受损：本轮 Chrome 实际选择 TCP，Native SDK 选择 UDP，分别用 ICE/RTP 统计核实。浏览器 RTC TCP 阶段有真实内核丢包及 inbound bytes 停止；没有用 CDP HTTP offline 代替 WebRTC 媒体传输层损伤。
+
+303 个周期样本记录了去重后的原始 RTP 统计、解码帧、RSS、线程与 asyncio 任务。Native 进程 RSS 为 **75.84–101.07 MB**、末次 **81.49 MB**；asyncio 任务始终 **15**。最后采样的客户音频/视频 RTP `packets_lost` 为 94/386，客服为 82/389；丢包、重传、FEC/PLC 与传输协议会影响这些累计值，不能把它们当成内核所有被丢包的精确总数。最终最长视频解码间隔为 **15.467 / 15.064 秒**，包含 12 秒故障及恢复；这不是无损通话结果。
+
+结束后 `media-drain` 返回 `cleanup_complete=true`、`pending_sessions=0`、`pending_operations=0`；原人工 request 仍为 active。证据目录 `b5-long-7e311492c9/`，含 `proof.json`、`stats.ndjson`、`rtp-summary.json`、`rtp-series.json` 和 `fault-markers.json`；根目录另保留 `netem-events.jsonl`、`netem-udp-events.jsonl`、`netem-tcp-media-events.jsonl` 及主进程 `b5-long.stdout.log`。
+
+### 短掉线、超时、转接失败与旧 JWT
+
+| 场景 | 结果 | 证据目录 |
+| --- | --- | --- |
+| SDK signal/full reconnect | 真实 RTP 恢复；full reconnect 的 SDK reconnected 事件约 0.12 秒后出现，双方重新订阅媒体。此项是 SDK 受控故障，不冒称 Wi-Fi/蜂窝现场切换 | `b5-sdk-recovery-e7c3c67dfc/` |
+| 客户主动离线超过默认 60 秒 | 客户于 13.493 秒关闭，73.835 秒观察到 ended / `MEDIA_CONNECTION_TIMEOUT`；旧 epoch token 请求 409，原人工文字消息仍可发送，request active，drain 完成 | `b5-long-offline-dc322d8ee3/` |
+| 转接目标在准备房真实收流后离线 | 新房 generation 2 双方已真实解码；目标未提交 ready 即断线。transfer 到期后原 generation 1、原专家和原服务保留，原媒体继续接收；重复 create-transfer 返回同一 transfer | `b5-transfer-target-failure-0e99e4e6a6/` |
+| 未过期旧 JWT 与新会话隔离 | 旧 JWT 尚余 48 秒时能加入旧空房；新会话使用不同房名并真实双向收流，旧 peer 音频/视频实收均 0。旧 epoch token API 返回 409，最终 drain 完成 | `b5-old-jwt-isolation-017beb5db0/` |
+
+旧 JWT 结果证明的是旧、新命名空间隔离，**不是旧 LiveKit JWT 被即时撤销**。本轮 SDK reconnect 和新会话恢复分别记录，未把服务端已终止会话的旧能力恢复成有效能力。
+
+### 真实浏览器状态与两个前端修复
+
+正常验证码登录后的客服工作台完成了真实合成音媒体通话，服务端核实了双方 SID 与媒体证据。浏览器使用 Ego TaskSpace 36 的独立客服页 p2 / origin 18907；没有在浏览器注入 Bearer，也没有操作客户 p1 的认证状态。
+
+1. 修复同一目标再次转接时 `transferId` 被清空而 `transferSignature` 残留的问题。真实 UI 发起、取消后再次选择同一专家，两次 POST 均为 200，`client_transfer_id` 为不同的非空 UUID。丢失响应后保留原请求 ID 的路径另有定向单元测试。实际证据为 `b5-browser-transfer-proof.json`、`b5-browser-second-transfer.png`。
+2. 补充本机媒体连接仍在、但预期接收轨连续无新 RTP 时的 `media.waitingForMedia` 提示；RTP 返回后自动清除。远端主动 mute、取消订阅、stream paused、publication disabled、后台/准备房 adaptive video 暂停均排除，SSRC/计数回退重新开始宽限。浏览器 RTC TCP 故障期间，DOM observer 于 **05:14:07.355Z** 记录“媒体接收暂时中断·正在等待恢复”，于 **05:14:12.354Z** 自动恢复已连接文案；媒体连接保持 connected，没有重新采集设备或新建房间。500 ms 原始样本测得最长约 **13.497 秒无新 inbound RTP bytes**，与 12 秒 TCP 黑洞及恢复对应。提示瞬间未拍到截图，不能把恢复截图写成该瞬间截图；持续 DOM observer 和 RTP 样本保存在 `b5-browser-rtp-tcp-proof.json`、`b5-browser-rtp-all-proof.json`，恢复图为 `b5-browser-rtp-recovered.png`。
+
+另对**本次 end HTTP 请求不可用**单独注入故障，不将它计入 RTP 丢包。点击真实“挂断媒体”按钮后，实际 `MediaStreamTrack.stop()` 将音频从 live 变为 ended，发生在 HTTP 尝试之前约 0.1 ms；本机 joined/microphone 立即变为 false，UI 显示本机媒体已断开并要求明确重连。服务端随后按超时收口为 ended / `MEDIA_CONNECTION_TIMEOUT`、cleanup complete，人工 request 仍 active。证据 `b5-browser-offline-hangup-proof.json`、`b5-browser-offline-hangup.png`。
+
+定向前端检查为 **44 项通过**，这是最终全量检查的子集，不能重复相加；i18n 六个 locale 对齐。没有在此填写尚未完成的 CI/统一构建结果。浏览器结束时已恢复 getUserMedia/fetch/RTCPeerConnection/track-stop instrumentation，清除 observer/timer，停止 oscillator、关闭 AudioContext 并 reload；技术 audio DOM 为 0、无 Vite overlay，重载后的 Runtime/Log error 检查为空。页面整体 QA 摘要为 `b5-browser-qa-proof.json`，最终清理及恢复截图均留在证据基目录。
+
+### 严格 API 重启与持久 outbox
+
+重启验证使用额外 API **18904**、新库 `xiaozhi_media_test_restart_caa21bfb8abb`、独立 Redis 34779、独立 room prefix；LiveKit 管理 RPC 经 loopback proxy 18919。没有重启运行长测的 API 18902，也没有重启 LiveKit。
+
+第二轮 probe `30ae917ab6` 先建立真实双向 AV，再同时要求匹配的 fault marker、新 fault epoch，以及 RPC 实际不可达，才发起 end。此时 `delete_room` 已持久为 queued。根代理正常终止并重启仅 API 18904，PID **67646→69644**；脚本另核对同 probe 的重启 marker、不同 PID 与晚于 fault 的重启 epoch。RPC 恢复后第 6 次 delete 尝试使旧房参与者被服务端断开，随后 `cleanup_complete=true`，原人工 assignment/request 保留。
+
+成功证据为 `b5-restart-outbox-30ae917ab6/`，并关联 `rpc-outage-trigger.json`、`b5-restart-api-marker.json`、`rpc-proxy-outage.jsonl`、`rpc-proxy-restored-r2.jsonl`。清理完成后的历史 `delete_room` 可能被 15 分钟墓碑巡检幂等重新排为 queued；room 已 cleaned、session cleanup complete、drain pending operations 0 时，不把该历史队列状态误判为未完成断流。
+
+第一轮 `b5-restart-outbox-cbe9bdbeb5/` 因 end/清理早于 RPC 故障触发，**保留并明确标为 inconclusive**，不计作重启验收成功。没有覆盖或删除这轮日志和数据库记录。
+
+### 本轮限制与保留事项
+
+- AudioStream 会输出 PLC/掩盖帧，因此音频解码连续、`max_audio_gap=0` 不能证明没有 RTP 中断；以原始 bytes/packets、视频解码和内核 dropped 共同判断。
+- Python SDK 在解释器退出时仍有 ignored `FfiHandle.__del__` `AssertionError`；日志保留。主长测 exit 0、业务与清理断言通过，但不表述成“无警告退出”。SDK full-reconnect 首轮技术脚本曾保留旧 reader，任务 15→23；这是验收脚本所有权问题，已在后续脚本中对替换/退订 reader 执行 cancel，不能当成产品持续泄漏结论，也不将它隐藏。
+- 本轮新“停流时禁止保存冻结 snapshot”guard 已覆盖带 camera/snapshot 授权的单元场景，**浏览器本轮为 audio-only，未完成这条新 guard 的真实摄像头/视频抓帧 QA**。主 Native 长测保留的 JPEG 是真实网络解码帧，但未以它冒充本轮新的 B3/B4 业务抓帧全链路；历史完整抓帧链路仍以前节证据为准。
+- 浏览器 fixture 首次邀请因操作超过 45 秒而过期；后续 helper 的“连接前读取 local_participant”和 video 参数被 VideoSource 变量遮蔽两项脚本问题已修正，仅终止了自己的失败 helper 进程。相关 `b5-browser-setup*.stdout.log` 与所有 fixture 行保留，不把这些失败改写成服务端通过记录。
+- `b5-long-7e311492c9/` 是本轮唯一 31 分钟长测 proof。浏览器 fixture helper 导入公共脚本时产生的其他 `b5-long-*` 技术目录不代表另一次长通话完成，不能按目录名或其初始 running 字段累计验收次数。
+- 以上验证不是真人听感、物理麦克风/摄像头/扬声器、移动端、Wi-Fi/蜂窝切换或外部业务 API 验收；本轮也不证明线上生产网络的具体恢复时限。

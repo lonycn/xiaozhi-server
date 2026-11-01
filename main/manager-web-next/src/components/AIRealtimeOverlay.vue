@@ -1,6 +1,6 @@
 <template>
  <section class="realtime-workspace" :aria-label="$t('realtime.title')">
-  <button v-if="allowed && !sessionLive && ['idle','ended','failed','canceled','expired'].includes(state.status)" type="button" @click="consentVisible = !consentVisible">{{ $t('realtime.open') }}</button>
+  <button v-if="allowed && !sessionLive && ['idle','ended','failed','canceled','expired'].includes(state.status)" type="button" @click="openConsent">{{ $t('realtime.open') }}</button>
   <small v-if="state.status === 'unavailable'">{{ $t('realtime.unavailable') }}</small>
   <div v-if="consentVisible && allowed" class="realtime-consent"><fieldset><legend>{{ $t('realtime.modeLabel') }}</legend><label><input v-model="turnMode" type="radio" value="manual" :disabled="retryLocked" />{{ $t('realtime.modeManual') }}</label><label><input v-model="turnMode" type="radio" value="server_vad" :disabled="!autoAvailable || retryLocked" />{{ $t('realtime.modeAuto') }}</label><small v-if="retryLocked">{{ $t('realtime.retrySame') }}</small><small v-if="!autoAvailable">{{ $t('realtime.autoUnavailable') }}</small></fieldset><p>{{ $t('realtime.consentNote') }}</p><label><input v-model="microphone" type="checkbox" :disabled="retryLocked" />{{ $t('realtime.microphoneConsent') }}</label><label><input v-model="camera" type="checkbox" :disabled="retryLocked" />{{ $t('realtime.cameraConsent') }}</label><button type="button" :disabled="!microphone" @click="start">{{ $t('realtime.start') }}</button><button type="button" @click="consentVisible = false">{{ $t('realtime.close') }}</button></div>
   <aside v-if="visible" class="realtime-overlay" :aria-label="$t('realtime.title')">
@@ -23,6 +23,7 @@
     </div>
     <p v-if="state.injections.length" class="realtime-note">{{ $t('realtime.injectionNote') }}</p>
     <ul v-if="state.injections.length" class="realtime-injections"><li v-for="item in state.injections.slice(-5)" :key="item.id">{{ $t('realtime.savedMessage') }} {{ item.message_id }} · {{ $t('realtime.injection_' + item.status) }}</li></ul>
+    <p v-if="['failed','existing'].includes(state.status) && sessionLive" class="realtime-note">{{ $t('realtime.recoveryNote') }}</p><button v-if="['failed','existing'].includes(state.status) && sessionLive" type="button" :disabled="state.networkAvailable === false" @click="recover">{{ $t('realtime.reconnect') }}</button>
     <p class="realtime-note">{{ $t('realtime.draftNote') }}</p>
    </div>
   </aside>
@@ -41,6 +42,8 @@ export default {
  methods:{
   reset(){this.capabilityRequest?.abort();this.autoAvailable=false;clearInterval(this.timer);this.controller?.dispose();this.microphone=false;this.camera=false;this.turnMode='manual';this.consentVisible=false;this.dismissed=false;this.clientId='';this.signature='';this.controller=markRaw(createRealtimeSession({client:realtimeApi,changed:state=>{this.state=state;this.$emit('state',state);},history:()=>this.$emit('history')}));this.state=this.controller.snapshot();this.$emit('state',this.state);if(this.allowed&&this.conversationId&&this.identity){this.controller.discover(this.conversationId);const request=new AbortController();this.capabilityRequest=request;realtimeApi.capabilities(request.signal).then(data=>{if(!request.signal.aborted)this.autoAvailable=Array.isArray(data?.turn_detection_modes)&&data.turn_detection_modes.includes('server_vad');}).catch(()=>{});this.timer=setInterval(()=>this.controller.refresh(),2000);}},
   shutdown(){return this.controller?.end();},
+  openConsent(){const opening=!this.consentVisible;if(opening&&this.state.session&&REALTIME_TERMINAL.has(this.state.session.status)){this.microphone=false;this.camera=false;this.clientId='';this.signature='';}this.consentVisible=opening;},
+  async recover(){if(await this.controller.recover()){this.microphone=false;this.camera=false;this.clientId='';this.signature='';this.consentVisible=true;this.dismissed=false;}},
   async start(){if(!this.allowed||!this.microphone||this.sessionLive||(this.turnMode==='server_vad'&&!this.autoAvailable))return;const consent={microphone:this.microphone,camera:this.camera},signature=JSON.stringify([this.conversationId,consent,this.turnMode]);if(signature!==this.signature||(this.state.session&&REALTIME_TERMINAL.has(this.state.session.status))){this.signature=signature;this.clientId=crypto.randomUUID();}this.consentVisible=false;this.dismissed=false;await this.controller.start(this.conversationId,consent,this.clientId,this.turnMode);},
  },
 };

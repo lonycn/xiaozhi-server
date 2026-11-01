@@ -18,7 +18,7 @@ export function createMediaSession({ client, userId, changed = () => {}, onTrack
   const rooms = new Map(), states = new Map();
   let microphone = false, camera = false, error = '', busy = false;
   const me = (generation = session?.current_generation) => session?.participants?.find(member => String(member.user_id) === String(userId()) && member.room_generation === generation);
-  const snapshot = () => ({ session, joined, microphone, camera, error, busy, localState: states.get(session?.current_generation)?.state || 'disconnected', playbackBlocked: !!states.get(session?.current_generation)?.playbackBlocked, hasVideo: !!states.get(session?.current_generation)?.hasVideo });
+  const snapshot = () => ({ session, joined, microphone, camera, error, busy, localState: states.get(session?.current_generation)?.state || 'disconnected', playbackBlocked: !!states.get(session?.current_generation)?.playbackBlocked, hasVideo: !!states.get(session?.current_generation)?.hasVideo, mediaStalled: !!states.get(session?.current_generation)?.mediaStalled });
   const emit = () => changed(snapshot());
   const fresh = epoch => !disposed && epoch === version && !controller.signal.aborted;
   function closeGeneration(generation) { const entry = rooms.get(generation); rooms.delete(generation); states.delete(generation); if (entry) return entry.close().catch(() => {}); }

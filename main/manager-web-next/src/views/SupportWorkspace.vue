@@ -129,8 +129,19 @@ export default {
       if (existing) existing.row = row;
       else this.annotationRecords[key] = [...items, { row, annotation: row.annotation || null }];
     },
+    annotationRenderSent(id) { return id != null && this.messages.some(message => (message.parts || []).some(part => part.attachment_id != null && String(part.attachment_id) === String(id))); },
     async addSavedAnnotation(item) {
-      if (!this.active || this.sending || this.historyLoading || this.actionBusy || this.annotationAdding || this.attachmentRows.length >= 10) return;
+      if (!this.active || this.sending || this.historyLoading || this.actionBusy || this.annotationAdding) return;
+      const row = item?.attachment ? item : item?.row;
+      const renderId = item?.annotation?.render_attachment_id || row?.attachment?.id;
+      // A render binds to one message. Reusing a sent annotation requires the
+      // editor's authenticated snapshot -> save-copy -> new-render flow.
+      if (this.annotationRenderSent(renderId)) {
+        const id = item?.annotation?.id || row?.annotation?.id || row?.attachment?.metadata?.annotation_id;
+        if (id) this.openAnnotationSnapshot(String(id));
+        return;
+      }
+      if (this.attachmentRows.length >= 10) return;
       // Locally generated ready rows have already passed editor validation.
       if (item?.attachment) { if (this.stageAnnotation({ scopeKey: this.attachmentScope, row: item })) this.$refs.expertLayout?.closeTools(); return; }
       const annotation = item?.annotation;
@@ -147,7 +158,7 @@ export default {
       finally { if (current()) this.annotationAdding = ''; }
     },
     stageAnnotation({ scopeKey, row }) {
-      if (scopeKey !== this.attachmentScope || this.sending || !this.active || this.actionBusy || !row?.attachment?.id || (row.attachment.conversation_id && row.attachment.conversation_id !== this.selected.conversation_id)) return;
+      if (scopeKey !== this.attachmentScope || this.sending || !this.active || this.actionBusy || !row?.attachment?.id || this.annotationRenderSent(row.attachment.id) || (row.attachment.conversation_id && row.attachment.conversation_id !== this.selected.conversation_id)) return;
       this.saveAnnotation({ scopeKey, row });
       if (this.attachmentRows.some(item => item.attachment?.id === row.attachment.id)) return;
       if (this.attachmentRows.length >= 10) { this.error = this.$t('attachments.count'); return; }

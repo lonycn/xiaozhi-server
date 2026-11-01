@@ -235,12 +235,28 @@ describe('persistent expert annotation history', () => {
     expect(tools.text()).toContain(saved.label); expect(tools.text()).toContain('expertWorkspace.sent');
     expect(annotation.list).toHaveBeenLastCalledWith(request.conversation_id,'0',expect.any(AbortSignal));
     expect(attachment.get).not.toHaveBeenCalled(); expect(images.blob).not.toHaveBeenCalled();
-    const layout=wrapper.findComponent({name:'ExpertWorkspaceLayout'}); layout.vm.toolsOpen=true; await wrapper.vm.$nextTick();
+    const editor = wrapper.findComponent({name:'AnnotationEditor'}), open = vi.spyOn(editor.vm,'openSnapshot').mockImplementation(() => {});
+    expect(tools.findAll('li button')[1].text()).toBe('annotations.saveCopy');
+    await tools.findAll('li button')[1].trigger('click');
+    expect(open).toHaveBeenCalledWith('22'); expect(wrapper.vm.attachmentRows).toEqual([]);
+    expect(attachment.get).not.toHaveBeenCalled(); expect(api.send).not.toHaveBeenCalled();
+    // Caller flags and a raw ready row cannot bypass the actual message binding.
+    open.mockClear(); await wrapper.vm.addSavedAnnotation({...tools.props('items')[0],sent:false});
+    await wrapper.vm.addSavedAnnotation({kind:'image',status:'ready',clientUploadId:'annotation-22',attachment:render});
+    expect(open).toHaveBeenCalledTimes(2); expect(wrapper.vm.attachmentRows).toEqual([]); expect(attachment.get).not.toHaveBeenCalled();
+    wrapper.vm.stageAnnotation({scopeKey:wrapper.vm.attachmentScope,row:{kind:'image',status:'ready',clientUploadId:'annotation-22',attachment:render}});
+    expect(wrapper.vm.attachmentRows).toEqual([]);
+  });
+  it('adds an unsent server annotation through explicit validated metadata fetch and closes the drawer', async () => {
+    annotation.list.mockResolvedValue(page([saved]));
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest(request);
+    const tools=wrapper.findComponent({name:'ExpertAnnotationTools'}), layout=wrapper.findComponent({name:'ExpertWorkspaceLayout'});
+    expect(tools.findAll('li button')[1].text()).toBe('expertWorkspace.addToDraft');
+    layout.vm.toolsOpen=true; await wrapper.vm.$nextTick(); expect(attachment.get).not.toHaveBeenCalled();
     attachment.get.mockResolvedValue(render); await tools.findAll('li button')[1].trigger('click'); await flushPromises();
-    expect(layout.vm.toolsOpen).toBe(false);
-    expect(attachment.get).toHaveBeenCalledWith('23',expect.any(AbortSignal)); expect(wrapper.vm.attachmentRows).toHaveLength(1); expect(wrapper.vm.savedAnnotations).toHaveLength(1);
-    expect(tools.text()).toContain('expertWorkspace.inDraft');
-    tools.vm.$emit('add',tools.props('items')[0]); await flushPromises(); expect(wrapper.vm.attachmentRows).toHaveLength(1);
+    expect(layout.vm.toolsOpen).toBe(false); expect(attachment.get).toHaveBeenCalledWith('23',expect.any(AbortSignal));
+    expect(wrapper.vm.attachmentRows).toHaveLength(1); expect(wrapper.vm.savedAnnotations).toHaveLength(1); expect(tools.text()).toContain('expertWorkspace.inDraft');
+    await wrapper.vm.addSavedAnnotation(tools.props('items')[0]); expect(attachment.get).toHaveBeenCalledTimes(1); expect(wrapper.vm.attachmentRows).toHaveLength(1);
   });
   it('closes the tools drawer when viewing history and reveals the same embedded editor above the call stage', async () => {
     annotation.list.mockResolvedValue(page([saved]));

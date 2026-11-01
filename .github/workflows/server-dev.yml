@@ -89,6 +89,8 @@ jobs:
         working-directory: main/xiaozhi-server
         run: python -m unittest discover -s tests -p 'test_realtime_worker*.py'
       - name: Run Dev tests
+        env:
+          XIAOZHI_AI_WORKER_PYTHON: python
         run: |
           python -m unittest discover -s dev/tests -p 'test_*.py'
           python -m unittest dev.tests.ci_test_prepare_databases

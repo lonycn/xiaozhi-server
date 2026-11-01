@@ -32,6 +32,7 @@
             <el-button v-if="selected.state === 'RESOLVED'" :loading="supportBusy" @click="resumeAi">{{ $t('support.resume') }}</el-button>
           </div>
           <p v-if="mediaNotices[selected?.id]" class="media-snapshot-notice" role="status">{{ $t('media.snapshotNotice') }}</p>
+          <AgentToolStatus v-if="selected" :conversation-id="selected.id" :identity="attachmentIdentity" />
           <div class="capability-note"><LegacyIcon class="el-icon-info" /><span>{{ $t(aiAvailable === false ? 'ai.unavailable' : 'ai.capability') }}</span></div>
           <AIRealtimeOverlay ref="aiRealtime" :conversation-id="selected?.id || ''" :identity="attachmentIdentity" :allowed="realtimeAllowed" @state="realtimeChanged" @history="pollConversation" />
           <MediaSessionOverlay :conversation-id="selected?.id || ''" :request-id="supportRequest?.status === 'active' ? supportRequest.request_id : ''" :identity="attachmentIdentity" :user-id="mediaUserId" :writable="selected?.state === 'HUMAN_ACTIVE'" @changed="humanMediaChanged" @frame="openLiveFrame" />
@@ -51,6 +52,7 @@
 </template>
 
 <script>
+import AgentToolStatus from '../components/AgentToolStatus.vue';
 import AIRealtimeOverlay from '../components/AIRealtimeOverlay.vue';
 import { aiFailureKey } from '../utils/aiErrors.mjs';
 import { REALTIME_TERMINAL } from '../realtime/session.mjs';
@@ -74,7 +76,7 @@ function cursorInteger(value) {
 
 export default {
   name: 'ConversationWorkspace',
-  components: { AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay, AIRealtimeOverlay },
+  components: { AgentToolStatus, AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay, AIRealtimeOverlay },
   data() {
     return { environmentLabel: import.meta.env.VITE_ENV_LABEL || '开发预览', identityEpoch: 0, identityController: new AbortController(), attachmentDrafts: {}, realtimeState: null, humanMedia: null, mediaNotices: {}, conversations: [], selected: null, messages: [], drafts: {}, pending: {}, error: '', createError: '', loadingList: false, loadingMessages: false, sending: false, createVisible: false, creating: false, newTitle: '', listCursor: 0, listHasMore: false, selectionVersion: 0, supportRequest: null, supportBusy: false, handoffPending: {}, pollTimer: null, messageCursor: '0', eventCursor: '0', pollBusy: false, disposed: false, runs: [], aiAvailable: null, streamController: null, streamCursor: '0', streamProjections: {}, selectionController: null, runBusy: {} };
   },

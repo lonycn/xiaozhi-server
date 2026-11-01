@@ -24,6 +24,7 @@
         <template #tools>
           <section class="tool-section context"><h3>{{ $t('expertWorkspace.context') }}</h3><template v-if="selected"><strong>{{ titles[selected.conversation_id] || $t('support.consultation') }}</strong><dl><div><dt>{{ $t('expertWorkspace.sessionDetails') }}</dt><dd>{{ $t('support.' + selected.status) }}</dd></div><div><dt>{{ $t('support.request') }}</dt><dd>{{ selected.request_id }}</dd></div><div><dt>{{ $t('expertWorkspace.conversation') }}</dt><dd>{{ selected.conversation_id }}</dd></div><div v-if="selected.requested_at"><dt>{{ $t('expertWorkspace.startedAt') }}</dt><dd>{{ formatDate(selected.requested_at) }}</dd></div><div><dt>{{ $t('expertWorkspace.draftCount') }}</dt><dd>{{ attachmentRows.length }}</dd></div></dl></template><p v-else>{{ $t('support.select') }}</p></section>
           <ExpertAnnotationTools class="tool-section" :items="savedAnnotations" :draft-rows="attachmentRows" :writable="active" :busy="sending || historyLoading || actionBusy || !!annotationAdding" :loading="annotationHistoryLoading" :more="annotationHistoryMore" :error="annotationHistoryError" @refresh="loadAnnotations(false)" @more="loadAnnotations(true)" @add="addSavedAnnotation" @open="openSavedAnnotation" />
+          <AgentToolStatus v-if="selected" :conversation-id="selected.conversation_id" :identity="attachmentIdentity" />
           <SupportSummaryPanel v-if="selected" :key="attachmentScope" :conversation-id="selected.conversation_id" :messages="messages" :writable="active" @source="focusSummarySource" @suggestion="appendSuggestion" />
         </template>
       </ExpertWorkspaceLayout>
@@ -36,6 +37,7 @@
   </section>
 </template>
 <script>
+import AgentToolStatus from '../components/AgentToolStatus.vue';
 import ExpertWorkspaceLayout from '../components/expert/ExpertWorkspaceLayout.vue';
 import ExpertContactList from '../components/expert/ExpertContactList.vue';
 import ExpertAnnotationTools from '../components/expert/ExpertAnnotationTools.vue';
@@ -54,7 +56,7 @@ import store from '../store';
 import { isSupportAdmin, allPages, senderKey, cursorInteger } from '../utils/support.mjs';
 export default {
   name: 'SupportWorkspace',
-  components: { ExpertWorkspaceLayout, ExpertContactList, ExpertAnnotationTools, SupportSummaryPanel, AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay },
+  components: { AgentToolStatus, ExpertWorkspaceLayout, ExpertContactList, ExpertAnnotationTools, SupportSummaryPanel, AttachmentComposer, AttachmentPart, AnnotationEditor, MediaSessionOverlay },
   data: () => ({ annotationHistoryLoading: false, annotationHistoryMore: false, annotationHistoryCursor: '0', annotationHistoryError: '', annotationHistoryEpoch: 0, annotationAdding: '', annotationVisible: false, annotationRecords: {}, attachmentDrafts: {}, mediaAdopting: false, selectionController: null, profile: null, accepting: false, presenceBusy: false, assigned: [], queue: [], agents: [], selected: null, messages: [], drafts: {}, titles: {}, pending: {}, loading: true, error: '', refreshBusy: false, staffEpoch: 0, permissionCheck: null, actionBusy: false, sending: false, saving: false, historyLoading: false, historyPolling: false, historyFetchVersion: 0, version: 0, disposed: false, heartbeat: null, poll: null, edit: { user_id: '', role: 'support_agent', enabled: true, capacity_text: 1 } }),
   computed: {
     savedAnnotations() {

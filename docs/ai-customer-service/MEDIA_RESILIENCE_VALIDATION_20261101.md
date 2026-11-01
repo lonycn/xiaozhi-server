@@ -6,7 +6,7 @@
 
 - 原 Dev：Vue 3 `18894`、API `18893`、实时 worker `18899`，原 MySQL/Redis 容器和卷继续使用。部署前确认 P3/B5 均无活动通话，只重启实时 worker，未重启原 API 或数据库。
 - 主测试 API `18902`、Redis `34778`，新建数据库 `xiaozhi_media_test_resilience_8e4702642371`；长测使用独立 worker `18914`、`18918`，短故障测试与浏览器使用其他专属进程，互不重启。
-- 重启测试 API `18904`、Redis `34779`，另一全新数据库 `xiaozhi_media_test_restart_caa21bfb8abb`。原数据和所有成功、失败、未闭合试验样本均保留，没有 DROP、TRUNCATE、清库或覆盖现有数据库。
+- 重启测试 API `18904`、Redis `34779`，另一全新数据库 `xiaozhi_media_test_restart_caa21bfb8abb`。原数据和所有成功、失败、未闭合试验样本均保留；未对任何现有数据库执行 DROP、TRUNCATE、清库或覆盖。全新测试库仅首次应用原完整迁移，原 Dev 不重新初始化。
 - 新建 LiveKit 17980/RTC TCP 17981/UDP 17982 与独立网络命名空间。NET_ADMIN 只授予该命名空间的测试工具容器；不改变宿主机路由、全局代理、共享 17880 服务或其他项目网络。
 - 唯一浏览器 TaskSpace 36，客户 `18906`、客服 `18907` 使用不同 origin 正常登录，未注入浏览器 Bearer。P3 最终使用生产构建预览，排除开发 HMR 重载对草稿和选中会话的影响。
 
@@ -50,7 +50,7 @@
 
 ### 最终应用心跳版本
 
-待最终 18918 实钟样本结束后填写。启动前已保存源文件 SHA 和实际加载函数 marshal/bytecode 指纹，测试客户端持续发送匹配心跳，并有独立实钟/SQL 上限观察器。不得用前一轮或缩短时钟替代本条结果。
+最终18918实钟样本通过：创建到WSS关闭1800.297秒，provider就绪后连接1798.471秒，数据库创建到结束1800.602秒，实际终态expired / SESSION_LIMIT。1770–1801秒逐秒API与SQL观察保留，6/6真实语音、ASR、usage及账本完成；provider IDs唯一、canonical seq连续。889次ping有888个匹配pong，最后一次随产品上限关闭而未ACK，没有6秒ACK超时或重放；RTT均值5.12ms、最大137.15ms。RSS30.4–43.6MB、任务8–9、队列峰值1/32；结束connections0、任务2，独立worker已正常停止。启动前源文件SHA和实际加载函数marshal/bytecode指纹均已采集并与最终源码核对，见 `p3-heartbeat-runtime/loaded-source-fingerprint.json`、`proof.json`、`limit-observation.json`，统一索引 `p3-acceptance-summary.json` 为PASSED。没有用前一轮或缩短时钟替代本条结果。
 
 ### B5 人工音视频
 
@@ -73,6 +73,17 @@ SDK 1.1.20 退出有已知 ignored FFI 析构 warning；功能断言、正常清
 
 ## 检查与发布
 
-本批最终：Vue 443 单元/组件、10 contract、13 snapshot，6 语言各 1861 key，生产构建通过；实时 worker 41、Dev/故障代理 60 项通过。定向集合都是子集，不重复累计。Java/迁移未改，运行 JAR 沿用上一批全量 508 项通过的基线，未伪称本批重跑 Java 全量。源码空白检查通过，最终 CI 与数据保留结果在本轮结束后追加。
+本批最终：Vue 443 单元/组件、10 contract、13 snapshot，6 语言各 1861 key，生产构建通过；实时 worker 41、Dev/故障代理 60 项通过。定向集合都是子集，不重复累计。Java/迁移未改，运行 JAR 沿用上一批全量 508 项通过的基线，未伪称本批重跑 Java 全量。源码空白检查通过；功能提交 `6fa10a0` 的 [远端 CI](https://github.com/lonycn/xiaozhi-server/actions/runs/41276897601) 已完成并通过。
 
 本轮不替代真实 Android/ESP32/真人麦克风扬声器摄像头、真实噪声回声、Wi-Fi/蜂窝切换、企业防火墙、HTTPS/WSS/TURN 公网部署验收。新增冻结截图 guard 只有单元验证，本次浏览器媒体提示样本为 audio-only，不声称补了真实摄像截图链路。真实业务 API 仍未提供，相关委托查询、工单提交与派单保持原未完成状态。
+
+## 原 Dev 保留核对
+
+原 Dev 前后均为4用户、25旧设备历史、33消息、120 changeset，P3/B5活动会话为0。`sys_user`、`ai_agent_chat_history`、`ai_message` 的 dump INSERT 内容逐字节一致，哈希在私有 `dev-after-proof.json`；不只比较行数。部署仅重启18899实时worker，API/MySQL/Redis未重启，未新增迁移。
+
+- 迁移前/开发前备份：`dev-before-20261101T044454Z.sql`，521449字节，SHA256 `2580e2ca37deaf677fb46c8f99db7ad305420e637ac4f14e56548a6650869fd6`。
+- 开发后备份：`dev-after-20261101T052719Z.sql`，521449字节，SHA256 `8c9d69a28efa9e371fedbb766ff6bc6d6292bb5206d2ac55b31354373586ab58`。
+
+两份文件均在上述仓库外工作目录，权限600；SQL dump 时间等元数据使整体SHA不同，受保护表的INSERT内容相同。辅助runs降级修复后，稳定构建重新选择原会话无该辅助接口的“资源不存在”错误；受控失联/背压留下的媒体失败提示属于测试终态，可正常关闭。技术输入和fetch观察已恢复并reload。最终截图 `p3-browser-final-clean-desktop.png`、`p3-browser-final-clean-mobile.png` 保留，手机390px无横向溢出。
+
+最终已正常停止两套隔离API、Redis、测试前端、所有故障代理和专属worker；新LiveKit、netem与工具容器只停止、未删除，网络和所有数据库/文件保留。临时端口均无监听，TaskSpace36正常finish且没有残留技术设备脚本。原Dev18894/API18893/实时worker18899继续运行，MySQL/Redis健康；清理过程核对PID/配置、容器ID/命名空间及Redis目录，不按模糊进程名终止其他服务。详见私有 `cleanup-proof.json`。

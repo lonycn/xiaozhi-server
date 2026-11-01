@@ -141,3 +141,33 @@ onMounted(() => {
 });
 onBeforeUnmount(() => { disposed = true; window.removeEventListener('resize', resize); mobileQuery.removeEventListener('change', resize); });
 </script>
+
+<style>
+/* The expert call workspace uses a compact rail without changing the user's
+   sidebar preference or the shell on any other route. */
+.admin-shell:has(.support-workspace) { --admin-sidebar-width: 84px; }
+.admin-shell.is-collapsed:has(.support-workspace) { --admin-sidebar-width: 64px; }
+.admin-shell:has(.support-workspace) .admin-topbar { height:44px; flex-basis:44px; padding-right:16px; }
+.admin-shell:has(.support-workspace) .admin-tabs { height:32px; flex-basis:32px; }
+.admin-shell:has(.support-workspace) .admin-tab a { padding-top:5px; padding-bottom:5px; font-size:12px; }
+.admin-shell:has(.support-workspace) .admin-footer { display:none; }
+.admin-shell:has(.support-workspace) .admin-page-host { padding:10px 12px; overflow:hidden; }
+@media(min-width:961px) {
+  .admin-shell:has(.support-workspace) .admin-sidebar { background:#123e3b; }
+  .admin-shell:has(.support-workspace) .admin-brand { justify-content:center; height:58px; flex-basis:58px; padding:0; border-bottom-color:#315753; }
+  .admin-shell:has(.support-workspace) .admin-brand strong,
+  .admin-shell:has(.support-workspace) .admin-menu-item-group__title,
+  .admin-shell:has(.support-workspace) .el-menu-item-group__title,
+  .admin-shell:has(.support-workspace) .admin-sidebar-caption { display:none; }
+  .admin-shell:not(.is-collapsed):has(.support-workspace) .admin-sidebar .el-menu-item,
+  .admin-shell:not(.is-collapsed):has(.support-workspace) .admin-sidebar .el-sub-menu__title { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; height:auto; min-height:74px; line-height:1.35; margin:6px; padding:10px 3px !important; white-space:normal; text-align:center; font-size:11px; border-radius:9px; }
+  .admin-shell:has(.support-workspace) .admin-sidebar .el-menu .el-icon { font-size:23px; margin:0; }
+  .admin-shell:has(.support-workspace) .admin-sidebar .el-menu-item.is-active { background:#087f7b; }
+  .admin-shell:has(.support-workspace) .admin-sidebar .el-menu { --el-menu-hover-bg-color:#20554f; }
+  .admin-shell:has(.support-workspace) .admin-sidebar .el-sub-menu__icon-arrow { right:3px; top:auto; bottom:3px; font-size:10px; }
+}
+@media(max-width:600px) {
+  .admin-shell:has(.support-workspace) .admin-page-host { padding:6px; }
+  .admin-shell:has(.support-workspace) .admin-topbar { height:46px; flex-basis:46px; }
+}
+</style>

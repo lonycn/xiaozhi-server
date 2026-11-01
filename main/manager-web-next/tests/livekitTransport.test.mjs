@@ -4,11 +4,27 @@ function harness(options={}){
   const listeners=new Map(),local={trackPublications:new Map(),publishTrack:vi.fn(async()=>{}),unpublishTrack:vi.fn(async()=>{})};
   const room={state:'connected',localParticipant:{...local,sid:'self'},remoteParticipants:new Map(),on:vi.fn((name,callback)=>listeners.set(name,callback)),connect:vi.fn(async()=>{}),disconnect:vi.fn(async()=>{}),removeAllListeners:vi.fn(),startAudio:vi.fn(async()=>{})};
   const sdk={Room:class{constructor(){return room;}},RoomEvent:{TrackSubscribed:'track',TrackUnsubscribed:'untrack',ConnectionStateChanged:'state',Disconnected:'disconnected'},createLocalTracks:vi.fn(async()=>[{kind:'audio',stop:vi.fn()}])};
-  const onTrack=vi.fn(),onChange=vi.fn(),transport=createRoomTransport(sdk,{onChange,onTrack,...options});
+  const onTrack=vi.fn(),onLocalTrack=vi.fn(),onChange=vi.fn(),transport=createRoomTransport(sdk,{onChange,onTrack,onLocalTrack,...options});
   const track=(kind='audio')=>{const element=document.createElement(kind==='audio'?'audio':'video');element.play=vi.fn(async()=>{});return {kind,sid:`TR_${kind}`,isMuted:false,mediaStreamTrack:{readyState:'live'},attach:vi.fn(()=>element),detach:vi.fn(()=>[element]),getRTCStatsReport:vi.fn()};};
-  return {room,sdk,listeners,transport,onTrack,onChange,track};
+  return {room,sdk,listeners,transport,onTrack,onLocalTrack,onChange,track};
 }
 describe('LiveKit transport device and receive evidence boundary',()=>{
+  it('previews only the existing authorized camera track, muted inline, and releases it on camera-off',async()=>{
+    const h=harness(),video={...h.track('video'),stop:vi.fn()},host=document.createElement('div');h.onLocalTrack.mockImplementation(element=>host.appendChild(element));h.sdk.createLocalTracks.mockResolvedValue([video]);h.transport.setForeground(true);
+    await h.transport.connect('wss://test','private',{microphone:false,camera:true});expect(h.sdk.createLocalTracks).toHaveBeenCalledOnce();expect(h.sdk.createLocalTracks).toHaveBeenCalledWith({audio:false,video:true});expect(h.onTrack).not.toHaveBeenCalled();
+    const element=host.querySelector('video');expect(element.muted).toBe(true);expect(element.playsInline).toBe(true);expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({hasLocalVideo:true,hasVideo:false}));
+    await h.transport.camera(false);expect(host.querySelector('video')).toBeNull();expect(video.stop).toHaveBeenCalledOnce();expect(h.room.localParticipant.unpublishTrack).toHaveBeenCalledWith(video);await h.transport.close();expect(video.stop).toHaveBeenCalledOnce();
+  });
+  it('keeps the preparing-generation local preview private until foreground and removes it on disconnect',async()=>{
+    const h=harness(),video={...h.track('video'),stop:vi.fn()},host=document.createElement('div');h.onLocalTrack.mockImplementation(element=>host.appendChild(element));h.sdk.createLocalTracks.mockResolvedValue([video]);
+    await h.transport.connect('wss://test','private',{microphone:false,camera:true});expect(video.attach).not.toHaveBeenCalled();h.transport.setForeground(true);expect(host.querySelector('video')).not.toBeNull();h.listeners.get('disconnected')();expect(host.querySelector('video')).toBeNull();expect(video.stop).toHaveBeenCalledOnce();expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({hasLocalVideo:false}));await h.transport.close();
+  });
+  it.each(['disable','disconnect'])('stops a late camera grant after %s without publishing or displaying it',async mode=>{
+    const h=harness(),video={...h.track('video'),stop:vi.fn()};let grant;h.sdk.createLocalTracks.mockReturnValue(new Promise(resolve=>{grant=resolve;}));const pending=h.transport.camera(true);
+    if(mode==='disable')await h.transport.camera(false);else h.listeners.get('disconnected')();grant([video]);await pending;
+    expect(video.stop).toHaveBeenCalledOnce();expect(h.room.localParticipant.publishTrack).not.toHaveBeenCalled();expect(h.onLocalTrack).not.toHaveBeenCalled();await h.transport.close();
+  });
+
   it('only requests sources explicitly chosen by the user and never logs or persists a token',async()=>{
     const h=harness();await h.transport.connect('wss://test','private',{microphone:true,camera:false});expect(h.sdk.createLocalTracks).toHaveBeenCalledTimes(1);expect(h.sdk.createLocalTracks).toHaveBeenCalledWith({audio:true,video:false});await h.transport.close();
   });

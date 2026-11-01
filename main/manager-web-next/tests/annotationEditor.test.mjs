@@ -26,6 +26,53 @@ beforeEach(() => {
 afterEach(() => {wrapper?.unmount();wrapper=null;vi.useRealTimers();vi.restoreAllMocks();});
 const arrow={id:'a1',type:'arrow',color:'#123456',stroke_width:.004,points:[{x:.1,y:.1},{x:.5,y:.5}]};
 describe('annotation editor snapshots and private canvas', () => {
+  it('prioritizes the embedded canvas while retaining ready state, explicit actions and full legacy metadata', async () => {
+    const vm=desk({embedded:true});await vm.openSnapshot('12');
+    expect(wrapper.find('.annotation-canvas-wrap').exists()).toBe(true);expect(wrapper.find('.annotation-label input').element.value).toBe('检查阀门');expect(wrapper.find('.annotation-label input').attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('.annotation-saved-state').text()).toBe('attachments.ready');expect(wrapper.find('.frame-evidence').exists()).toBe(false);expect(wrapper.find('.annotation-preview').exists()).toBe(false);expect(wrapper.text()).not.toContain('annotations.saveNote');expect(wrapper.text()).not.toContain('annotations.copyNote');expect(wrapper.find('footer').text()).toContain('annotations.saveCopy');expect(wrapper.find('footer').text()).toContain('annotations.addReply');
+    await wrapper.setProps({embedded:false});expect(wrapper.find('.frame-evidence').text()).toContain('10');expect(wrapper.find('.annotation-preview').exists()).toBe(true);expect(wrapper.text()).toContain('annotations.saveNote');expect(wrapper.text()).toContain('annotations.copyNote');expect(wrapper.find('.annotation-saved-state').text()).toContain('12');
+  });
+
+  it('uses scoped drawing tool keys while protecting text input and IME', async () => {
+    const vm=desk({embedded:true});await vm.openFrame('10');const canvas=wrapper.find('canvas').element,preventDefault=vi.fn();
+    vm.dialogKeydown({key:'2',target:canvas,preventDefault});expect(vm.tool).toBe('rect');vm.dialogKeydown({key:'8',target:canvas,isComposing:true,preventDefault});expect(vm.tool).toBe('rect');
+    vm.dialogKeydown({key:'7',target:document.createElement('input'),preventDefault});expect(vm.tool).toBe('rect');vm.dialogKeydown({key:'7',target:canvas,preventDefault});expect(vm.tool).toBe('freehand');
+  });
+
+  it('embeds the frozen editor in its host without a body portal or modal focus trap, using red freehand tools', async () => {
+    wrapper=mount(Editor,{attachTo:document.body,props:{conversationId:'c',scopeKey:'actor:c:assignment',identity:'actor',writable:true,embedded:true},global:{mocks:{$t:key=>key}}});
+    await wrapper.vm.openFrame('10');
+    const dialog=wrapper.find('[role="dialog"]');expect(dialog.exists()).toBe(true);expect(dialog.attributes('aria-modal')).toBe('false');
+    expect(wrapper.element.contains(dialog.element)).toBe(true);expect(wrapper.find('.annotation-backdrop--embedded').exists()).toBe(true);
+    expect(wrapper.vm.tool).toBe('freehand');expect(wrapper.vm.color).toBe('#E53935');expect(wrapper.find('[role="toolbar"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('annotations.returnLive');expect(wrapper.emitted('visibility')).toEqual([[true]]);
+    const preventDefault=vi.fn();wrapper.vm.dialogKeydown({key:'Tab',target:wrapper.find('footer button:last-child').element,preventDefault});expect(preventDefault).not.toHaveBeenCalled();
+    wrapper.vm.close();expect(wrapper.emitted('visibility')).toEqual([[true],[false]]);
+  });
+  it('keeps the default editor as a body modal for existing conversation consumers', async () => {
+    wrapper=mount(Editor,{attachTo:document.body,props:{conversationId:'c',scopeKey:'actor:c:assignment',identity:'actor',writable:true},global:{mocks:{$t:key=>key}}});
+    await wrapper.vm.openFrame('10');const dialog=document.body.querySelector('.annotation-dialog');
+    expect(dialog?.getAttribute('aria-modal')).toBe('true');expect(wrapper.element.contains(dialog)).toBe(false);expect(document.body.querySelector('.annotation-backdrop--embedded')).toBeNull();
+    expect(dialog.textContent).toContain('annotations.close');wrapper.vm.close();await wrapper.vm.$nextTick();expect(document.body.querySelector('.annotation-dialog')).toBeNull();
+  });
+  it('releases private pixels and exits the inline editor when the server revokes authorization', async () => {
+    const vm=desk({embedded:true});await vm.openFrame('10');api.save.mockRejectedValue(Object.assign(new Error('denied'),{status:403}));await vm.saveSnapshot();
+    expect(vm.visible).toBe(false);expect(vm.background).toBeNull();expect(vm.error).toBe('annotations.denied');expect(wrapper.emitted('visibility')).toEqual([[true],[false]]);expect(wrapper.emitted('ready')).toBeUndefined();
+  });
+  it('restores an inline live-frame draft and its undo history after returning to live video', async () => {
+    const vm=desk({embedded:true});await vm.openFrame('10');vm.commit({...vm.scene,elements:[arrow]});vm.tool='text';vm.textPosition={x:.2,y:.3};vm.textDraft='未完成说明';vm.close();await vm.openFrame('10');
+    expect(vm.textDraft).toBe('未完成说明');expect(vm.textPosition).toEqual({x:.2,y:.3});expect(vm.tool).toBe('text');expect(vm.scene.elements).toEqual([arrow]);vm.undo();expect(vm.scene.elements).toEqual([]);expect(api.createFrame).not.toHaveBeenCalled();
+  });
+  it('stages exactly once only after explicit save and add-to-reply in embedded mode', async () => {
+    const vm=desk({embedded:true});await vm.openFrame('10');await vm.saveSnapshot();expect(wrapper.emitted('ready')).toBeUndefined();
+    await vm.addToReply();await vm.addToReply();expect(wrapper.emitted('ready')).toHaveLength(1);expect(wrapper.emitted('visibility')).toEqual([[true],[false]]);expect(wrapper.emitted('ready')[0][0].row.attachment).toEqual(generated);
+  });
+  it('closes inline editing on revoked scope and fences a late source load', async () => {
+    const response=deferred();api.frame.mockReturnValueOnce(response.promise);const vm=desk({embedded:true}),opening=vm.openFrame('10');await flushPromises();
+    await wrapper.setProps({scopeKey:'actor:c:reassigned',writable:false});response.resolve(frame);await opening;
+    expect(vm.visible).toBe(false);expect(vm.background).toBeNull();expect(wrapper.emitted('visibility')).toEqual([[true],[false]]);expect(images.blob).not.toHaveBeenCalled();
+  });
+
   it('creates an authorized image frame, downloads a private blob and sizes the canvas to the viewport', async () => {
     const vm=desk();await vm.openSource({attachmentId:'9'});
     expect(api.createFrame.mock.calls[0][0]).toMatchObject({conversation_id:'c',source_attachment_id:'9',client_frame_id:expect.any(String)});expect(api.createFrame.mock.calls[0][0].time_ms).toBeUndefined();

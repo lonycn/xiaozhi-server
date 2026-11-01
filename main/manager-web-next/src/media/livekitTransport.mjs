@@ -5,42 +5,51 @@ export async function createLiveKitTransport(options) {
   return createRoomTransport(sdk, options);
 }
 
-export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => {}, now = () => Date.now() } = {}) {
+export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => {}, onLocalTrack = () => {}, now = () => Date.now() } = {}) {
   const room = new sdk.Room({ adaptiveStream: true, dynacast: true });
   const local = new Map();
   const tracks = new Set(), attachments = new Map(), samples = new Map();
   let closed = false, foreground = false, connected = false, mediaStalled = false;
-  const flow = new Map();
-  const update = () => onChange({ connected: connected && room.state === 'connected', state: room.state, hasVideo: foreground && [...tracks].some(track => track.kind === 'video' && !track.isMuted), mediaStalled });
-  function render(track) {
+  const flow = new Map(), sourceVersions = new Map(), stopped = new WeakSet(); let captureEpoch = 0;
+  function stopTrack(track) { if (!stopped.has(track)) { stopped.add(track); track.stop(); } }
+  const update = () => onChange({ connected: connected && room.state === 'connected', state: room.state, hasVideo: foreground && [...tracks].some(track => track.kind === 'video' && !track.isMuted), hasLocalVideo: foreground && local.has('video') && !local.get('video').isMuted, mediaStalled });
+  function render(track, isLocal = false) {
     if (!foreground || attachments.has(track)) return;
     const element = track.attach(); element.autoplay = true; element.playsInline = true;
     if (track.kind === 'audio') element.hidden = true;
-    attachments.set(track, element); onTrack(element, track);
-    element.play?.().catch(() => onChange({ playbackBlocked: true }));
+    if (isLocal) element.muted = true;
+    attachments.set(track, element); (isLocal ? onLocalTrack : onTrack)(element, track);
+    element.play?.().catch(() => { if (!isLocal) onChange({ playbackBlocked: true }); });
   }
   function detach(track) {
     const owned = attachments.get(track);
-    for (const element of track.detach()) element.remove();
+    for (const element of track.detach?.() || []) element.remove();
     // LiveKit may detach first on unsubscribe, leaving its element list empty.
     owned?.remove(); attachments.delete(track); samples.delete(track.sid); flow.delete(track.sid);
   }
   room.on(sdk.RoomEvent.TrackSubscribed, track => { if (!closed) { tracks.add(track); render(track); update(); } });
   room.on(sdk.RoomEvent.TrackUnsubscribed, track => { tracks.delete(track); detach(track); update(); });
   room.on(sdk.RoomEvent.ConnectionStateChanged, () => { if (room.state !== 'connected') { mediaStalled = false; flow.clear(); samples.clear(); } update(); });
-  room.on(sdk.RoomEvent.Disconnected, () => { connected = false; mediaStalled = false; flow.clear(); samples.clear(); for (const track of local.values()) track.stop(); local.clear(); for (const track of tracks) detach(track); update(); });
+  room.on(sdk.RoomEvent.Disconnected, () => { ++captureEpoch; connected = false; mediaStalled = false; flow.clear(); samples.clear(); for (const track of local.values()) { detach(track); stopTrack(track); } local.clear(); for (const track of tracks) detach(track); update(); });
+  if (sdk.RoomEvent.LocalTrackUnpublished) room.on(sdk.RoomEvent.LocalTrackUnpublished, publication => {
+    for (const [kind, track] of local) if (publication.track === track) { detach(track); stopTrack(track); local.delete(kind); }
+    update();
+  });
   async function source(kind, enabled) {
-    const old = local.get(kind);
-    if (!enabled) { if (old) { old.stop(); local.delete(kind); await room.localParticipant.unpublishTrack(old); } return; }
+    const version = (sourceVersions.get(kind) || 0) + 1; sourceVersions.set(kind, version);
+    const epoch = captureEpoch, old = local.get(kind);
+    if (!enabled) { if (old) { detach(old); stopTrack(old); local.delete(kind); update(); await room.localParticipant.unpublishTrack(old); } return; }
     if (old || closed) return;
     const captured = await sdk.createLocalTracks({ audio: kind === 'audio', video: kind === 'video' });
     for (const track of captured) {
-      if (closed) { track.stop(); continue; }
+      if (closed || epoch !== captureEpoch || sourceVersions.get(kind) !== version) { stopTrack(track); continue; }
       local.set(kind, track);
       try { await room.localParticipant.publishTrack(track); }
-      catch (error) { track.stop(); local.delete(kind); throw error; }
-      if (closed) { track.stop(); local.delete(kind); }
+      catch (error) { detach(track); stopTrack(track); if (local.get(kind) === track) local.delete(kind); throw error; }
+      if (closed || epoch !== captureEpoch || sourceVersions.get(kind) !== version) { detach(track); stopTrack(track); if (local.get(kind) === track) local.delete(kind); await room.localParticipant.unpublishTrack(track); }
+      else if (kind === 'video') render(track, true);
     }
+    update();
   }
   return {
     async connect(url, token, consent) {
@@ -57,7 +66,8 @@ export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => 
     },
     setForeground(value) {
       foreground = value;
-      for (const track of tracks) { if (value) render(track); else detach(track); } update();
+      for (const track of tracks) { if (value) render(track); else detach(track); }
+      const preview = local.get('video'); if (preview) { if (value) render(preview, true); else detach(preview); } update();
     },
     async microphone(value) { await source('audio', value); },
     async camera(value) { await source('video', value); },
@@ -88,11 +98,11 @@ export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => 
     },
     videoTrack() { return [...tracks].find(track => track.kind === 'video' && !track.isMuted); },
     async close() {
-      if (closed) return; closed = true; connected = false; mediaStalled = false; flow.clear(); samples.clear();
+      if (closed) return; closed = true; ++captureEpoch; connected = false; mediaStalled = false; flow.clear(); samples.clear();
       for (const track of tracks) detach(track); tracks.clear();
       // Stop hardware synchronously, including while an async publication is in progress.
-      for (const track of local.values()) track.stop(); local.clear();
-      for (const publication of room.localParticipant.trackPublications.values()) publication.track?.stop();
+      for (const track of local.values()) { detach(track); stopTrack(track); } local.clear();
+      for (const publication of room.localParticipant.trackPublications.values()) publication.track && stopTrack(publication.track);
       await room.disconnect(true); room.removeAllListeners();
     },
   };

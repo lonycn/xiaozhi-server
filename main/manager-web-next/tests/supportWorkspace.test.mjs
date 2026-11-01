@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Workspace from '../src/views/SupportWorkspace.vue';
 const api = vi.hoisted(() => ({ me: vi.fn(), presence: vi.fn(), queue: vi.fn(), assigned: vi.fn(), agents: vi.fn(), action: vi.fn(), send: vi.fn(), profile: vi.fn() }));
 const conversation = vi.hoisted(() => ({ messages: vi.fn(), detail: vi.fn() }));
-const annotation = vi.hoisted(() => ({ frame: vi.fn() }));
+const annotation = vi.hoisted(() => ({ frame: vi.fn(), list: vi.fn(), get: vi.fn() }));
+const attachment = vi.hoisted(() => ({ get: vi.fn() }));
+vi.mock('../src/apis/module/attachment', () => ({ default: attachment }));
 const images = vi.hoisted(() => ({ blob: vi.fn(), decode: vi.fn(), release: vi.fn() }));
 vi.mock('../src/apis/module/annotation', () => ({ default: annotation }));
 vi.mock('../src/apis/module/annotationClient.mjs', () => ({ privateAnnotationBlob: images.blob, decodeAnnotationBlob: images.decode }));
@@ -14,8 +16,8 @@ vi.mock('../src/store', () => ({ default: { state } }));
 const page = (items = []) => ({ items, next_cursor: '0', has_more: false });
 const profile = { user_id: '9223372036854775806', enabled: true, accepting: false };
 let wrapper;
-function mountDesk() { wrapper = mount(Workspace, { global: { mocks: { $t: key => key }, stubs: { SupportSummaryPanel: true, Teleport: true, RouterLink: true, ElAlert: true, ElSwitch: true, ElButton: { template: '<button><slot /></button>' }, ElInput: true, ElInputNumber: true, ElSelect: true, ElOption: true, ElTable: true, ElTableColumn: true } } }); return wrapper; }
-beforeEach(() => { vi.useFakeTimers(); vi.resetAllMocks(); state.userInfo = {}; api.me.mockResolvedValue(profile); api.presence.mockImplementation(async accepting => ({ ...profile, accepting })); api.queue.mockResolvedValue(page()); api.assigned.mockResolvedValue(page()); api.agents.mockResolvedValue(page()); conversation.messages.mockResolvedValue(page()); conversation.detail.mockResolvedValue({ title: '咨询' }); });
+function mountDesk(mocks = {}) { wrapper = mount(Workspace, { global: { mocks: { $t: key => key, ...mocks }, stubs: { SupportSummaryPanel: true, Teleport: true, RouterLink: true, ElAlert: true, ElSwitch: true, ElButton: { template: '<button><slot /></button>' }, ElInput: true, ElInputNumber: true, ElSelect: true, ElOption: true, ElTable: true, ElTableColumn: true, ElTag: true } } }); return wrapper; }
+beforeEach(() => { vi.useFakeTimers(); vi.resetAllMocks(); state.userInfo = {}; api.me.mockResolvedValue(profile); api.presence.mockImplementation(async accepting => ({ ...profile, accepting })); api.queue.mockResolvedValue(page()); api.assigned.mockResolvedValue(page()); api.agents.mockResolvedValue(page()); conversation.messages.mockResolvedValue(page()); conversation.detail.mockResolvedValue({ title: '咨询' }); annotation.list.mockResolvedValue(page()); });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); });
 describe('support desk', () => {
   it('allows profile management without granting administrator queue or conversation access', async () => {
@@ -192,4 +194,114 @@ describe('B4 support annotations', () => {
     wrapper.vm.selected.status='resolved';await wrapper.vm.$nextTick();expect(editor.props('writable')).toBe(false);expect(editor.vm.error).toBe('annotations.denied');
   });
 
+});
+
+describe('expert workspace integration', () => {
+  const request = { request_id:'expert-r', conversation_id:'expert-c', status:'active' };
+  const row = { kind:'image',clientUploadId:'annotation-22',status:'ready',attachment:{id:'23',status:'ready',conversation_id:'expert-c',filename:'检查位置.jpg',metadata:{annotation_id:'22',frame_id:'20'}} };
+  it('stages the editor add event once, preserves saved context after send and isolates each request', async () => {
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest(request);
+    const editor=wrapper.findComponent({name:'AnnotationEditor'});
+    editor.vm.$emit('ready',{scopeKey:wrapper.vm.attachmentScope,row}); await wrapper.vm.$nextTick();
+    expect(wrapper.vm.attachmentRows).toHaveLength(1); expect(wrapper.vm.savedAnnotations).toHaveLength(1); expect(api.send).not.toHaveBeenCalled();
+    editor.vm.$emit('ready',{scopeKey:wrapper.vm.attachmentScope,row}); expect(wrapper.vm.attachmentRows).toHaveLength(1);
+    api.send.mockResolvedValue({id:'expert-message',parts:[{type:'image',attachment_id:'23'}]}); await wrapper.vm.send();
+    expect(wrapper.vm.attachmentRows).toEqual([]); expect(wrapper.vm.savedAnnotations[0].sent).toBe(true);
+    await wrapper.vm.selectRequest({request_id:'other',conversation_id:'other-c',status:'active'}); expect(wrapper.vm.savedAnnotations).toEqual([]);
+    annotation.list.mockResolvedValue(page([{ id:'22',frame_id:'20',render_attachment_id:'23',conversation_id:'expert-c',label:'检查位置',status:'ready' }]));
+    await wrapper.vm.selectRequest(request); expect(wrapper.vm.savedAnnotations).toHaveLength(1);
+    wrapper.vm.revokeStaff(); expect(wrapper.vm.annotationRecords).toEqual({}); expect(wrapper.vm.attachmentDrafts).toEqual({});
+  });
+  it('keeps the embedded media/editor instances through request selection, tool toggles and ordinary polls', async () => {
+    api.assigned.mockResolvedValue(page([request])); mountDesk(); await flushPromises();
+    const media=wrapper.findComponent({name:'MediaSessionOverlay'}).vm, editor=wrapper.findComponent({name:'AnnotationEditor'}).vm;
+    await wrapper.vm.selectRequest(request); const layout=wrapper.findComponent({name:'ExpertWorkspaceLayout'});
+    layout.vm.toolsOpen=true; await wrapper.vm.$nextTick(); layout.vm.toolsOpen=false; await wrapper.vm.refresh();
+    expect(wrapper.findComponent({name:'MediaSessionOverlay'}).vm).toBe(media); expect(wrapper.findComponent({name:'AnnotationEditor'}).vm).toBe(editor);
+    expect(wrapper.findComponent({name:'MediaSessionOverlay'}).props('embedded')).toBe(true); expect(wrapper.findComponent({name:'AnnotationEditor'}).props('embedded')).toBe(true);
+    editor.$emit('visibility',true); await wrapper.vm.$nextTick(); expect(wrapper.findComponent({name:'MediaSessionOverlay'}).props('captureDisabled')).toBe(true);
+  });
+});
+
+describe('persistent expert annotation history', () => {
+  const request={request_id:'restored',conversation_id:'persisted-conversation',status:'active'};
+  const saved={id:'22',frame_id:'20',render_attachment_id:'23',conversation_id:request.conversation_id,label:'已保存的现场标记',status:'ready'};
+  const render={id:'23',conversation_id:request.conversation_id,filename:'已保存的现场标记.jpg',status:'ready',metadata:{annotation_id:'22',frame_id:'20'}};
+  it('restores the saved and sent history from server metadata after reload without fetching private media', async () => {
+    annotation.list.mockResolvedValue(page([saved]));
+    conversation.messages.mockResolvedValue(page([{id:'sent',seq:'1',parts:[{type:'image',attachment_id:'23'}]}]));
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest(request);
+    const tools=wrapper.findComponent({name:'ExpertAnnotationTools'});
+    expect(tools.text()).toContain(saved.label); expect(tools.text()).toContain('expertWorkspace.sent');
+    expect(annotation.list).toHaveBeenLastCalledWith(request.conversation_id,'0',expect.any(AbortSignal));
+    expect(attachment.get).not.toHaveBeenCalled(); expect(images.blob).not.toHaveBeenCalled();
+    const layout=wrapper.findComponent({name:'ExpertWorkspaceLayout'}); layout.vm.toolsOpen=true; await wrapper.vm.$nextTick();
+    attachment.get.mockResolvedValue(render); await tools.findAll('li button')[1].trigger('click'); await flushPromises();
+    expect(layout.vm.toolsOpen).toBe(false);
+    expect(attachment.get).toHaveBeenCalledWith('23',expect.any(AbortSignal)); expect(wrapper.vm.attachmentRows).toHaveLength(1); expect(wrapper.vm.savedAnnotations).toHaveLength(1);
+    expect(tools.text()).toContain('expertWorkspace.inDraft');
+    tools.vm.$emit('add',tools.props('items')[0]); await flushPromises(); expect(wrapper.vm.attachmentRows).toHaveLength(1);
+  });
+  it('closes the tools drawer when viewing history and reveals the same embedded editor above the call stage', async () => {
+    annotation.list.mockResolvedValue(page([saved]));
+    let rejectRead; annotation.get.mockReturnValue(new Promise((resolve,reject)=>{rejectRead=reject;}));
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest(request);
+    const layout=wrapper.findComponent({name:'ExpertWorkspaceLayout'}), editor=wrapper.findComponent({name:'AnnotationEditor'}), media=wrapper.findComponent({name:'MediaSessionOverlay'}).vm;
+    await layout.findAll('.mobile-panels button')[1].trigger('click');
+    expect(layout.findAll('.mobile-panels button')[1].attributes('aria-expanded')).toBe('true');
+    await wrapper.findComponent({name:'ExpertAnnotationTools'}).findAll('li button')[0].trigger('click');
+    expect(layout.findAll('.mobile-panels button')[1].attributes('aria-expanded')).toBe('false');
+    expect(editor.vm.visible).toBe(true); expect(editor.find('.annotation-dialog').isVisible()).toBe(true);
+    expect(wrapper.findComponent({name:'MediaSessionOverlay'}).vm).toBe(media);
+    expect(annotation.get).toHaveBeenCalledWith('22',expect.any(AbortSignal));
+    rejectRead(new Error('read interrupted')); await flushPromises();
+  });
+  it('paginates metadata with a validated cursor and deduplicates an editor-ready event', async () => {
+    annotation.list.mockResolvedValueOnce({items:[saved],has_more:true,next_cursor:'22'}).mockResolvedValueOnce(page([saved,{...saved,id:'24',render_attachment_id:'25',label:'另一处标记'}]));
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest(request);
+    expect(wrapper.vm.annotationHistoryMore).toBe(true); await wrapper.vm.loadAnnotations(true);
+    expect(annotation.list.mock.calls[1][1]).toBe('22'); expect(wrapper.vm.savedAnnotations).toHaveLength(2); expect(wrapper.vm.annotationHistoryMore).toBe(false);
+    wrapper.vm.stageAnnotation({scopeKey:wrapper.vm.attachmentScope,row:{kind:'image',status:'ready',clientUploadId:'annotation-22',attachment:render,annotation:saved}});
+    expect(wrapper.vm.savedAnnotations).toHaveLength(2); expect(wrapper.vm.attachmentRows).toHaveLength(1);
+    annotation.list.mockResolvedValue({items:[],has_more:true,next_cursor:'0'}); await wrapper.vm.loadAnnotations(false);
+    expect(wrapper.vm.annotationHistoryError).toBeTruthy(); expect(wrapper.vm.savedAnnotations).toHaveLength(2);
+  });
+  it('ignores late list/add responses after selection changes, even if transport resolves after abort', async () => {
+    let finishList; annotation.list.mockReturnValueOnce(new Promise(resolve=>{finishList=resolve;}));
+    mountDesk(); await flushPromises(); const selection=wrapper.vm.selectRequest(request); await flushPromises();
+    const oldSignal=annotation.list.mock.calls[0][2];
+    await wrapper.vm.selectRequest({request_id:'other',conversation_id:'other-conversation',status:'active'});
+    expect(oldSignal.aborted).toBe(true); finishList(page([saved])); await selection;
+    expect(wrapper.vm.savedAnnotations).toEqual([]); expect(wrapper.vm.annotationHistoryLoading).toBe(false);
+    annotation.list.mockResolvedValue(page([saved])); await wrapper.vm.selectRequest(request);
+    let finishAdd; attachment.get.mockReturnValueOnce(new Promise(resolve=>{finishAdd=resolve;}));
+    const adding=wrapper.vm.addSavedAnnotation(wrapper.vm.savedAnnotations[0]);
+    await wrapper.vm.selectRequest({request_id:'other',conversation_id:'other-conversation',status:'active'});
+    finishAdd(render); await adding; expect(wrapper.vm.attachmentRows).toEqual([]); expect(wrapper.vm.attachmentDrafts.restored).toBeUndefined(); expect(wrapper.vm.annotationAdding).toBe('');
+  });
+  it('shows recoverable history errors and clears private history on an authorization failure', async () => {
+    annotation.list.mockRejectedValueOnce(new Error('offline'));
+    mountDesk(); await flushPromises(); await wrapper.vm.selectRequest(request);
+    expect(wrapper.findComponent({name:'ExpertAnnotationTools'}).find('[role="alert"]').exists()).toBe(true); expect(wrapper.vm.annotationHistoryLoading).toBe(false);
+    annotation.list.mockResolvedValue(page([saved])); await wrapper.vm.loadAnnotations(false); expect(wrapper.vm.annotationHistoryError).toBe(''); expect(wrapper.vm.savedAnnotations).toHaveLength(1);
+    attachment.get.mockResolvedValue({...render,conversation_id:'someone-else'}); await wrapper.vm.addSavedAnnotation(wrapper.vm.savedAnnotations[0]); expect(wrapper.vm.attachmentRows).toEqual([]); expect(wrapper.vm.annotationHistoryError).toBeTruthy();
+    annotation.list.mockRejectedValue(Object.assign(new Error('denied'),{status:403})); await wrapper.vm.loadAnnotations(false);
+    expect(wrapper.vm.savedAnnotations).toEqual([]); expect(api.me).toHaveBeenCalledTimes(2); expect(wrapper.vm.profile).toEqual(profile);
+  });
+});
+
+describe('owned support request deep links', () => {
+  const request={request_id:'owned-request',conversation_id:'owned-conversation',status:'active'};
+  it('restores only an owned assigned request and preserves unrelated query keys on selection', async () => {
+    const replace=vi.fn().mockResolvedValue(); const route={path:'/support',query:{request:'owned-request',filter:'keep'}};
+    api.assigned.mockResolvedValue(page([request])); mountDesk({$route:route,$router:{replace}}); await flushPromises();
+    expect(wrapper.vm.selected).toEqual(request); expect(conversation.messages).toHaveBeenCalledWith('owned-conversation','0'); expect(api.action).not.toHaveBeenCalled();
+    await wrapper.vm.selectRequest({request_id:'another-owned',conversation_id:'next-conversation',status:'active'});
+    expect(replace).toHaveBeenCalledWith({path:'/support',query:{request:'another-owned',filter:'keep'}});
+  });
+  it('does not fetch an arbitrary deep-linked conversation or claim queue entries', async () => {
+    api.assigned.mockResolvedValue(page([request])); api.queue.mockResolvedValue(page([{request_id:'queued-request',conversation_id:'queued-conversation',status:'queued'}]));
+    mountDesk({$route:{path:'/support',query:{request:'queued-request'}},$router:{replace:vi.fn().mockResolvedValue()}}); await flushPromises();
+    expect(wrapper.vm.selected).toBeNull(); expect(conversation.messages).not.toHaveBeenCalled(); expect(annotation.list).not.toHaveBeenCalled(); expect(api.action).not.toHaveBeenCalled();
+  });
 });

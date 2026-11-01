@@ -45,7 +45,7 @@ Java 执行 `server_capabilities` 成功，第 2 轮消息角色为 `user, assis
 
 ### 自动测试
 
-- Java：完整 549 项通过、零跳过；此后补齐 Shiro 精确入口、管理员诊断及证据过滤后，相关 31 项、最终 13 项定向测试通过并重新打包。不同轮次计数不累加。
+- Java：本机完整 549 项通过、零跳过；此后补齐 Shiro 精确入口、管理员诊断及证据过滤后，相关 31 项、最终 13 项定向测试通过并重新打包；最终远端全量 556 项通过、零跳过。不同轮次计数不累加。
 - Vue：482 项单元/组件、10 项契约、13 项 snapshot 通过；6 语言每种 1937 key 检查与生产构建通过。
 - Python：普通 AI worker 完整 66 项、realtime worker 完整 48 项通过。
 - Dev 运维完整 65 项及 CI 数据库准备 3 项通过。
@@ -67,7 +67,7 @@ Dev 使用原 MySQL 和 Redis。只追加 `agent-tools` 和 `ai-provider-request
 | 旧聊天历史 | 25 | 25 | 原 25 行逐字节一致 |
 | 统一消息 | 35 | 37 | 原 35 行逐字节一致，新增 2 条技术验收消息 |
 
-变更前 SQL 备份 SHA-256：`6156db534a342d30f63113bce500c179e4a39a1d53bff74bb45dcaa5f4da20a5`。备份及核对记录为私有文件，位于 `work/server-agent-tools-20261101/`；核对结果见 `dev-data-preservation.json`。最终测试 JAR 已原子放入 Dev runtime 并重建 API，AI/realtime worker 使用当前源码，原前端 18894 继续运行。
+变更前 SQL 备份 SHA-256：`6156db534a342d30f63113bce500c179e4a39a1d53bff74bb45dcaa5f4da20a5`。备份及核对记录为私有文件，位于 `work/server-agent-tools-20261101/`；核对结果见 `dev-data-preservation.json`。最终测试 JAR 已原子放入 Dev runtime 并重建 API，测试产物与运行副本 SHA-256 均为 `c8c6ee453b8583afa7bef6a6e4b7ae4ecaccdeaa36beb0356da5d28730ea2f20`；公共配置实际返回 code=0。AI/realtime worker 使用当前源码，原前端 18894 继续运行。
 
 ## 仍需开发或接入
 
@@ -80,4 +80,9 @@ Dev 使用原 MySQL 和 Redis。只追加 `agent-tools` 和 `ai-provider-request
 
 ## CI 与提交
 
-本批源码和文档在 Dev 整理提交；推送后的实际 CI 结果将在检查完成后补入，不以工作流文件存在代替通过。
+功能提交 `d6acb8b` 和 CI 解释器配置修复 `1bbb16d` 均已推送 `origin/Dev`。两条实际流水线已完成：
+
+- [Vue 3 CI](https://github.com/lonycn/xiaozhi-server/actions/runs/41296560321)：成功，482 项单元/组件、10 项契约、13 项 snapshot、国际化及构建。
+- [Dev 后端 CI](https://github.com/lonycn/xiaozhi-server/actions/runs/41296978563)：成功，Java 21 独立 MySQL 全量及 Python AI/realtime/Dev 两个 job 均通过。
+
+首轮后端 CI 中 Java 全量 556 项已通过，但 Dev 运维测试默认寻找本机 `.venv`，Linux runner 不具备该路径；修复为显式指定已安装依赖的 Python 后，后端完整流水线复验成功。未更改业务逻辑或数据库来适应 CI。

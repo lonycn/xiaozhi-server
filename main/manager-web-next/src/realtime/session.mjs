@@ -2,18 +2,28 @@ import {base64Bytes,bytesBase64} from './pcm.mjs';
 import {createBrowserCapture,audioContext} from './browserMedia.mjs';
 import {createPcmPlayback} from './playback.mjs';
 export const REALTIME_TERMINAL=new Set(['ended','failed','expired','canceled']);
-export function realtimeErrorKey(error){const code=error?.code||error?.message;if(error?.name==='NotAllowedError'||error?.name==='SecurityError')return 'realtime.permission';if(error?.status===404)return 'realtime.unavailable';if(error?.status===401||error?.status===403)return 'realtime.denied';if(code==='AUDIO_UNAVAILABLE')return 'realtime.audioUnavailable';if(error?.name==='NotFoundError')return 'realtime.deviceMissing';if(code==='OMNI_AUDIO_LIMIT')return 'ai.omniAudioLimit';if(code==='RESPONSE_IN_PROGRESS')return 'realtime.responseBusy';if(code==='INPUT_LIMIT')return 'realtime.inputLimit';if(code==='AUDIO_TURN_LIMIT')return 'realtime.turnLimit';if(['OUTPUT_LIMIT','FRAME_LIMIT','BACKPRESSURE'].includes(code))return 'realtime.resourceLimit';if(code==='TIMEOUT'||code==='PROVIDER_TIMEOUT')return 'realtime.timeout';if(code==='COMMAND_UNCONFIRMED')return 'realtime.unconfirmed';if(error?.status===409||code==='REALTIME_EPOCH_CHANGED')return 'realtime.changed';return 'realtime.failed';}
+export function realtimeErrorKey(error){const code=error?.code||error?.message;if(error?.name==='NotAllowedError'||error?.name==='SecurityError')return 'realtime.permission';if(error?.status===404)return 'realtime.unavailable';if(error?.status===401||error?.status===403)return 'realtime.denied';if(code==='AUDIO_UNAVAILABLE')return 'realtime.audioUnavailable';if(error?.name==='NotFoundError')return 'realtime.deviceMissing';if(code==='OMNI_AUDIO_LIMIT')return 'ai.omniAudioLimit';if(code==='SESSION_LIMIT')return 'realtime.sessionLimit';if(code==='NETWORK_UNAVAILABLE')return 'realtime.networkUnavailable';if(['SOCKET_ERROR','SOCKET_CLOSED','CLIENT_DISCONNECTED','CONNECTION_TIMEOUT'].includes(code))return 'realtime.connectionLost';if(code==='RESPONSE_IN_PROGRESS')return 'realtime.responseBusy';if(code==='INPUT_LIMIT')return 'realtime.inputLimit';if(code==='AUDIO_TURN_LIMIT')return 'realtime.turnLimit';if(['OUTPUT_LIMIT','FRAME_LIMIT','BACKPRESSURE'].includes(code))return 'realtime.resourceLimit';if(code==='TIMEOUT'||code==='PROVIDER_TIMEOUT')return 'realtime.timeout';if(code==='COMMAND_UNCONFIRMED')return 'realtime.unconfirmed';if(error?.status===409||code==='REALTIME_EPOCH_CHANGED')return 'realtime.changed';return 'realtime.failed';}
 /** A separate AI provider lifecycle; never reuse a human RTC room or JWT. */
-export function createRealtimeSession({client,changed=()=>{},history=()=>{},socketFactory=url=>new WebSocket(url),captureFactory=createBrowserCapture,playbackFactory=()=>createPcmPlayback(audioContext()),clock=()=>Date.now()}){
- let state={session:null,status:'idle',error:'',responseId:null,messageId:null,transcript:'',injections:[],cameraSampling:false,turnSeconds:0,turnDetectionMode:'manual',listening:false,listeningPending:false,listeningRequested:false,speechActive:false};
- let generation=0,disposed=false,controller=new AbortController(),socket=null,capture=null,playback=null,recording=false,turnBytes=0,turnStarted=0,readyTimer=null,turnTimer=null,commandTimer=null,busy=false,lastImageAt=0,commandId=null,cameraStopped=false,listeningRequested=false,listeningTimer=null,captureReady=false,listeningAcknowledged=false;const finishedResponses=new Set();
+export function createRealtimeSession({client,changed=()=>{},history=()=>{},socketFactory=url=>new WebSocket(url),captureFactory=createBrowserCapture,playbackFactory=()=>createPcmPlayback(audioContext()),clock=()=>Date.now(),networkTarget=globalThis}){
+ let state={session:null,status:'idle',error:'',responseId:null,messageId:null,transcript:'',injections:[],cameraSampling:false,turnSeconds:0,turnDetectionMode:'manual',listening:false,listeningPending:false,listeningRequested:false,speechActive:false,connection:'idle',networkAvailable:globalThis.navigator?.onLine!==false};
+ let generation=0,disposed=false,controller=new AbortController(),socket=null,capture=null,playback=null,recording=false,turnBytes=0,turnStarted=0,readyTimer=null,turnTimer=null,commandTimer=null,busy=false,lastImageAt=0,commandId=null,cameraStopped=false,listeningRequested=false,listeningTimer=null,captureReady=false,listeningAcknowledged=false;let heartbeatTimer=null,pongTimer=null,pendingPing=null,pingSequence=0,refreshing=false,pollFailures=0;const finishedResponses=new Set();
  const emit=()=>changed({...state,injections:[...state.injections]});
  const fresh=version=>!disposed&&version===generation&&!controller.signal.aborted;
- function clearTimers(){clearTimeout(readyTimer);clearInterval(turnTimer);clearTimeout(commandTimer);clearTimeout(listeningTimer);}
+ function clearTimers(){clearTimeout(readyTimer);clearInterval(turnTimer);clearTimeout(commandTimer);clearTimeout(listeningTimer);clearInterval(heartbeatTimer);clearTimeout(pongTimer);pendingPing=null;}
  function stopInput(){recording=false;listeningRequested=false;state.listeningRequested=false;captureReady=false;listeningAcknowledged=false;state.listeningPending=false;clearTimeout(listeningTimer);state.listening=false;state.speechActive=false;clearInterval(turnTimer);state.cameraSampling=false;const resource=capture;capture=null;resource?.stop().catch(()=>{});}
- function release({keepTransport=false}={}){++generation;controller.abort();controller=new AbortController();clearTimers();stopInput();playback?.close().catch(()=>{});playback=null;const old=socket;if(!keepTransport)socket=null;if(old){old.onopen=null;old.onmessage=null;old.onerror=null;old.onclose=null;if(!keepTransport)old.close(1000);}busy=false;}
- function fail(error){release();state={...state,status:'failed',error:realtimeErrorKey(error)};emit();}
+ function release({keepTransport=false}={}){++generation;controller.abort();controller=new AbortController();clearTimers();stopInput();playback?.close().catch(()=>{});playback=null;const old=socket;if(!keepTransport)socket=null;if(old){old.onopen=null;old.onmessage=null;old.onerror=null;old.onclose=null;if(!keepTransport)old.close(1000);}busy=false;refreshing=false;pollFailures=0;}
+ function fail(error){release();state={...state,status:'failed',connection:'disconnected',responseId:null,messageId:null,error:realtimeErrorKey(error)};emit();}
  function send(frame){if(!socket||socket.readyState!==1)throw new Error('SOCKET_CLOSED');if(socket.bufferedAmount>256000)throw new Error('BACKPRESSURE');socket.send(JSON.stringify(frame));}
+ function monitorConnection(frame,version){
+  if(frame.heartbeat_seconds===undefined&&frame.heartbeat_timeout_seconds===undefined)return;
+  const interval=frame.heartbeat_seconds,timeout=frame.heartbeat_timeout_seconds;
+  if(!Number.isInteger(interval)||interval<1||interval>5||!Number.isInteger(timeout)||timeout<4||timeout>10||timeout<=interval){fail(new Error('PROTOCOL_ERROR'));return;}
+  clearInterval(heartbeatTimer);clearTimeout(pongTimer);pendingPing=null;
+  heartbeatTimer=setInterval(()=>{if(!fresh(version)||pendingPing!==null)return;try{pendingPing=++pingSequence;send({type:'ping',id:pendingPing});pongTimer=setTimeout(()=>{if(fresh(version)&&pendingPing!==null)fail({code:'CONNECTION_TIMEOUT'});},timeout*1000);}catch(error){fail(error);}},interval*1000);
+ }
+ const offline=()=>{state.networkAvailable=false;if(socket||state.status==='connecting')fail({code:'NETWORK_UNAVAILABLE'});else emit();};
+ const online=()=>{state.networkAvailable=true;if(state.status==='failed'&&['realtime.networkUnavailable','realtime.connectionLost'].includes(state.error))state.error='realtime.networkRestored';emit();};
+ networkTarget?.addEventListener?.('offline',offline);networkTarget?.addEventListener?.('online',online);
  function mergeInjections(items){for(const item of items){const index=state.injections.findIndex(old=>old.id===item.id);if(index<0)state.injections.push(item);else if(!['acknowledged','failed'].includes(state.injections[index].status)||item.status===state.injections[index].status)state.injections[index]={...state.injections[index],...item};}}
  function identity(frame){return state.session&&frame.session_id===state.session.id&&frame.control_epoch===state.session.control_epoch;}
  function onFrame(frame,version){
@@ -27,7 +37,8 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
    case 'listening.stopped':clearTimeout(listeningTimer);state.listeningPending=false;state.listening=false;state.speechActive=false;state.turnSeconds=0;break;
    case 'speech.started':playback?.clear();if(!listeningRequested)break;state.speechActive=true;turnStarted=clock();state.turnSeconds=0;break;
    case 'speech.stopped':state.speechActive=false;state.turnSeconds=0;break;
-   case 'ready':clearTimeout(readyTimer);state.session={...state.session,status:'active'};state.status='active';break;
+   case 'pong':if(pendingPing!==null&&frame.id===pendingPing){pendingPing=null;clearTimeout(pongTimer);state.connection=pollFailures?'degraded':'connected';}break;
+   case 'ready':clearTimeout(readyTimer);state.session={...state.session,status:'active'};state.status='active';state.connection='connected';monitorConnection(frame,version);break;
    case 'response.started':
     if(typeof frame.response_id!=='string'||typeof frame.message_id!=='string'||finishedResponses.has(frame.response_id)||state.status==='interrupting')return;
     if(state.turnDetectionMode!=='server_vad')stopInput();state.responseId=frame.response_id;state.messageId=frame.message_id;state.transcript='';state.status='responding';commandId=null;playback?.response(frame.response_id);history();break;
@@ -51,7 +62,7 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
     playback?.clear();stopInput();
     if(frame.code==='RESPONSE_IN_PROGRESS'){state.error=realtimeErrorKey(frame);break;}
     fail({code:frame.code});return;
-   case 'ended':{const status=REALTIME_TERMINAL.has(frame.status)?frame.status:'ended';release();state.session={...state.session,status};state.status=status;history();break;}
+   case 'ended':{const status=REALTIME_TERMINAL.has(frame.status)?frame.status:'ended';release();state.session={...state.session,status};state.status=status;state.connection='disconnected';state.responseId=null;state.messageId=null;history();break;}
    default:return;
   }
   emit();
@@ -65,7 +76,7 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
   snapshot:()=>({...state,injections:[...state.injections]}),
   async discover(conversationId){const version=generation;try{const session=await client.current(conversationId,controller.signal);if(!fresh(version))return;state.session=session;state.turnDetectionMode=session?.turn_detection_mode||'manual';state.status=session&&!REALTIME_TERMINAL.has(session.status)?'existing':'idle';state.error='';emit();}catch(error){if(fresh(version)&&error.name!=='AbortError'){state.status=error.status===404?'unavailable':'failed';state.error=realtimeErrorKey(error);emit();}}},
   async start(conversationId,consent,clientId,turnDetectionMode='manual'){
-   if(busy||disposed||!consent.microphone||!['manual','server_vad'].includes(turnDetectionMode))return;release();cameraStopped=false;finishedResponses.clear();const version=generation;busy=true;state={...state,session:null,status:'connecting',error:'',transcript:'',responseId:null,messageId:null,injections:[],turnDetectionMode,listening:false,listeningPending:false,listeningRequested:false,speechActive:false};emit();
+   if(busy||disposed||!consent.microphone||!['manual','server_vad'].includes(turnDetectionMode))return;release();cameraStopped=false;finishedResponses.clear();const version=generation;busy=true;state={...state,session:null,status:'connecting',error:'',transcript:'',responseId:null,messageId:null,injections:[],turnDetectionMode,listening:false,listeningPending:false,listeningRequested:false,speechActive:false,connection:'connecting'};emit();
    try{
     // Resume playback within this explicit user action; microphone permission is a
     // separate manual-recording action after the real provider ready event.
@@ -119,20 +130,42 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
    try{const command=await client.interrupt(state.session.id,{expected_epoch:state.session.control_epoch,client_command_id:commandId,response_id:state.responseId},controller.signal);if(!fresh(version))return;if(command.status==='failed'){fail({code:command.error_code||'COMMAND_UNCONFIRMED'});return;}if(command.status==='acknowledged'&&state.status==='interrupting'){finishedResponses.add(state.responseId);state.responseId=null;state.status='active';history();emit();return;}commandTimer=setTimeout(()=>{if(fresh(version)&&state.status==='interrupting')fail({code:'COMMAND_UNCONFIRMED'});},15000);}
    catch(error){if(fresh(version)&&error.name!=='AbortError')fail(error);}
   },
-  async refresh(){if(!state.session||disposed||state.status==='ending')return;const version=generation;try{const next=await client.get(state.session.id,controller.signal);if(!fresh(version))return;if(next.control_epoch!==state.session.control_epoch||(next.turn_detection_mode||'manual')!==state.turnDetectionMode||REALTIME_TERMINAL.has(next.status)){const changedEpoch=next.control_epoch!==state.session.control_epoch;release();state.session=next;state.status=REALTIME_TERMINAL.has(next.status)?next.status:'failed';if(changedEpoch&&!REALTIME_TERMINAL.has(next.status))state.error='realtime.changed';emit();return;}state.session=next;await pollInjections(version);if(fresh(version))emit();}catch(error){if(fresh(version)&&error.name!=='AbortError')fail(error);}},
+  async refresh(){
+   if(!state.session||disposed||state.status==='ending'||refreshing)return;
+   const version=generation;refreshing=true;
+   const activeTransport=()=>!!socket&&socket.readyState===1&&!['failed','existing','ending'].includes(state.status)&&!REALTIME_TERMINAL.has(state.status);
+   try{
+    const next=await client.get(state.session.id,controller.signal);if(!fresh(version))return;
+    if(next.control_epoch!==state.session.control_epoch||(next.turn_detection_mode||'manual')!==state.turnDetectionMode||REALTIME_TERMINAL.has(next.status)){
+     const changedEpoch=next.control_epoch!==state.session.control_epoch;release();state.session=next;state.status=REALTIME_TERMINAL.has(next.status)?next.status:'failed';state.connection='disconnected';state.responseId=null;state.messageId=null;
+     if(next.error_code)state.error=realtimeErrorKey({code:next.error_code});else if(changedEpoch&&!REALTIME_TERMINAL.has(next.status))state.error='realtime.changed';emit();return;
+    }
+    state.session=next;await pollInjections(version);if(fresh(version)){pollFailures=0;if(activeTransport()&&state.connection==='degraded'){state.connection='connected';state.error='';}emit();}
+   }catch(error){
+    if(fresh(version)&&error.name!=='AbortError'){
+     if([401,403,404,409,410].includes(error.status))fail(error);
+     else if(activeTransport()){if(++pollFailures>=3)fail(error);else{state.connection='degraded';state.error='realtime.networkSlow';emit();}}
+    }
+   }finally{if(fresh(version))refreshing=false;}
+  },
+  /** End the old capability before offering a newly consented session. No media is replayed. */
+  async recover(){
+   if(disposed||busy||!state.session||!['failed','existing'].includes(state.status))return false;
+   await this.end();return !disposed&&REALTIME_TERMINAL.has(state.session?.status);
+  },
   async end(){
    if(disposed||state.status==='ending')return;
    const session=state.session;
    // Invalidate all old API/device/socket callbacks and stop local media now.
    // Keep the worker connection alive until Java has durably ended the session,
    // otherwise CLIENT_DISCONNECTED can win the canonical terminal-state race.
-   release({keepTransport:!!session});if(!session){state.status='ended';emit();return;}const version=generation;busy=true;state.status='ending';state.error='';emit();
+   release({keepTransport:!!session});if(!session){state.status='ended';state.connection='disconnected';emit();return;}const version=generation;busy=true;state.status='ending';state.error='';emit();
    try{
     const ended=await client.end(session.id,{expected_epoch:session.control_epoch},controller.signal);if(!fresh(version))return;
     if(ended?.id!==session.id||!REALTIME_TERMINAL.has(ended.status))throw new Error('COMMAND_UNCONFIRMED');
-    release();state.session=ended;state.status=ended.status;history();emit();
-   }catch(error){if(fresh(version)){release();state.status='failed';state.error=realtimeErrorKey(error);emit();}}
+    release();state.session=ended;state.status=ended.status;state.connection='disconnected';state.responseId=null;state.messageId=null;history();emit();
+   }catch(error){if(fresh(version)){release();state.status='failed';state.connection='disconnected';state.error=realtimeErrorKey(error);emit();}}
   },
-  dispose(){disposed=true;release();},
+  dispose(){disposed=true;networkTarget?.removeEventListener?.('offline',offline);networkTarget?.removeEventListener?.('online',online);release();},
  };
 }

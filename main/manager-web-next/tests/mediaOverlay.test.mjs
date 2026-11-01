@@ -1,7 +1,7 @@
 import {mount,flushPromises} from '@vue/test-utils';
 import {describe,it,expect,vi,beforeEach,afterEach} from 'vitest';
 import Overlay from '../src/components/MediaSessionOverlay.vue';
-const api=vi.hoisted(()=>({create:vi.fn(),invitations:vi.fn(),current:vi.fn(),get:vi.fn(),accept:vi.fn(),reject:vi.fn(),token:vi.fn(),ready:vi.fn(),end:vi.fn(),experts:vi.fn(),capture:vi.fn()}));
+const api=vi.hoisted(()=>({create:vi.fn(),invitations:vi.fn(),current:vi.fn(),get:vi.fn(),accept:vi.fn(),reject:vi.fn(),token:vi.fn(),ready:vi.fn(),end:vi.fn(),experts:vi.fn(),capture:vi.fn(),transfer:vi.fn()}));
 vi.mock('../src/apis/module/media',()=>({default:api}));
 const attachment=vi.hoisted(()=>({init:vi.fn(),upload:vi.fn(),complete:vi.fn(),get:vi.fn()}));
 vi.mock('../src/apis/module/attachment',()=>({default:attachment}));
@@ -54,6 +54,13 @@ describe('in-chat media consent and display',()=>{
  it('requires microphone consent, keeps camera optional, and passes exact choices on explicit accept',async()=>{mountOverlay();await flushPromises();const accepted=session({status:'connecting',control_epoch:2,participants:session().participants.map(p=>({...p,status:'accepted',consent:{microphone:true,camera:false,allow_snapshots:false}}))});api.accept.mockResolvedValue(accepted);api.get.mockResolvedValue(accepted);api.token.mockResolvedValue({session_id:'7',control_epoch:2,room_generation:1,server_url:'wss://m',participant_token:'private',publish_sources:['microphone']});await wrapper.find('input[type=checkbox]').setValue(true);await wrapper.findAll('button').find(button=>button.text()==='media.accept').trigger('click');await flushPromises();expect(api.accept.mock.calls[0][1].consent).toEqual({microphone:true,camera:false,allow_snapshots:false});expect(room.connect.mock.calls[0][2]).toEqual({microphone:true,camera:false});});
  it('retains mounted media elements while minimized and expanded',async()=>{mountOverlay();await flushPromises();const host=wrapper.find('.media-stage').element;const button=wrapper.find('button[aria-label="media.minimize"]');await button.trigger('click');expect(wrapper.find('.media-stage').element).toBe(host);await button.trigger('click');expect(wrapper.find('.media-stage').element).toBe(host);});
  it('does not render active when only server status is active but this browser is disconnected',async()=>{api.current.mockResolvedValue(session({status:'active'}));api.get.mockResolvedValue(session({status:'active'}));mountOverlay();await flushPromises();expect(wrapper.text()).toContain('media.locallyDisconnected');expect(wrapper.text()).not.toContain('media.status_active');});
+ it('shows a receive interruption instead of active and disables capture until current RTP recovers',async()=>{
+  const active=session({status:'active',participants:[{user_id:'u',role:'customer',room_generation:1,consent:{microphone:true,camera:true,allow_snapshots:true}},{user_id:'a',role:'agent',room_generation:1,consent:{microphone:true,camera:false}}]});
+  api.current.mockResolvedValue(active);api.get.mockResolvedValue(active);mountOverlay({staff:true,userId:'a'});await flushPromises();
+  wrapper.vm.state={...wrapper.vm.state,session:active,joined:true,localState:'connected',mediaStalled:true};wrapper.vm.hasVideo=true;await wrapper.vm.$nextTick();
+  expect(wrapper.text()).toContain('media.waitingForMedia');expect(wrapper.text()).not.toContain('media.status_active');expect(wrapper.vm.canCapture).toBe(false);
+  wrapper.vm.state={...wrapper.vm.state,mediaStalled:false};await wrapper.vm.$nextTick();expect(wrapper.text()).toContain('media.status_active');expect(wrapper.vm.canCapture).toBe(true);
+ });
  it('closes media and aborts pending discovery when the authenticated identity changes',async()=>{mountOverlay();await flushPromises();const signal=api.current.mock.calls[0][1];await wrapper.setProps({identity:'other:true',userId:'other'});expect(signal.aborted).toBe(true);expect(wrapper.vm.choice).toEqual({microphone:false,camera:false,allow_snapshots:false});});
  it('shows actual unavailable state for a disabled feature and never creates a synthetic call',async()=>{api.invitations.mockRejectedValue(Object.assign(new Error('off'),{status:404}));mountOverlay();await flushPromises();expect(wrapper.text()).toContain('media.unavailable');expect(wrapper.find('.media-overlay').exists()).toBe(false);expect(wrapper.findAll('button').some(button=>button.text()==='media.invite')).toBe(false);});
 
@@ -68,5 +75,18 @@ describe('in-chat media consent and display',()=>{
   await wrapper.vm.capture();expect(attachment.upload).toHaveBeenCalledTimes(1);expect(api.capture).toHaveBeenCalledWith('7',{expected_epoch:3,room_generation:1,source_attachment_id:'9',client_frame_id:expect.any(String),captured_at:expect.any(String)},expect.any(AbortSignal));expect(wrapper.emitted('frame')[0][0]).toMatchObject({frame:{id:'11'},conversationId:'c'});expect(wrapper.text()).toContain('media.captureNote');
  });
  it('does not capture or upload when the customer has not consented to saved frames',async()=>{mountOverlay({staff:true,userId:'a'});await flushPromises();await wrapper.vm.capture();expect(attachment.init).not.toHaveBeenCalled();expect(api.capture).not.toHaveBeenCalled();});
+ it('creates a new nonempty transfer intent when the same expert is selected after an earlier request completed',async()=>{
+  const active=session({status:'active'});api.current.mockResolvedValue(active);api.get.mockResolvedValue(active);api.transfer.mockResolvedValue({});
+  mountOverlay({staff:true,userId:'a'});await flushPromises();wrapper.vm.targetId='72';await wrapper.vm.startTransfer();
+  const first=api.transfer.mock.calls[0][1].client_transfer_id;expect(first).toMatch(/^[a-f0-9-]{36}$/);
+  wrapper.vm.targetId='72';await wrapper.vm.startTransfer();const second=api.transfer.mock.calls[1][1].client_transfer_id;
+  expect(second).toMatch(/^[a-f0-9-]{36}$/);expect(second).not.toBe(first);
+ });
+ it('keeps the transfer intent when its response is lost and retries the same expert safely',async()=>{
+  const active=session({status:'active'});api.current.mockResolvedValue(active);api.get.mockResolvedValue(active);api.transfer.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce({});
+  mountOverlay({staff:true,userId:'a'});await flushPromises();wrapper.vm.targetId='72';await wrapper.vm.startTransfer();
+  const first=api.transfer.mock.calls[0][1].client_transfer_id;expect(wrapper.vm.state.error).toBe('media.failed');
+  await wrapper.vm.startTransfer();expect(api.transfer.mock.calls[1][1].client_transfer_id).toBe(first);expect(wrapper.vm.targetId).toBe('');
+ });
  it('keeps hangup available during pending browser permissions',async()=>{mountOverlay();await flushPromises();wrapper.vm.state={...wrapper.vm.state,busy:true};await wrapper.vm.$nextTick();expect(wrapper.find('.media-hangup').attributes('disabled')).toBeUndefined();});
 });

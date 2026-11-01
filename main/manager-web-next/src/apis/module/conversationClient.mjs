@@ -1,6 +1,6 @@
 /** Async API client with explicit HTTP errors and injectable transport for tests. */
 export function createConversationClient({ baseUrl, getToken, onUnauthorized, fetchImpl = globalThis.fetch, errorMessage }) {
-  async function request(path = '', options = {}) {
+  async function request(path = '', options = {}, { runsNotFound = false } = {}) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (options.signal?.aborted) abort();
@@ -18,6 +18,9 @@ export function createConversationClient({ baseUrl, getToken, onUnauthorized, fe
         throw new Error('登录已过期，请重新登录');
       }
       if (!response.ok || body?.code !== 0) {
+        // A disabled AI runs route can be wrapped as HTTP 200 with application 404.
+        // Restrict this compatibility case to the runs list; never mask other failures.
+        const status = runsNotFound && response.status === 200 && body?.code === 404 ? 404 : response.status;
         if (errorMessage && /\/(handoff|resume-ai)$/.test(path)) throw Object.assign(new Error(errorMessage(body?.msg, response.status)), { code: body?.msg, status: response.status });
         const messages = {
           CLIENT_MESSAGE_ID_REUSED: '消息编号冲突，请刷新后再试',
@@ -26,7 +29,7 @@ export function createConversationClient({ baseUrl, getToken, onUnauthorized, fe
         };
         throw Object.assign(new Error(messages[body?.msg] || (response.status === 404 && (!path || path.startsWith('?'))
           ? '当前服务尚未启用统一对话，请检查开发环境配置'
-          : body?.msg || '请求未成功，请稍后重试')), { status: response.status });
+          : body?.msg || '请求未成功，请稍后重试')), { status });
       }
       return body.data;
     } catch (error) {
@@ -38,7 +41,7 @@ export function createConversationClient({ baseUrl, getToken, onUnauthorized, fe
     }
   }
   return {
-    runs: (id, signal) => request(`/${encodeURIComponent(id)}/runs?before=0&limit=50`, { signal }),
+    runs: (id, signal) => request(`/${encodeURIComponent(id)}/runs?before=0&limit=50`, { signal }, { runsNotFound: true }),
     runAction: (id, runId, action, signal) => request(`/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/${action}`, { method: 'POST', body: '{}', signal }),
     stream: (id, after, signal) => fetchImpl(`${baseUrl.replace(/\/$/, '')}/api/v1/ai/conversations/${encodeURIComponent(id)}/stream?after=${encodeURIComponent(after)}`, { headers: { Accept: 'text/event-stream', Authorization: `Bearer ${getToken() || ''}`, 'Last-Event-ID': String(after) }, signal }),
     detail: (id, signal) => request(`/${encodeURIComponent(id)}`, { signal }),

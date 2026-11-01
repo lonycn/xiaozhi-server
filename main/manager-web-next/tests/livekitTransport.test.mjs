@@ -1,10 +1,10 @@
 import {describe,it,expect,vi} from 'vitest';
 import {createRoomTransport} from '../src/media/livekitTransport.mjs';
-function harness(){
+function harness(options={}){
   const listeners=new Map(),local={trackPublications:new Map(),publishTrack:vi.fn(async()=>{}),unpublishTrack:vi.fn(async()=>{})};
   const room={state:'connected',localParticipant:{...local,sid:'self'},remoteParticipants:new Map(),on:vi.fn((name,callback)=>listeners.set(name,callback)),connect:vi.fn(async()=>{}),disconnect:vi.fn(async()=>{}),removeAllListeners:vi.fn(),startAudio:vi.fn(async()=>{})};
   const sdk={Room:class{constructor(){return room;}},RoomEvent:{TrackSubscribed:'track',TrackUnsubscribed:'untrack',ConnectionStateChanged:'state',Disconnected:'disconnected'},createLocalTracks:vi.fn(async()=>[{kind:'audio',stop:vi.fn()}])};
-  const onTrack=vi.fn(),onChange=vi.fn(),transport=createRoomTransport(sdk,{onChange,onTrack});
+  const onTrack=vi.fn(),onChange=vi.fn(),transport=createRoomTransport(sdk,{onChange,onTrack,...options});
   const track=(kind='audio')=>{const element=document.createElement(kind==='audio'?'audio':'video');element.play=vi.fn(async()=>{});return {kind,sid:`TR_${kind}`,isMuted:false,mediaStreamTrack:{readyState:'live'},attach:vi.fn(()=>element),detach:vi.fn(()=>[element]),getRTCStatsReport:vi.fn()};};
   return {room,sdk,listeners,transport,onTrack,onChange,track};
 }
@@ -37,4 +37,28 @@ describe('LiveKit transport device and receive evidence boundary',()=>{
   it('stops capture synchronously on close and does not mark reconnecting transport ready',async()=>{
     const h=harness(),track={stop:vi.fn()};h.sdk.createLocalTracks.mockResolvedValue([track]);await h.transport.connect('wss://test','private',{microphone:true,camera:false});h.room.state='reconnecting';h.listeners.get('state')();expect((await h.transport.evidence()).transport_ready).toBe(false);const pending=h.transport.close();expect(track.stop).toHaveBeenCalledTimes(1);await pending;expect(h.room.disconnect).toHaveBeenCalledWith(true);
   });
+  it('reports six seconds without fresh RTP and clears the diagnostic when packets return',async()=>{
+    let time=0,bytes=100;const h=harness({now:()=>time}),track=h.track();
+    h.room.remoteParticipants.set('peer',{sid:'peer',trackPublications:new Map([['track',{track}]])});track.getRTCStatsReport.mockImplementation(async()=>new Map([['inbound',{type:'inbound-rtp',bytesReceived:bytes}]]));
+    await h.transport.connect('wss://test','private',{microphone:false,camera:false});h.transport.setForeground(true);h.listeners.get('track')(track);await h.transport.evidence();
+    time=5999;await h.transport.evidence();expect(h.onChange).not.toHaveBeenCalledWith(expect.objectContaining({mediaStalled:true}));
+    time=6000;await h.transport.evidence();expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({connected:true,mediaStalled:true}));
+    time=6500;bytes=160;expect((await h.transport.evidence()).receiving_audio).toBe(true);expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({mediaStalled:false}));await h.transport.close();
+  });
+  it.each(['muted','paused','disabled','unsubscribed','backgroundVideo','hiddenDocument'])('does not label intentional %s as missing RTP and resets the recovery grace period',async mode=>{
+    let time=0;const hidden=vi.spyOn(document,'hidden','get').mockReturnValue(false);const h=harness({now:()=>time}),track=h.track(['backgroundVideo','hiddenDocument'].includes(mode)?'video':'audio'),publication={track};
+    h.room.remoteParticipants.set('peer',{sid:'peer',trackPublications:new Map([['track',publication]])});track.getRTCStatsReport.mockResolvedValue(new Map([['inbound',{type:'inbound-rtp',bytesReceived:100}]]));
+    await h.transport.connect('wss://test','private',{microphone:false,camera:false});h.transport.setForeground(true);h.listeners.get('track')(track);await h.transport.evidence();
+    if(mode==='muted')track.isMuted=true;if(mode==='paused')track.streamState='paused';if(mode==='disabled')publication.isEnabled=false;if(mode==='unsubscribed')publication.isSubscribed=false;if(mode==='backgroundVideo')h.transport.setForeground(false);if(mode==='hiddenDocument')hidden.mockReturnValue(true);
+    time=20000;await h.transport.evidence();expect(h.onChange).not.toHaveBeenCalledWith(expect.objectContaining({mediaStalled:true}));
+    track.isMuted=false;track.streamState='active';publication.isEnabled=true;publication.isSubscribed=true;hidden.mockReturnValue(false);h.transport.setForeground(true);await h.transport.evidence();time+=5999;await h.transport.evidence();expect(h.onChange).not.toHaveBeenCalledWith(expect.objectContaining({mediaStalled:true}));await h.transport.close();hidden.mockRestore();
+  });
+
+  it('clears a receive warning for remote mute and treats a counter reset as a fresh grace period',async()=>{
+    let time=0,bytes=100;const h=harness({now:()=>time}),track=h.track(),publication={track};h.room.remoteParticipants.set('peer',{sid:'peer',trackPublications:new Map([['track',publication]])});track.getRTCStatsReport.mockImplementation(async()=>new Map([['inbound',{type:'inbound-rtp',bytesReceived:bytes}]]));
+    await h.transport.connect('wss://test','private',{microphone:false,camera:false});h.listeners.get('track')(track);await h.transport.evidence();time=6000;await h.transport.evidence();expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({mediaStalled:true}));
+    track.isMuted=true;await h.transport.evidence();expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({mediaStalled:false}));track.isMuted=false;await h.transport.evidence();time=12000;await h.transport.evidence();expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({mediaStalled:true}));
+    time=12500;bytes=1;expect((await h.transport.evidence()).receiving_audio).toBe(false);expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({mediaStalled:false}));await h.transport.close();
+  });
+
 });

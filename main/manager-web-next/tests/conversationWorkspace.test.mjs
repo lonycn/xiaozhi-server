@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Workspace from '../src/views/ConversationWorkspace.vue';
+import { createConversationClient } from '../src/apis/module/conversationClient.mjs';
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), messages: vi.fn(), send: vi.fn(), detail: vi.fn(), events: vi.fn(), handoff: vi.fn(), resume: vi.fn(), runs: vi.fn(), stream: vi.fn(), runAction: vi.fn() }));
 vi.mock('../src/apis/module/conversation', () => ({ default: api }));
 const support = vi.hoisted(() => ({ get: vi.fn(), action: vi.fn() }));
@@ -18,6 +19,29 @@ beforeEach(() => {
 afterEach(() => { if (wrapper.exists()) wrapper.unmount(); vi.useRealTimers(); });
 
 describe('conversation workspace', () => {
+  it('degrades the optional AI runs panel when the route returns an application 404', async () => {
+    const client = createConversationClient({ baseUrl:'/xiaozhi', getToken:()=>'', onUnauthorized:vi.fn(),
+      fetchImpl:vi.fn().mockResolvedValue({ status:200, ok:true, json:async()=>({ code:404, msg:'资源不存在' }) }) });
+    api.runs.mockImplementation(client.runs);
+    api.messages.mockResolvedValue({ items:[], next_cursor:'0', has_more:false });
+    await vm.selectConversation({ id:'c' });
+    expect(vm.aiAvailable).toBe(false);
+    expect(vm.error).toBe('');
+    expect(vm.selected.id).toBe('c');
+  });
+
+  it.each([
+    ['HTTP 500', () => Promise.resolve({ status:500, ok:false, json:async()=>({code:500,msg:'server failure'}) }), 'server failure'],
+    ['network failure', () => Promise.reject(new TypeError('network failure')), 'network failure'],
+    ['application 403', () => Promise.resolve({ status:200, ok:true, json:async()=>({code:403,msg:'access denied'}) }), 'access denied'],
+  ])('preserves %s while loading optional AI runs', async (name, fetchImpl, message) => {
+    const client = createConversationClient({ baseUrl:'/xiaozhi', getToken:()=>'', onUnauthorized:vi.fn(), fetchImpl });
+    api.runs.mockImplementation(client.runs);
+    api.messages.mockResolvedValue({ items:[], next_cursor:'0', has_more:false });
+    await vm.selectConversation({ id:'c' });
+    expect(vm.error).toContain(message);
+  });
+
   it('retains failed content and retries with the same idempotency identifier', async () => {
     vm.selected = { id: 'one' }; vm.draft = '压缩机有异响';
     api.send.mockRejectedValueOnce(new Error('连接中断')).mockResolvedValueOnce({ id: 'saved', parts: [] });

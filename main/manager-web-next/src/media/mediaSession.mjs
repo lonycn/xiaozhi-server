@@ -13,12 +13,12 @@ export function mediaErrorKey(error) {
 }
 
 /** Owns ephemeral tokens, generation fences and both rooms. No persisted credentials. */
-export function createMediaSession({ client, userId, changed = () => {}, onTrack = () => {}, transportFactory = createLiveKitTransport }) {
+export function createMediaSession({ client, userId, changed = () => {}, onTrack = () => {}, onLocalTrack = () => {}, transportFactory = createLiveKitTransport }) {
   let session = null, version = 0, controller = new AbortController(), consent = null, joined = false, disposed = false;
   const rooms = new Map(), states = new Map();
   let microphone = false, camera = false, error = '', busy = false;
   const me = (generation = session?.current_generation) => session?.participants?.find(member => String(member.user_id) === String(userId()) && member.room_generation === generation);
-  const snapshot = () => ({ session, joined, microphone, camera, error, busy, localState: states.get(session?.current_generation)?.state || 'disconnected', playbackBlocked: !!states.get(session?.current_generation)?.playbackBlocked, hasVideo: !!states.get(session?.current_generation)?.hasVideo, mediaStalled: !!states.get(session?.current_generation)?.mediaStalled });
+  const snapshot = () => ({ session, joined, microphone, camera, error, busy, localState: states.get(session?.current_generation)?.state || 'disconnected', playbackBlocked: !!states.get(session?.current_generation)?.playbackBlocked, hasVideo: !!states.get(session?.current_generation)?.hasVideo, hasLocalVideo: !!states.get(session?.current_generation)?.hasLocalVideo, mediaStalled: !!states.get(session?.current_generation)?.mediaStalled });
   const emit = () => changed(snapshot());
   const fresh = epoch => !disposed && epoch === version && !controller.signal.aborted;
   function closeGeneration(generation) { const entry = rooms.get(generation); rooms.delete(generation); states.delete(generation); if (entry) return entry.close().catch(() => {}); }
@@ -56,7 +56,7 @@ export function createMediaSession({ client, userId, changed = () => {}, onTrack
     const token = await client.token(id, { expected_epoch: session.control_epoch, room_generation: generation }, controller.signal);
     if (!fresh(epoch) || session?.id !== id) return;
     if (token.session_id !== id || token.room_generation !== generation || token.control_epoch !== session.control_epoch || !token.server_url || !token.participant_token || !token.publish_sources?.includes('microphone')) throw new Error('INVALID_MEDIA_TOKEN');
-    const room = await transportFactory({ onChange: state => { if (fresh(epoch) && rooms.get(generation) === room) { states.set(generation, { ...states.get(generation), ...state }); emit(); } }, onTrack: (element, track) => { if (fresh(epoch)) onTrack(element, track, generation); else element.remove(); } });
+    const room = await transportFactory({ onChange: state => { if (fresh(epoch) && rooms.get(generation) === room) { states.set(generation, { ...states.get(generation), ...state }); emit(); } }, onTrack: (element, track) => { if (fresh(epoch)) onTrack(element, track, generation); else element.remove(); }, onLocalTrack: (element, track) => { if (fresh(epoch)) onLocalTrack(element, track, generation); else element.remove(); } });
     if (!fresh(epoch)) { await room.close(); return; }
     rooms.set(generation, room); room.setForeground(generation === session.current_generation);
     try {

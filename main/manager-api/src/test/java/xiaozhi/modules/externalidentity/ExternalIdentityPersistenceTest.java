@@ -37,8 +37,8 @@ class ExternalIdentityPersistenceTest {
     static final byte[] KEY=ExternalProtocolTest.KEY;
     static final String KEY_ID=ExternalProtocolTest.KEY_ID,ISSUER=ExternalProtocolTest.ISSUER;
     static String keys(){return "{\""+KEY_ID+"\":{\"issuer\":\""+ISSUER+"\",\"secret_b64\":\""+Base64.getEncoder().encodeToString(KEY)+"\"}}";}
-    @BeforeAll static void initialize()throws Exception {
-        String url=System.getenv("EXTERNAL_TEST_JDBC_URL");
+    @BeforeAll static void initialize()throws Exception { initialize(System.getenv("EXTERNAL_TEST_JDBC_URL")); }
+    static void initialize(String url)throws Exception {
         if(!url.matches("jdbc:mysql://127\\.0\\.0\\.1:34776/xiaozhi_external_test_[a-z0-9_]+(\\?.*)?"))throw new IllegalArgumentException("Requires new loopback xiaozhi_external_test_* schema on34776");
         createFreshSchema(url);
         var source=new DriverManagerDataSource(url,"root",System.getenv("EXTERNAL_TEST_DB_PASSWORD"));db=new JdbcTemplate(source);

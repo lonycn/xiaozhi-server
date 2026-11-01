@@ -49,12 +49,12 @@ class AiExecutionPersistenceTest {
         jdbc.execute("CREATE TABLE ai_agent_chat_history(id BIGINT PRIMARY KEY,content VARCHAR(100))");
         jdbc.update("INSERT INTO sys_user VALUES(1,1,1,'isolated-admin')");
         jdbc.update("INSERT INTO ai_agent_chat_history VALUES(1,'legacy-ai-sentinel')");
-        for (String path:List.of("conversation","support","ai-execution")) {
+        for (String path:List.of("conversation","support","ai-execution","ai-provider-request-usage")) {
             try(var connection=source.getConnection();var migration=new Liquibase("db/changelog/"+path+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))) {
                 migration.update(new Contexts());migration.update(new Contexts());
             }
         }
-        assertEquals(3,jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
+        assertEquals(4,jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
     }
     @BeforeEach void services() {
         owner=ids.getAndAdd(3);staff=owner+1;outsider=owner+2;
@@ -80,6 +80,31 @@ class AiExecutionPersistenceTest {
     int error(Runnable work) {return assertThrows(ConversationProblem.class,work::run).status();}
     long number(String sql,Object...args) {return jdbc.queryForObject(sql,Long.class,args);}
     void expire(Task task) {jdbc.update("UPDATE ai_run SET lease_expires_at=DATE_SUB(CURRENT_TIMESTAMP(3),INTERVAL 1 MINUTE) WHERE id=?",task.runId());}
+
+    @Test void successfulToolContinuationPersistsEveryObservedProviderRequest() {
+        String id=conversation();conversations.send(owner,id,text("usage-success","hello"));
+        Task task=ai.claim(new Claim("usage-worker"));
+        var rounds=List.of(new ProviderRequest(1,"provider-first",new Usage(2L,3L,5L),"tool_calls"),
+                new ProviderRequest(2,"provider-second",new Usage(7L,11L,18L),"stop"));
+        ai.complete(task.runId(),new Complete(task.leaseToken(),0L,"stop",new Usage(9L,14L,23L),"provider-second",rounds,1));
+        assertEquals(2,number("SELECT COUNT(*) FROM ai_provider_request_usage WHERE run_id=?",task.runId()));
+        assertEquals(23,number("SELECT total_tokens FROM ai_model_usage WHERE run_id=?",task.runId()));
+        assertEquals("completed",run(id).status());
+    }
+    @Test void failedContinuationRetainsKnownRoundsWithoutInventingAggregateUsage() {
+        String id=conversation();conversations.send(owner,id,text("usage-failed","hello"));Task task=ai.claim(new Claim("usage-worker"));
+        ai.fail(task.runId(),new Fail(task.leaseToken(),"PROVIDER_TIMEOUT",null,List.of(
+                new ProviderRequest(1,"observed",new Usage(2L,3L,5L),"tool_calls"),new ProviderRequest(2,null,null,null)),1));
+        assertEquals(2,number("SELECT COUNT(*) FROM ai_provider_request_usage WHERE run_id=?",task.runId()));
+        assertEquals(1,number("SELECT COUNT(*) FROM ai_provider_request_usage WHERE run_id=? AND total_tokens IS NULL",task.runId()));
+        assertEquals(0,number("SELECT COUNT(*) FROM ai_model_usage WHERE run_id=?",task.runId()));
+        assertNull(run(id).usage());
+    }
+    @Test void unresolvedToolProposalCannotBecomeTerminalAssistantCompletion() {
+        String id=conversation();conversations.send(owner,id,text("bad-terminal","hello"));Task task=ai.claim(new Claim("usage-worker"));
+        assertEquals(400,error(()->ai.complete(task.runId(),new Complete(task.leaseToken(),0L,"tool_calls",null,null))));
+        assertEquals("running",run(id).status());
+    }
 
     @Test void streamsOneDurableMessageAndRealUsageWithIdempotentLastChunk() {
         String id=conversation();var input=conversations.send(owner,id,text("question","isolated question"));

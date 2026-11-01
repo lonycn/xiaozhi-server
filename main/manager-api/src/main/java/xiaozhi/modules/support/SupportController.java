@@ -75,6 +75,10 @@ public class SupportController {
     public Result<Request> resolve(@PathVariable String id, @RequestBody(required=false) JsonNode body) {
         return ok(service.resolve(SecurityUser.getUserId(),id,end(body)));
     }
+    @PostMapping("/support/requests/{id}/end")
+    public Result<Request> endSupport(@PathVariable String id, @RequestBody(required=false) JsonNode body) {
+        return ok(service.endByOwner(SecurityUser.getUserId(),id,end(body)));
+    }
     @PostMapping("/support/requests/{id}/cancel")
     public Result<Request> cancel(@PathVariable String id, @RequestBody(required=false) JsonNode body) {
         return ok(service.cancel(SecurityUser.getUserId(),id,end(body)));

@@ -3,6 +3,7 @@ import asyncio
 import websockets
 from .config import MODEL
 from .control import Fault
+from .tool_contract import capability, require_disabled
 
 
 def provider_error(event):
@@ -37,7 +38,12 @@ class Provider:
             raise Fault('PROVIDER_UNAVAILABLE') from None
 
     @staticmethod
-    def session_update(turn_detection_mode="manual"):
+    def tool_capability():
+        return capability()
+
+    @staticmethod
+    def session_update(turn_detection_mode="manual", tools=None):
+        require_disabled(tools)
         return dict(type='session.update', session={
             'modalities': ['text', 'audio'], 'turn_detection':
                 {'type': 'server_vad', 'threshold': 0.5, 'silence_duration_ms': 800}

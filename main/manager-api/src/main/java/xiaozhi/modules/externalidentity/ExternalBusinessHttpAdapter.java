@@ -91,7 +91,7 @@ public final class ExternalBusinessHttpAdapter implements ExternalBusinessAdapte
         if(identities.keys().values().stream().anyMatch(key->MessageDigest.isEqual(key.secret(),source.secret())))
             throw failure("BUSINESS_CONFIGURATION_INVALID");
         Principal actor=identity.authenticateHash(original.tokenHash());
-        if(!actor.equals(original))
+        if(!ExternalIdentityService.sameBinding(original,actor))
             throw failure("BUSINESS_CONTEXT_INVALID");
         validateRead(actor,read);
         String session=sourceSession(actor);
@@ -115,7 +115,7 @@ public final class ExternalBusinessHttpAdapter implements ExternalBusinessAdapte
             .POST(HttpRequest.BodyPublishers.ofByteArray(raw)).build();
         HttpResponse<byte[]> response=transport.send(request);
         // A source/Bearer revoked while awaiting the upstream cannot release a late response.
-        if(!identity.authenticateHash(actor.tokenHash()).equals(actor))throw failure("BUSINESS_CONTEXT_INVALID");
+        if(!ExternalIdentityService.sameBinding(actor,identity.authenticateHash(actor.tokenHash())))throw failure("BUSINESS_CONTEXT_INVALID");
         Source current=settings.source(actor.issuer());
         if(!current.endpoint().equals(source.endpoint()) || !current.keyId().equals(source.keyId())
             || !MessageDigest.isEqual(current.secret(),source.secret()))throw failure("BUSINESS_CONFIGURATION_CHANGED");

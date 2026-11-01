@@ -1,0 +1,85 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611010300-agent-tools
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE agent_tool_definition (
+                name VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                version INT NOT NULL,
+                adapter VARCHAR(32) NOT NULL,
+                operation_class VARCHAR(16) NOT NULL DEFAULT 'read',
+                input_schema_json LONGTEXT NOT NULL,
+                output_schema_json LONGTEXT NOT NULL,
+                enabled TINYINT NOT NULL DEFAULT 1,
+                timeout_ms INT NOT NULL DEFAULT 5000,
+                max_result_bytes INT NOT NULL DEFAULT 32768,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                PRIMARY KEY(name,version),
+                CHECK(JSON_VALID(input_schema_json)), CHECK(JSON_VALID(output_schema_json)),
+                CHECK(operation_class='read'), CHECK(timeout_ms BETWEEN 1 AND 5000),
+                CHECK(max_result_bytes BETWEEN 1 AND 32768)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              INSERT INTO agent_tool_definition(name,version,adapter,input_schema_json,output_schema_json) VALUES
+                ('get_device',1,'external_business','{"type":"object","additionalProperties":false,"properties":{"device_id":{"type":"string","minLength":1,"maxLength":100,"pattern":"^[A-Za-z0-9_.:-]{1,100}$"}},"required":["device_id"]}','{"type":"object"}'),
+                ('get_work_order',1,'external_business','{"type":"object","additionalProperties":false,"properties":{"work_order_id":{"type":"string","minLength":1,"maxLength":100,"pattern":"^[A-Za-z0-9_.:-]{1,100}$"}},"required":["work_order_id"]}','{"type":"object"}'),
+                ('search_knowledge',1,'external_business','{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","minLength":1,"maxLength":1000}},"required":["query"]}','{"type":"object"}'),
+                ('server_capabilities',1,'technical_local','{"type":"object","additionalProperties":false,"properties":{},"required":[]}','{"type":"object"}');
+              CREATE TABLE agent_tool_run_binding (
+                run_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                conversation_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                owner_user_id BIGINT NOT NULL,
+                principal_json LONGTEXT NULL,
+                source_config_hash CHAR(64) NULL,
+                local_tools_allowed TINYINT NOT NULL DEFAULT 0,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                CONSTRAINT fk_agent_tool_binding_run FOREIGN KEY(run_id) REFERENCES ai_run(id),
+                CHECK(principal_json IS NULL OR JSON_VALID(principal_json))
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE agent_tool_call (
+                id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                run_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                run_attempt INT NOT NULL,
+                control_epoch BIGINT NOT NULL,
+                lease_hash CHAR(64) NOT NULL,
+                provider_call_id VARCHAR(200) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                tool_name VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                tool_version INT NOT NULL DEFAULT 1,
+                round_number INT NOT NULL,
+                arguments_json LONGTEXT NOT NULL,
+                arguments_hash CHAR(64) NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                result_json LONGTEXT NULL,
+                error_code VARCHAR(64) NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                UNIQUE KEY uk_agent_tool_provider(run_id,provider_call_id),
+                CONSTRAINT fk_agent_tool_call_run FOREIGN KEY(run_id) REFERENCES ai_run(id),
+                CONSTRAINT fk_agent_tool_definition FOREIGN KEY(tool_name,tool_version) REFERENCES agent_tool_definition(name,version),
+                CHECK(JSON_VALID(arguments_json)), CHECK(result_json IS NULL OR JSON_VALID(result_json)),
+                CHECK(status IN ('running','succeeded','failed','discarded')),
+                CHECK(round_number BETWEEN 1 AND 3)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE agent_tool_attempt (
+                id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                call_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                run_attempt INT NOT NULL,
+                control_epoch BIGINT NOT NULL,
+                lease_hash CHAR(64) NOT NULL,
+                started_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                CONSTRAINT fk_agent_tool_attempt_call FOREIGN KEY(call_id) REFERENCES agent_tool_call(id),
+                UNIQUE KEY uk_agent_tool_attempt(call_id,run_attempt,lease_hash)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE agent_tool_audit (
+                sequence BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                call_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                conversation_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                event_sequence BIGINT NOT NULL,
+                state VARCHAR(20) NOT NULL,
+                error_code VARCHAR(64) NULL,
+                elapsed_ms BIGINT NOT NULL DEFAULT 0,
+                result_hash CHAR(64) NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                CONSTRAINT fk_agent_tool_audit_call FOREIGN KEY(call_id) REFERENCES agent_tool_call(id),
+                INDEX idx_agent_tool_audit_history(conversation_id,event_sequence,sequence)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

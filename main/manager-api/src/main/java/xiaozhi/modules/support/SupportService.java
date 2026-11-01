@@ -279,6 +279,28 @@ public class SupportService {
         });
     }
 
+    /** End only this active request; retries cannot terminate a later handoff. */
+    public Request endByOwner(Long actor, String requestId, EndRequest body) {
+        long user = actor(actor);
+        String reason = reason(body);
+        Request hint = request(requestId, false);
+        return transactions.execute(tx -> {
+            Conv conv = conversation(hint.conversationId(), true);
+            owner(conv, user);
+            Request req = request(requestId, true);
+            if ("resolved".equals(req.status())) return req;
+            if (!"active".equals(req.status()) || !"HUMAN_ACTIVE".equals(conv.state()))
+                throw problem(409, "REQUEST_NOT_ACTIVE");
+            if (jdbc.queryForList("SELECT id FROM support_assignment WHERE request_id=? AND agent_user_id=? AND released_at IS NULL FOR UPDATE",
+                    requestId, req.assignedAgentUserId()).isEmpty()) throw problem(409, "ASSIGNMENT_CHANGED");
+            jdbc.update("UPDATE support_request SET status='resolved',ended_at=CURRENT_TIMESTAMP(3),end_reason=? WHERE id=?", reason, requestId);
+            state(req.conversationId(), "RESOLVED", false);
+            event(req.conversationId(), "support.resolved", requestId);
+            release(req);
+            return request(requestId, false);
+        });
+    }
+
     public Request cancel(Long actor, String requestId, EndRequest body) {
         long user = actor(actor);
         String reason = reason(body);

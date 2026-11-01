@@ -1,0 +1,94 @@
+name: Dev backend
+
+on:
+  push:
+    branches: [Dev]
+    paths:
+      - 'main/manager-api/**'
+      - 'main/xiaozhi-server/ai_worker/**'
+      - 'main/xiaozhi-server/realtime_worker/**'
+      - 'main/xiaozhi-server/tests/test_ai_worker*.py'
+      - 'main/xiaozhi-server/tests/test_realtime_worker*.py'
+      - 'dev/**'
+      - '.github/workflows/server-dev.yml'
+  pull_request:
+    paths:
+      - 'main/manager-api/**'
+      - 'main/xiaozhi-server/ai_worker/**'
+      - 'main/xiaozhi-server/realtime_worker/**'
+      - 'main/xiaozhi-server/tests/test_ai_worker*.py'
+      - 'main/xiaozhi-server/tests/test_realtime_worker*.py'
+      - 'dev/**'
+      - '.github/workflows/server-dev.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java:
+    name: Java 21 and isolated MySQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI_MYSQL_PASSWORD: ci_${{ github.run_id }}_${{ github.run_attempt }}
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci_${{ github.run_id }}_${{ github.run_attempt }}
+          TZ: UTC
+        ports:
+          - 34776:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root --password=$MYSQL_ROOT_PASSWORD"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 34777:6379
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Install MySQL client
+        run: sudo apt-get update && sudo apt-get install -y default-mysql-client
+      - name: Prepare isolated schemas
+        run: python3 dev/tests/ci_prepare_databases.py
+      - name: Package and run tests
+        working-directory: main/manager-api
+        run: mvn -B -DskipTests=false -DargLine=-Xmx512m package
+
+  python:
+    name: Python workers and Dev tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            main/xiaozhi-server/ai_worker/requirements.txt
+            main/xiaozhi-server/realtime_worker/requirements.txt
+      - name: Install pinned worker dependencies
+        run: python -m pip install -r main/xiaozhi-server/ai_worker/requirements.txt -r main/xiaozhi-server/realtime_worker/requirements.txt
+      - name: Run AI worker tests
+        working-directory: main/xiaozhi-server
+        run: python -m unittest discover -s tests -p 'test_ai_worker*.py'
+      - name: Run realtime worker tests
+        working-directory: main/xiaozhi-server
+        run: python -m unittest discover -s tests -p 'test_realtime_worker*.py'
+      - name: Run Dev tests
+        run: |
+          python -m unittest discover -s dev/tests -p 'test_*.py'
+          python -m unittest dev.tests.ci_test_prepare_databases

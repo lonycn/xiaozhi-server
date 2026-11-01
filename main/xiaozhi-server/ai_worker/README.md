@@ -62,6 +62,39 @@ headers are never logged. Error codes are `MODEL_MISMATCH`, `PROVIDER_AUTH`,
 `PROVIDER_RATE_LIMIT`, `PROVIDER_TIMEOUT`, `PROVIDER_UNAVAILABLE`, `PROVIDER_ERROR`,
 and `WORKER_ERROR`.
 
+## Optional structured tools
+
+Tools remain disabled when a claimed task omits `tools` or supplies an empty list;
+plain-text request and completion callback fields retain the original contract.
+When Java authorizes tools, the claim includes OpenAI function schemas, `attempt`,
+`control_epoch`, and `tool_policy`. Only the documented Qwen model families in
+`tools.supported()` accept these schemas. Unknown models and unsolicited tool calls
+fail closed. Schemas never grant authority to execute anything in this process.
+
+The worker merges streamed function names/arguments by call index, checks stable
+IDs, and requires complete object JSON (no duplicate keys or nonfinite numbers).
+It posts a bounded batch to `/internal/ai-worker/runs/{id}/tools` with
+`lease_token`, `attempt`, `control_epoch`, `round`, and
+`calls: [{provider_call_id, name, arguments}]`. Java executes serially and returns
+`results: [{provider_call_id, name, status, output, error_code}]`. The worker validates
+identity and size, appends the assistant's `tool_calls` and matching `role: tool`
+messages, rechecks the lease, then resumes the provider. Waiting for a tool never
+completes the assistant message. No arbitrary Python function, URL, or SQL executes.
+
+Hard ceilings are three tool rounds, eight calls, 16 KiB streamed arguments per
+round, 64 KiB cumulative tool results, 120,000 output characters, and 30 seconds
+for the entire loop; stricter task policy wins. Heartbeat failure cancels tool
+waiting as well as provider streaming. Retries use identical manager request bodies
+and provider call IDs; provider requests themselves are never retried.
+
+For enabled tasks, completion/failure adds `provider_requests` (one-based provider
+round, request ID, actual usage, finish reason), `tool_count`, and aggregate usage.
+Aggregate usage is null if any observed request lacks reported usage. Failed
+business tools remain explicit tool errors for the model; a missing source never
+becomes fabricated business data. Added failures are `UNSUPPORTED_TOOL`,
+`TOOL_PROTOCOL_ERROR`, `TOOL_ARGUMENTS_INVALID`, `TOOL_LIMIT_EXCEEDED`, `TOOL_TIMEOUT`.
+Offline tests do not establish real provider or business integration acceptance.
+
 ## Offline verification
 
 ```sh

@@ -22,6 +22,10 @@ public class ExternalIdentityController {
     @PostMapping("/revoke") public void revoke(HttpServletRequest request,HttpServletResponse response)throws IOException {
         privateResponse(response);byte[] body=signedBody(request,ExternalIdentityService.REVOKE);service.revoke(service.verify(request.getRequestURI(),body,headers(request)),body);response.setStatus(204);
     }
+    @PostMapping("/renew") public Result<Map<String,Object>> renew(HttpServletRequest request,HttpServletResponse response)throws IOException {
+        privateResponse(response);byte[] body=signedBody(request,ExternalIdentityService.RENEW);
+        return new Result<Map<String,Object>>().ok(service.renew(request.getRequestURI(),body,headers(request)));
+    }
     @PostMapping("/exchange") public Result<Exchanged> exchange(HttpServletRequest request,HttpServletResponse response)throws IOException {
         privateResponse(response);if(request.getQueryString()!=null)throw new ExternalProblem(400,"INVALID_EXTERNAL_REQUEST");
         byte[] raw=body(request);JsonNode input;

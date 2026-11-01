@@ -793,3 +793,9 @@ databaseChangeLog:
   - include:
       file: realtime-vad.changelog.yaml
       relativeToChangelogFile: true
+  - include:
+      file: agent-tools.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: ai-provider-request-usage.changelog.yaml
+      relativeToChangelogFile: true

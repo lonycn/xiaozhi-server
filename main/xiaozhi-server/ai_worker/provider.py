@@ -58,6 +58,11 @@ class Bailian:
     async def stream(self, task):
         stream = None
         try:
+            tool_options = {}
+            if task.get('tools'):
+                from .tools import policy
+                policy(task)  # fail closed even when this adapter is called directly
+                tool_options = {'tools': task['tools'], 'tool_choice': 'auto'}
             if self.config.omni_model and task.get('model') == self.config.omni_model and self.omni_client is not None:
                 selected = self.omni_client
             elif task.get('model') == self.config.model:
@@ -69,6 +74,7 @@ class Bailian:
             stream = await selected.chat.completions.create(
                 model=task['model'], messages=task['messages'], stream=True,
                 stream_options={'include_usage': True}, max_tokens=self.config.max_tokens,
+                **tool_options,
                 **({'modalities': ['text'], 'reasoning_effort': 'none'}
                    if self.config.omni_model and task['model'] == self.config.omni_model
                    else {'extra_body': {'enable_thinking': False}}))

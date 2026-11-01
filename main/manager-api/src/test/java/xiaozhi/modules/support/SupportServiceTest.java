@@ -174,6 +174,25 @@ class SupportServiceTest {
         assertEquals("RESOLVED",jdbc.conversationState);
         verifyNoInteractions(conversations);
     }
+    @Test void ownerEndsActiveSupportOnceAndClosesMediaWithoutResumingAi() {
+        service.claim(2L,ID);
+        var hooks=mock(xiaozhi.modules.supportmedia.SupportMediaHooks.class);
+        service.setMediaHooksForTests(hooks);
+        assertEquals(404,status(() -> service.endByOwner(3L,ID,null)));
+        assertEquals("resolved",service.endByOwner(1L,ID,new EndRequest("done")).status());
+        assertEquals("RESOLVED",jdbc.conversationState);
+        verify(hooks).responsibilityEnded(ID);
+        int writes=jdbc.writes.size();
+        assertEquals("resolved",service.endByOwner(1L,ID,null).status());
+        assertEquals(writes,jdbc.writes.size());
+        verifyNoInteractions(conversations);
+    }
+    @Test void ownerCannotEndQueuedOrStaleRequest() {
+        assertEquals(409,status(() -> service.endByOwner(1L,ID,null)));
+        jdbc.requestStatus="active"; jdbc.assignee=2L; jdbc.conversationState="HUMAN_QUEUED";
+        assertEquals(409,status(() -> service.endByOwner(1L,ID,null)));
+        assertTrue(jdbc.writes.isEmpty());
+    }
     @Test void cancelLeavesAiPausedAndProfileManagementRequiresAdministrator() {
         assertEquals("canceled",service.cancel(1L,ID,null).status());
         assertEquals("RESOLVED",jdbc.conversationState);

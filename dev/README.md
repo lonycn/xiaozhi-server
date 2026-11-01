@@ -110,3 +110,15 @@ python3 dev/manage.py summary-disable
 `up`/`stop`会管理已启用的独立摘要 worker；`ai-disable`也停止摘要任务执行，保留开启偏好与历史，重新启用 AI 时按偏好恢复。`summary-disable`仅关闭能力并停止 worker，不清理任务/摘要/客户数据。进程身份不符时拒绝终止。当前本机 Dev 已于2026-10-31显式启用，原库增量迁移至117；详见[运维说明](../docs/ai-customer-service/HANDOFF_ASSISTANCE_OPERATIONS.md)和[真实技术验收](../docs/ai-customer-service/HANDOFF_ASSISTANCE_VALIDATION.md)。
 
 B6 只读业务 adapter 仍默认关闭。接通前必须由真实来源实现[签名委托接口](../docs/ai-customer-service/B6_READONLY_HTTP_PROTOCOL.md)，提供独立密钥、TLS 与真实用户/租户/资源归属复核；不能用已有 Workbench 凭据替代。
+
+### Agent 工具调用（显式启用）
+
+工具调用默认关闭，必须先启用并配置 AI worker。使用最新 JAR 和更新后的 worker 环境：
+
+```bash
+python3 dev/manage.py agent-tools-enable --build
+python3 dev/manage.py agent-tools-status
+python3 dev/manage.py agent-tools-disable
+```
+
+普通 `agent-tools-enable` 不开放本地技术工具。仅在明确需要本地技术验收时使用 `agent-tools-enable --technical-local`；技术工具只报告固定协议能力，不提供客户业务数据。命令会检查 JAR、worker 依赖及私有配置，并重建本 Dev API、重启 AI worker。关闭时保留会话、工具审计、数据库和私有模型配置；关闭 AI 时工具随之不可用，已有工具开关偏好保留。`agent-tools-status` 报告配置及 AI 前提下的启用状态，不代表业务数据源、外部 App 或真实业务流程已联通。

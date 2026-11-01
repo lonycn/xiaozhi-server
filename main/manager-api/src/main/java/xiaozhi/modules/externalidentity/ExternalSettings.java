@@ -7,12 +7,23 @@ import com.fasterxml.jackson.databind.*;
 
 @Component
 public class ExternalSettings {
-    private boolean enabled;
-    private boolean mediaEnabled;
+    private volatile boolean enabled;
+    private volatile boolean mediaEnabled;
+    private volatile boolean renewalEnabled;
+    private volatile int renewalMaxSeconds=300;
+    @Value("${external-identity.renewal-enabled:false}") public void setRenewalEnabled(boolean value){renewalEnabled=value;}
+    @Value("${external-identity.renewal-max-seconds:300}") public void setRenewalMaxSeconds(int value){renewalMaxSeconds=value;}
+    public boolean renewalEnabled(){return enabled && renewalEnabled;}
+    public int renewalMaxSeconds(){
+        keys();
+        if(!renewalEnabled)throw new ExternalProblem(503,"RENEWAL_NOT_CONFIGURED");
+        if(renewalMaxSeconds<30 || renewalMaxSeconds>900)throw new ExternalProblem(503,"RENEWAL_NOT_CONFIGURED");
+        return Math.min(tokenSeconds,renewalMaxSeconds);
+    }
     @Value("${features.external-realtime-media-enabled:false}") public void setMediaEnabled(boolean value){mediaEnabled=value;}
     public boolean mediaEnabled(){return enabled && mediaEnabled;}
-    private String keysJson="";
-    private int tokenSeconds=300;
+    private volatile String keysJson="";
+    private volatile int tokenSeconds=300;
     public record Key(String issuer,byte[] secret) { @Override public String toString(){return "ExternalKey[redacted]";} }
     @Value("${features.external-identity-enabled:false}") public void setEnabled(boolean value){enabled=value;}
     @Value("${external-identity.keys-json:}") public void setKeysJson(String value){keysJson=value;}

@@ -29,6 +29,11 @@ public class AiExecutionService {
     private String visionModel = "";
     private String omniModel = "";
     private AiAttachmentContext attachments;
+    private final AiProviderUsageStore providerUsage;
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.agenttool.AgentToolService> agentTools;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setAgentTools(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.agenttool.AgentToolService> value) { agentTools=value; }
+    private xiaozhi.modules.agenttool.AgentToolService tools() { return agentTools==null?null:agentTools.getIfAvailable(); }
     private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.realtime.RealtimeHooks> realtime;
     @org.springframework.beans.factory.annotation.Autowired
     public void setRealtime(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.realtime.RealtimeHooks> value) { realtime=value; }
@@ -37,11 +42,14 @@ public class AiExecutionService {
     static final String DISCOVERY_QUERY = "SELECT id,conversation_id,list_sequence FROM ai_run WHERE list_sequence>? AND (status='queued' OR (status IN ('running','streaming') AND lease_expires_at<=CURRENT_TIMESTAMP(3))) ORDER BY list_sequence LIMIT 32";
     private static final Set<String> ERRORS = Set.of("MODEL_MISMATCH", "PROVIDER_AUTH", "PROVIDER_RATE_LIMIT",
             "PROVIDER_TIMEOUT", "PROVIDER_UNAVAILABLE", "PROVIDER_ERROR", "WORKER_ERROR",
-            "MEDIA_INPUT_UNAVAILABLE", "MODEL_CAPABILITY_UNAVAILABLE", "OMNI_AUDIO_LIMIT");
+            "MEDIA_INPUT_UNAVAILABLE", "MODEL_CAPABILITY_UNAVAILABLE", "OMNI_AUDIO_LIMIT",
+            "UNSUPPORTED_TOOL", "TOOL_PROTOCOL_ERROR", "TOOL_ARGUMENTS_INVALID", "TOOL_LIMIT_EXCEEDED", "TOOL_TIMEOUT",
+            "TOOL_CONTEXT_MISSING", "TOOL_AUTHORIZATION_EXPIRED");
 
     public AiExecutionService(JdbcTemplate jdbc, ObjectMapper json, PlatformTransactionManager manager) {
         this.jdbc = jdbc; this.json = json; this.tx = new TransactionTemplate(manager);
         this.access = new ConversationAccessService(new ConversationDao(jdbc));
+        this.providerUsage = new AiProviderUsageStore(jdbc);
     }
     @Value("${features.ai-text-enabled:false}") public void setEnabled(boolean value) { enabled = value; }
     @Value("${ai.execution.model:qwen-flash}") public void setModel(String value) { model = value; }
@@ -73,6 +81,7 @@ public class AiExecutionService {
                 INSERT INTO ai_run(id,conversation_id,input_message_id,output_message_id,control_epoch,output_text,model)
                 VALUES(?,?,?,?,?,'',?)
                 """, run, conversationId, inputId, output, number(c,"control_epoch"), inputNeedsVision(inputId) && !visionModel.isBlank() ? visionModel : model);
+        if(tools()!=null)tools().prepareRun(run,conversationId,number(c,"owner_user_id"),requestPrincipal());
         jdbc.update("UPDATE ai_conversation SET last_seq=? WHERE id=?", sequence, conversationId);
         Map<String,Object> r = row(run, true);
         event(r, "ai.run.queued", Map.of());
@@ -160,6 +169,11 @@ public class AiExecutionService {
                     terminal(r,"canceled",null,"ai.run.canceled"); return null;
                 }
                 if (!"queued".equals(r.get("status")) && leaseLive(r)) return null;
+                if(tools()!=null) {
+                    if(tools().isEnabled() && !tools().hasBinding((String)r.get("id"))) {terminal(r,"failed","TOOL_CONTEXT_MISSING","ai.run.failed");return null;}
+                    try { tools().validateBinding((String)r.get("id")); }
+                    catch(ConversationProblem denied) {terminal(r,"failed","TOOL_AUTHORIZATION_EXPIRED","ai.run.failed");return null;}
+                }
                 if (number(r,"attempt") >= 3) { terminal(r,"failed","RETRY_EXHAUSTED","ai.run.failed"); return null; }
                 var plan = attachmentPlan(r);
                 if (plan.waiting()) return null;
@@ -168,6 +182,7 @@ public class AiExecutionService {
                     terminal(r,"failed","MODEL_CAPABILITY_UNAVAILABLE","ai.run.failed"); return null;
                 }
                 String selectedModel = plan.audio() ? omniModel : plan.vision() ? visionModel : model;
+                if(tools()!=null && number(r,"attempt")>0)tools().cancelPending((String)r.get("id"));
                 jdbc.update("UPDATE ai_run SET model=? WHERE id=?", selectedModel,r.get("id"));
                 int attempt = (int) number(r,"attempt") + 1;
                 String token = id() + id();
@@ -181,9 +196,13 @@ public class AiExecutionService {
                 message(r,"","running");
                 if (attempt > 1) event(r,"assistant.message.reset",Map.of());
                 event(r,"ai.run.started",Map.of());
+                var catalog=tools()==null || plan.audio() || plan.vision() || !textToolsSupported(selectedModel)
+                        ?null:tools().taskTools((String)r.get("id"),attempt,token,number(r,"control_epoch"));
+                var declarations=catalog==null||catalog.tools().isEmpty()?null:catalog.tools();
+                var policy=declarations==null?null:new ToolPolicy(catalog.maxRounds(),catalog.maxCalls(),4096,32768,30,120000);
                 return new Task((String)r.get("id"),(String)r.get("conversation_id"),(String)r.get("input_message_id"),
                         (String)r.get("output_message_id"),number(r,"control_epoch"),attempt,token,leaseSeconds,
-                        (String)r.get("model"),context(r, plan.refs()));
+                        (String)r.get("model"),context(r, plan.refs()),declarations,policy);
             });
             if (task != null) return task;
         }
@@ -213,11 +232,19 @@ public class AiExecutionService {
     }
     public Run complete(String runId, Complete body) {
         if (body == null || body.lastSequence() == null || body.lastSequence() < 0
-                || (body.finishReason()!=null && !Set.of("stop","length","content_filter","tool_calls","unknown").contains(body.finishReason()))
+                || (body.finishReason()!=null && !Set.of("stop","length","content_filter","unknown").contains(body.finishReason()))
                 || (body.providerRequestId()!=null && (body.providerRequestId().length()>200 || body.providerRequestId().matches(".*[\\r\\n].*")))) throw problem(400,"INVALID_COMPLETION");
         validateUsage(body.usage());
+        providerUsage.validate(body.providerRequests(),body.usage(),body.toolCount());
         return callback(runId,body.leaseToken(),r -> {
             if (body.lastSequence() != number(r,"last_chunk_sequence")) throw problem(409,"CHUNK_SEQUENCE_CONFLICT");
+            if(tools()!=null && tools().hasBinding(runId)) {
+                if(jdbc.queryForObject("SELECT COUNT(*) FROM agent_tool_call WHERE run_id=? AND status='running'",Long.class,runId)>0)
+                    throw problem(409,"TOOL_EXECUTION_PENDING");
+                if(body.toolCount()!=null && !body.toolCount().equals(jdbc.queryForObject("SELECT COUNT(*) FROM agent_tool_call WHERE run_id=? AND run_attempt=?",Integer.class,runId,number(r,"attempt"))))
+                    throw problem(400,"TOOL_COUNT_MISMATCH");
+            }
+            providerUsage.record(runId,(int)number(r,"attempt"),(String)r.get("model"),body.providerRequests());
             String usage = body.usage() == null ? null : encode(body.usage());
             jdbc.update("UPDATE ai_run SET usage_json=?,finish_reason=?,provider_request_id=? WHERE id=?",usage,body.finishReason(),body.providerRequestId(),runId);
             if (body.usage()!=null) jdbc.update("INSERT INTO ai_model_usage(run_id,attempt,model,input_tokens,output_tokens,total_tokens,provider_request_id) VALUES(?,?,?,?,?,?,?)",
@@ -228,9 +255,20 @@ public class AiExecutionService {
     }
     public Run fail(String runId, Fail body) {
         if (body==null || !ERRORS.contains(body.errorCode()==null ? "" : body.errorCode())) throw problem(400,"INVALID_ERROR_CODE");
+        validateUsage(body.usage());providerUsage.validate(body.providerRequests(),body.usage(),body.toolCount());
         return callback(runId,body.leaseToken(),r -> {
+            providerUsage.record(runId,(int)number(r,"attempt"),(String)r.get("model"),body.providerRequests());
+            if(body.usage()!=null) {
+                jdbc.update("UPDATE ai_run SET usage_json=? WHERE id=?",encode(body.usage()),runId);
+                jdbc.update("INSERT INTO ai_model_usage(run_id,attempt,model,input_tokens,output_tokens,total_tokens,provider_request_id) VALUES(?,?,?,?,?,?,NULL)",
+                        runId,number(r,"attempt"),r.get("model"),body.usage().inputTokens(),body.usage().outputTokens(),body.usage().totalTokens());
+            }
             terminal(r,"failed",body.errorCode(),"ai.run.failed"); return view(row(runId,false));
         });
+    }
+    /** Text tools are opt-in only on known language model families; media keeps its existing path. */
+    static boolean textToolsSupported(String value) {
+        return value!=null && value.matches("qwen(?:-(?:flash|plus|max|turbo)|3\\.[678]-max|3\\.[567]-plus|3\\.[5678]-flash|3-(?:max|coder))(?:-[a-z0-9-]+)?");
     }
     private <T> T callback(String runId, String token, java.util.function.Function<Map<String,Object>,T> action) {
         requireEnabled(); validId(runId);
@@ -242,6 +280,7 @@ public class AiExecutionService {
             if (!ownerEnabled(c) || !"AI_ACTIVE".equals(c.get("state")) || number(c,"control_epoch")!=number(r,"control_epoch")
                     || !("running".equals(r.get("status")) || "streaming".equals(r.get("status")))
                     || !token.equals(r.get("lease_token")) || !leaseLive(r)) throw problem(409,"LEASE_INVALID");
+            if(tools()!=null)tools().validatePublish(runId,(int)number(r,"attempt"),token,number(r,"control_epoch"));
             return action.apply(r);
         });
     }
@@ -310,6 +349,7 @@ public class AiExecutionService {
         Collections.reverse(result); return result;
     }
     private void terminal(Map<String,Object> r,String status,String error,String type) {
+        if(tools()!=null && ("canceled".equals(status)||"failed".equals(status)))tools().cancelPending((String)r.get("id"));
         jdbc.update("UPDATE ai_run SET status=?,error_code=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",status,error,r.get("id"));
         message(r,(String)r.get("output_text"),status);
         event(r,type,error==null?Map.of():Map.of("error_code",error));
@@ -346,6 +386,14 @@ public class AiExecutionService {
         if(u!=null && (u.inputTokens()==null || u.outputTokens()==null || u.totalTokens()==null || u.inputTokens()<0 || u.outputTokens()<0 || u.totalTokens()<0
                 || u.inputAudioTokens()!=null && (u.inputAudioTokens()<0 || u.inputAudioTokens()>u.inputTokens())))
             throw problem(400,"INVALID_USAGE");
+    }
+    private xiaozhi.modules.externalidentity.ExternalModels.Principal requestPrincipal() {
+        var attributes=org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if(!(attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet))return null;
+        Object value=servlet.getRequest().getAttribute(xiaozhi.modules.externalidentity.ExternalIdentityService.ATTRIBUTE);
+        if(value==null)return null;
+        if(!(value instanceof xiaozhi.modules.externalidentity.ExternalModels.Principal principal))throw problem(403,"TOOL_CONTEXT_INVALID");
+        return principal;
     }
     private void requireEnabled() { if(!enabled) throw problem(503,"AI_TEXT_DISABLED"); }
     private static boolean active(Map<String,Object> r) { return Set.of("queued","running","streaming").contains(r.get("status")); }

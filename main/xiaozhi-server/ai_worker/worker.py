@@ -27,6 +27,13 @@ def actual_usage(usage):
     return result
 
 
+def aggregate_usage(requests):
+    if not requests or any(record['usage'] is None for record in requests):
+        return None
+    keys = set.intersection(*(set(record['usage']) for record in requests))
+    return {key: sum(record['usage'][key] for record in requests) for key in keys}
+
+
 class Worker:
     def __init__(self, config, manager, provider):
         self.config, self.manager, self.provider = config, manager, provider
@@ -134,6 +141,11 @@ class Worker:
         return {**task, 'messages': prepared}
 
     async def generate(self, task):
+        from .tools import policy
+        selected = policy(task)
+        if selected is not None:
+            await self.generate_tools(task, *selected)
+            return
         sequence = 0
         usage, finish_reason, request_id = None, None, None
         try:
@@ -152,6 +164,8 @@ class Worker:
                 if reported is not None:
                     usage = reported
                 for choice in chunk.choices or []:
+                    if getattr(choice.delta, 'tool_calls', None) or getattr(choice.delta, 'function_call', None):
+                        raise ProviderFailure('UNSUPPORTED_TOOL')
                     if choice.finish_reason:
                         finish_reason = choice.finish_reason
                     content = getattr(choice.delta, 'content', None)
@@ -165,6 +179,92 @@ class Worker:
         await self.manager.callback(task, 'complete', last_sequence=sequence,
                                     finish_reason=finish_reason, usage=usage,
                                     provider_request_id=request_id)
+
+    async def generate_tools(self, task, names, limits):
+        from .tools import Proposals, encoded, result_messages
+        sequence, tool_count, output_chars = 0, 0, 0
+        requests, seen = [], set()
+
+        async def run():
+            nonlocal sequence, tool_count, output_chars
+            prepared = await self.prepare(task)
+            result_bytes = 0
+            for round_number in range(1, limits['max_rounds'] + 2):
+                proposals = Proposals(names, limits)
+                content_parts = []
+                record = dict(round=round_number, provider_request_id=None, usage=None, finish_reason=None)
+                requests.append(record)
+                async with self.provider.stream(prepared) as stream:
+                    headers = getattr(getattr(stream, 'response', None), 'headers', {})
+                    record['provider_request_id'] = headers.get('x-request-id') or headers.get('x-dashscope-request-id')
+                    async for chunk in stream:
+                        usage = actual_usage(getattr(chunk, 'usage', None))
+                        if usage is not None:
+                            record['usage'] = usage
+                        for choice in chunk.choices or []:
+                            if getattr(choice.delta, 'function_call', None):
+                                raise ProviderFailure('UNSUPPORTED_TOOL')
+                            if getattr(choice, 'index', 0) != 0:
+                                raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+                            if choice.finish_reason:
+                                if record['finish_reason'] and record['finish_reason'] != choice.finish_reason:
+                                    raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+                                record['finish_reason'] = choice.finish_reason
+                            fragments = getattr(choice.delta, 'tool_calls', None)
+                            if fragments:
+                                proposals.add(fragments)
+                            content = getattr(choice.delta, 'content', None)
+                            if content:
+                                if not isinstance(content, str):
+                                    raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+                                output_chars += len(content)
+                                if output_chars > limits['max_output_chars']:
+                                    raise ProviderFailure('TOOL_LIMIT_EXCEEDED')
+                                content_parts.append(content)
+                                for start in range(0, len(content), 4096):
+                                    sequence += 1
+                                    await self.manager.callback(task, 'delta', sequence=sequence, text=content[start:start + 4096])
+                finish = record['finish_reason']
+                if finish is None:
+                    raise ProviderFailure('PROVIDER_ERROR')
+                if not proposals.parts:
+                    if finish in ('tool_calls', 'function_call'):
+                        raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+                    return record
+                if finish != 'tool_calls':
+                    raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+                calls = proposals.complete(seen)
+                if round_number > limits['max_rounds'] or tool_count + len(calls) > limits['max_calls']:
+                    raise ProviderFailure('TOOL_LIMIT_EXCEEDED')
+                seen.update(call['provider_call_id'] for call in calls)
+                tool_count += len(calls)
+                response = await self.manager.tools(task, round_number, calls, limits['max_result_bytes'] + 4096)
+                messages = result_messages(response, calls, limits['max_result_bytes'])
+                result_bytes += sum(len(message['content'].encode('utf-8')) for message in messages)
+                if result_bytes > limits['max_result_bytes']:
+                    raise ProviderFailure('TOOL_LIMIT_EXCEEDED')
+                # Revalidate authority after waiting, before starting another provider request.
+                ack = await self.manager.callback(task, 'heartbeat')
+                if not isinstance(ack, dict) or ack.get('active') is not True:
+                    raise LeaseLost()
+                prepared['messages'].append(dict(role='assistant', content=''.join(content_parts) or None,
+                    tool_calls=[dict(id=call['provider_call_id'], type='function', function=dict(
+                        name=call['name'], arguments=encoded(call['arguments']))) for call in calls]))
+                prepared['messages'].extend(messages)
+        try:
+            final = await asyncio.wait_for(run(), limits['timeout_seconds'])
+        except asyncio.TimeoutError:
+            error = ProviderFailure('TOOL_TIMEOUT')
+            error.tool_metadata = dict(provider_requests=requests, tool_count=tool_count, usage=aggregate_usage(requests))
+            raise error from None
+        except ProviderFailure as error:
+            error.tool_metadata = dict(provider_requests=requests, tool_count=tool_count, usage=aggregate_usage(requests))
+            raise
+        # Terminal callback has its own bounded transport. Do not cancel an uncertain
+        # completion ACK at the loop deadline and then send a conflicting failure.
+        await self.manager.callback(task, 'complete', last_sequence=sequence, finish_reason=final['finish_reason'],
+            usage=aggregate_usage(requests), provider_request_id=final['provider_request_id'],
+            provider_requests=requests, tool_count=tool_count)
 
     async def execute(self, task):
         if task.get('model') not in (self.config.model, getattr(self.config, 'vision_model', '') or self.config.model, getattr(self.config, 'omni_model', '') or self.config.model):
@@ -183,7 +283,7 @@ class Worker:
                 await heartbeat
             await generation
         except ProviderFailure as exc:
-            await self.manager.callback(task, 'fail', error_code=exc.code)
+            await self.manager.callback(task, 'fail', error_code=exc.code, **getattr(exc, 'tool_metadata', {}))
         finally:
             for job in (generation, heartbeat):
                 job.cancel()

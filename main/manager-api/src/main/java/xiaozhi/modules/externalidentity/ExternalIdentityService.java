@@ -26,7 +26,7 @@ import xiaozhi.common.jdbc.TimestampColumnMapRowMapper;
 @Service
 @ConditionalOnProperty(prefix="features",name="external-identity-enabled",havingValue="true")
 public class ExternalIdentityService {
-    public static final String ISSUE="/api/v1/external/identity/issue",REVOKE="/api/v1/external/identity/revoke";
+    public static final String ISSUE="/api/v1/external/identity/issue",REVOKE="/api/v1/external/identity/revoke",RENEW="/api/v1/external/identity/renew";
     public static final String ATTRIBUTE="xiaozhi.external.principal";
     private static final SecureRandom RANDOM=new SecureRandom();
     private final JdbcTemplate db;private final ObjectMapper json;private final TransactionTemplate tx;
@@ -39,6 +39,13 @@ public class ExternalIdentityService {
         this.tx=new TransactionTemplate(manager);this.settings=settings;this.clock=clock;
     }
     public static boolean externalToken(String value){return value!=null && value.startsWith("xext_");}
+    /** Renewal changes only expiry; a newly issued bearer must never inherit an old binding. */
+    public static boolean sameBinding(Principal left,Principal right) {
+        return left!=null && right!=null && left.tokenId()==right.tokenId() && left.sourceId()==right.sourceId()
+            && left.userId()==right.userId() && Objects.equals(left.tokenHash(),right.tokenHash())
+            && Objects.equals(left.issuer(),right.issuer()) && Objects.equals(left.subject(),right.subject())
+            && Objects.equals(left.tenant(),right.tenant()) && Objects.equals(left.scope(),right.scope());
+    }
     public static String signature(byte[] secret,String path,String timestamp,String nonce,byte[] body) {
         try {
             String canonical=String.join("\n","POST",path,timestamp,nonce,hash(body));
@@ -47,7 +54,7 @@ public class ExternalIdentityService {
         } catch(Exception ignored){throw new ExternalProblem(503,"IDENTITY_UNAVAILABLE");}
     }
     public Verified verify(String path,byte[] raw,Map<String,List<String>> headers) {
-        if(path==null || path.length()>256 || !(canonicalOperation(path,ISSUE)||canonicalOperation(path,REVOKE)) || raw==null || raw.length>32768)throw problem(400,"INVALID_SIGNED_REQUEST");
+        if(path==null || path.length()>256 || !(canonicalOperation(path,ISSUE)||canonicalOperation(path,REVOKE)||canonicalOperation(path,RENEW)) || raw==null || raw.length>32768)throw problem(400,"INVALID_SIGNED_REQUEST");
         var keys=settings.keys();List<String> names=List.of("x-external-key-id","x-external-timestamp","x-external-nonce","x-external-signature");
         for(String name:names)if(headers.get(name)==null || headers.get(name).size()!=1)throw problem(401,"SIGNATURE_INVALID");
         String keyId=headers.get(names.get(0)).getFirst(),timestamp=headers.get(names.get(1)).getFirst(),
@@ -130,6 +137,51 @@ public class ExternalIdentityService {
             db.update("UPDATE external_access_token SET revoked_at=COALESCE(revoked_at,?) WHERE source_id=?",ts(clock.instant()),row.get("id"));
         });
     }
+    /** Signed producer renewal of one existing bearer. No token issuance or source lifetime change. */
+    public Map<String,Object> renew(String path,byte[] raw,Map<String,List<String>> headers) {
+        Verified signed=verify(path,raw,headers);verified(signed,RENEW,raw);
+        int maximum=settings.renewalMaxSeconds();
+        JsonNode input=request(raw,Set.of("external_subject","source_session_id","token_id","tenant","scope","requested_lifetime_seconds"));
+        String subject=text(input,"external_subject",100),session=text(input,"source_session_id",100),reference=text(input,"token_id",19);
+        if(!reference.matches("[1-9][0-9]{0,18}"))throw problem(400,"INVALID_EXTERNAL_REQUEST");
+        long tokenId;try{tokenId=Long.parseLong(reference);}catch(NumberFormatException invalid){throw problem(400,"INVALID_EXTERNAL_REQUEST");}
+        long requested=integer(input.get("requested_lifetime_seconds"));
+        if(requested<30 || requested>maximum)throw problem(400,"INVALID_RENEWAL_LIFETIME");
+        Tenant tenant=tenant(input.get("tenant"));Scope scope=scope(input.get("scope"));
+        return tx.execute(status->{
+            reverifyRenewal(signed,path,raw,headers);nonce(signed);
+            // Same source->token lock order as source revocation. Missing sources never create tombstones here.
+            var origin=one("SELECT * FROM external_source_session WHERE issuer=? AND external_subject=? AND source_session_id=? FOR UPDATE",signed.issuer(),subject,session);
+            sourceActive(origin);
+            var token=one("SELECT * FROM external_access_token WHERE id=? AND source_id=? FOR UPDATE",tokenId,origin.get("id"));
+            activeToken(token);
+            var principal=principal(number(token,"principal_id"),true);account(number(principal,"user_id"),true);
+            if(!tenant.equals(new Tenant((String)principal.get("tenant_type"),(String)principal.get("tenant_id")))
+                    || !scope.equals(scope(decode((String)token.get("scope_json")))))throw problem(403,"RENEWAL_BINDING_MISMATCH");
+            var identity=one("SELECT issuer,external_subject FROM external_identity WHERE id=?",principal.get("identity_id"));
+            if(!signed.issuer().equals(identity.get("issuer")) || !subject.equals(identity.get("external_subject")))throw problem(403,"RENEWAL_BINDING_MISMATCH");
+            // Locks may have waited past token expiry, account disable, source expiry, or key rotation.
+            reverifyRenewal(signed,path,raw,headers);sourceActive(origin);activeToken(token);
+            int currentMaximum=settings.renewalMaxSeconds();
+            if(requested>currentMaximum)throw problem(400,"INVALID_RENEWAL_LIFETIME");
+            Instant now=clock.instant(),existing=instant(token.get("expires_at"));
+            if(!existing.isAfter(now))throw problem(401,"EXTERNAL_TOKEN_REVOKED_OR_EXPIRED");
+            Instant proposed=now.plusSeconds(requested);
+            Instant expiry=min(existing.isAfter(proposed)?existing:proposed,instant(origin.get("expires_at")));
+            if(!expiry.equals(existing) && db.update("UPDATE external_access_token SET expires_at=? WHERE id=? AND revoked_at IS NULL AND expires_at>?",ts(expiry),tokenId,ts(now))!=1)
+                throw problem(401,"EXTERNAL_TOKEN_REVOKED_OR_EXPIRED");
+            return Map.<String,Object>of("token_id",reference,"expires_at",expiry,
+                "expires_in",Math.max(0,Duration.between(now,expiry).getSeconds()));
+        });
+    }
+    private void reverifyRenewal(Verified signed,String path,byte[] raw,Map<String,List<String>> headers) {
+        Verified current=verify(path,raw,headers);
+        if(!signed.equals(current))throw problem(401,"SIGNATURE_INVALID");
+        verified(current,RENEW,raw);
+    }
+    private void activeToken(Map<String,Object> token) {
+        if(token.get("revoked_at")!=null || !instant(token.get("expires_at")).isAfter(clock.instant()))throw problem(401,"EXTERNAL_TOKEN_REVOKED_OR_EXPIRED");
+    }
     private void nonce(Verified signed) {
         try {db.update("INSERT INTO external_signature_nonce(key_id,nonce,expires_at) VALUES(?,?,?)",signed.keyId(),signed.nonce(),ts(clock.instant().plusSeconds(120)));}
         catch(DuplicateKeyException ignored){throw problem(409,"NONCE_REPLAY");}
@@ -178,7 +230,8 @@ public class ExternalIdentityService {
     }
     public Map<String,Object> view(Principal actor) {
         return Map.of("user_id",Long.toString(actor.userId()),"issuer",actor.issuer(),"external_subject",actor.subject(),
-                "tenant",actor.tenant(),"scope",actor.scope(),"expires_at",actor.expiresAt(),"rtc_enabled",mediaEnabled(),"business_connected",false);
+                "tenant",actor.tenant(),"scope",actor.scope(),"expires_at",actor.expiresAt(),"rtc_enabled",mediaEnabled(),"business_connected",false,
+                "token_id",Long.toString(actor.tokenId()),"renewal_enabled",settings.renewalEnabled());
     }
     private Tenant tenant(JsonNode node) {
         exact(node,Set.of("type","id"));String type=text(node,"type",16),id=text(node,"id",19);

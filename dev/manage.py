@@ -69,6 +69,11 @@ def configure():
             if omni != "qwen3.8-omni-flash":
                 raise RuntimeError("Unsupported Omni model")
             properties["ai.execution.omni-model"] = omni
+    tools = agent_tools_settings()
+    if tools.get("enabled") is True and settings.get("enabled") is True:
+        properties["features.agent-tools-enabled"] = "true"
+        if tools.get("technical_local") is True:
+            properties["agent-tools.technical-local-enabled"] = "true"
     if summary_settings().get("enabled") is True and settings.get("enabled") is True:
         properties["features.support-summary-assistance-enabled"] = "true"
     media = media_settings()
@@ -131,6 +136,47 @@ def ai_settings():
     if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
         raise RuntimeError("Invalid AI settings")
     return data
+
+
+def agent_tools_settings():
+    path = RUNTIME / "agent-tools-settings.json"
+    if not path.exists():
+        return {"enabled": False, "technical_local": False}
+    data = json.loads(path.read_text())
+    if (not isinstance(data, dict) or type(data.get("enabled")) is not bool
+            or type(data.get("technical_local")) is not bool):
+        raise RuntimeError("Invalid agent tools settings")
+    return data
+
+
+def agent_tools_jar_check():
+    markers = {"BOOT-INF/classes/xiaozhi/modules/agenttool/AgentToolService.class",
+               "BOOT-INF/classes/xiaozhi/modules/ai/AiProviderUsageStore.class",
+               "BOOT-INF/classes/db/changelog/agent-tools.changelog.yaml"}
+    try:
+        with zipfile.ZipFile(API / "target/xiaozhi-esp32-api.jar") as archive:
+            if not markers.issubset(set(archive.namelist())):
+                raise RuntimeError("Agent tools require a freshly built API")
+    except (OSError, zipfile.BadZipFile):
+        raise RuntimeError("Agent tools require a freshly built API") from None
+
+
+def prepare_agent_tools(technical_local=False):
+    if type(technical_local) is not bool:
+        raise RuntimeError("Invalid technical tool setting")
+    agent_tools_jar_check()
+    if ai_settings().get("enabled") is not True:
+        raise RuntimeError("Enable the configured AI worker before agent tools")
+    python = os.environ.get("XIAOZHI_AI_WORKER_PYTHON", str(ROOT.parent / ".venv/bin/python"))
+    try:
+        subprocess.run([python, "-c", "import openai, httpx, ai_worker.tools"], cwd=ROOT / "main/xiaozhi-server", check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Agent tools require the updated AI worker environment") from None
+    config = RUNTIME / "ai-worker.json"
+    if not config.is_file() or config.stat().st_mode & 0o077:
+        raise RuntimeError("Agent tools require a private AI worker configuration")
+    private_json("agent-tools-settings.json", {"enabled": True, "technical_local": technical_local})
 
 
 def summary_settings():
@@ -876,7 +922,7 @@ def stop_process(find_process, filename):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status", "summary-enable", "summary-disable", "summary-status"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status", "summary-enable", "summary-disable", "summary-status", "agent-tools-enable", "agent-tools-disable", "agent-tools-status"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
     parser.add_argument("--storage", choices=["filesystem", "s3"])
@@ -888,9 +934,30 @@ def main():
     parser.add_argument("--realtime-public-url", help="Client-reachable realtime WebSocket URL")
     parser.add_argument("--server-vad", action=argparse.BooleanOptionalAction, default=None,
                         help="Enable/disable automatic realtime speech detection; omitted preserves current setting")
+    parser.add_argument("--technical-local", action="store_true", help="Explicitly allow technical-only local acceptance tools")
     args = parser.parse_args()
+    if args.technical_local and args.action != "agent-tools-enable":
+        parser.error("--technical-local is only valid with agent-tools-enable")
     configure()
-    if args.action == "summary-enable":
+    if args.action == "agent-tools-enable":
+        if args.build:
+            build()
+        prepare_agent_tools(args.technical_local)
+        stop_process(ai_process, "ai-worker-process.json")
+        configure(); recreate_api(); start_ai_worker()
+        print("Agent tools enabled; technical local tools:", args.technical_local)
+    elif args.action == "agent-tools-disable":
+        stop_process(ai_process, "ai-worker-process.json")
+        private_json("agent-tools-settings.json", {"enabled": False, "technical_local": False})
+        configure(); recreate_api()
+        if ai_settings().get("enabled") is True: start_ai_worker()
+        print("Agent tools disabled; history and data retained")
+    elif args.action == "agent-tools-status":
+        tools = agent_tools_settings()
+        active = tools.get("enabled") is True and ai_settings().get("enabled") is True
+        print("Agent tools enabled:", active)
+        print("Technical local tools enabled:", active and tools.get("technical_local") is True)
+    elif args.action == "summary-enable":
         if args.build:
             build()
         prepare_summary()

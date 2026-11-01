@@ -16,6 +16,8 @@ import xiaozhi.common.utils.Result;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {ConversationController.class,
         xiaozhi.modules.ai.AiController.class, xiaozhi.modules.ai.AiWorkerController.class,
+        xiaozhi.modules.agenttool.AgentToolController.class, xiaozhi.modules.agenttool.AgentToolWorkerController.class,
+        xiaozhi.modules.app.AppCapabilitiesController.class,
         xiaozhi.modules.attachment.AttachmentController.class, xiaozhi.modules.attachment.MediaWorkerController.class})
 public class ConversationExceptionHandler {
     @ExceptionHandler(ConversationProblem.class)

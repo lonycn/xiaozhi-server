@@ -13,6 +13,7 @@ from PIL import Image
 from .config import MODEL
 from .control import AuthorityLost, Fault, ResponseInterrupted
 from .provider import provider_error
+from .tool_contract import require_disabled, reject_tool_event
 
 
 class TerminalReceipt(Exception):
@@ -417,6 +418,7 @@ class Session:
             self.seen[event_id] = digest
             if len(self.seen) > 2048: self.seen.popitem(last=False)
         await self.authorize(force_busy=True)
+        reject_tool_event(event)
         if kind == 'session.created':
             if self.created: raise Fault('PROVIDER_ERROR')
             self.created = True
@@ -602,6 +604,9 @@ class Session:
     async def run(self):
         try:
             await self.send_browser('connected', authorize=False)
+            # A future manager must not silently enable declarations that this
+            # worker cannot execute under realtime-session authority.
+            require_disabled(self.task.get('tools'))
             self.provider = await self.provider_factory.connect()
             self.tasks = [asyncio.create_task(self.browser_read()), asyncio.create_task(self.provider_read()), asyncio.create_task(self.pulse())]
             while True:

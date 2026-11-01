@@ -22,4 +22,14 @@ class SupportAuthContractTest {
         var paths = new ArrayList<>(chain.keySet());
         assertTrue(paths.indexOf("/api/v1/support/**") < paths.indexOf("/**"));
     }
+    @Test void signedRenewalAndAppContractsUseTheirExactAuthenticationBoundaries() {
+        var factory=ShiroConfig.shirFilter(mock(WebSecurityManager.class),mock(SysParamsService.class));
+        var chain=factory.getFilterChainDefinitionMap();
+        assertEquals("anon",chain.get("/api/v1/external/identity/renew"));
+        assertEquals("conversation",chain.get("/api/v1/app/capabilities"));
+        assertEquals("conversation",chain.get("/api/v1/admin/diagnostics/readiness"));
+        var paths=new ArrayList<>(chain.keySet());
+        assertTrue(paths.indexOf("/api/v1/external/identity/renew")<paths.indexOf("/api/v1/external/**"));
+        assertTrue(paths.indexOf("/api/v1/app/capabilities")<paths.indexOf("/**"));
+    }
 }

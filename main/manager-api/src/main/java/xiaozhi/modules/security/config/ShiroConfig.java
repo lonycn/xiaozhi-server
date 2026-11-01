@@ -126,9 +126,12 @@ public class ShiroConfig {
         // B6 public entry routes have their own HMAC or single-use capability validation.
         filterMap.put("/api/v1/external/identity/issue", "anon");
         filterMap.put("/api/v1/external/identity/revoke", "anon");
+        filterMap.put("/api/v1/external/identity/renew", "anon");
         filterMap.put("/api/v1/external/identity/exchange", "anon");
         filterMap.put("/api/v1/external/attachments/*/content", "anon");
         filterMap.put("/api/v1/external/**", "conversation");
+        filterMap.put("/api/v1/app/capabilities", "conversation");
+        filterMap.put("/api/v1/admin/diagnostics/readiness", "conversation");
         filterMap.put("/api/v1/ai/attachments/*/content", "anon");
         filterMap.put("/api/v1/ai/**", "conversation");
         filterMap.put("/api/v1/support/**", "conversation");

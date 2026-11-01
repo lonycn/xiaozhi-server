@@ -62,6 +62,11 @@ class ExternalProtocolTest {
     @Test void whitelistAllowsOwnChatMediaAndHandoffButRejectsLegacyStaffRtcAndUnknown() {
         String id="a".repeat(32);
         for(String path:List.of("/api/v1/ai/conversations","/api/v1/ai/conversations/"+id+"/messages","/api/v1/ai/conversations/"+id+"/handoff","/api/v1/ai/uploads/init","/api/v1/support/annotations"))assertTrue(ExternalPathPolicy.allowed("POST",path),path);
+        assertTrue(ExternalPathPolicy.allowed("POST","/api/v1/support/requests/"+id+"/end"));
+        assertTrue(ExternalPathPolicy.allowed("GET","/api/v1/external/media-invitations"));
+        assertTrue(ExternalPathPolicy.allowed("GET","/api/v1/app/capabilities"));
+        assertFalse(ExternalPathPolicy.allowed("GET","/api/v1/support/media-invitations"));
+        assertEquals(java.util.Set.of("after","limit"),ExternalPathPolicy.queryKeys("GET","/api/v1/external/media-invitations"));
         assertTrue(ExternalPathPolicy.allowed("POST","/api/v1/support/media-sessions/123/token"));
         assertFalse(ExternalPathPolicy.allowed("GET","/api/v1/support/media-sessions/123/token"));
         assertFalse(ExternalPathPolicy.allowed("POST","/api/v1/support/media-transfers/123/accept"));

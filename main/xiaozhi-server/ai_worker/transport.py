@@ -50,6 +50,38 @@ class Manager:
         return await self.post('runs/' + task['run_id'] + '/' + action,
                                {'lease_token': task['lease_token'], **body}, retry=action != 'heartbeat')
 
+    async def tools(self, task, round_number, calls, maximum):
+        # Only this fixed authenticated endpoint. No provider URL/function can reach transport.
+        # Manager serializes Java long identifiers/epochs as decimal strings. Proposals use
+        # strictly typed integral fields, validated by policy before this fixed transport.
+        body = {'lease_token': task['lease_token'], 'attempt': int(task['attempt']),
+                'control_epoch': int(task['control_epoch']), 'round': round_number, 'calls': calls}
+        path = 'internal/ai-worker/runs/' + task['run_id'] + '/tools'
+        # A lost ACK is retried with identical call IDs/arguments. Java owns idempotency.
+        for attempt in range(3):
+            try:
+                async with self.client.stream('POST', path, json=body,
+                        headers={'Accept-Encoding': 'identity'}, timeout=httpx.Timeout(30, connect=5)) as response:
+                    if response.status_code in (401, 403, 409, 410):
+                        raise LeaseLost()
+                    if response.status_code != 200 or response.headers.get('content-encoding', 'identity') != 'identity':
+                        raise ControlError()
+                    result = bytearray()
+                    async for part in response.aiter_bytes(16384):
+                        result.extend(part)
+                        if len(result) > maximum:
+                            from .provider import ProviderFailure
+                            raise ProviderFailure('TOOL_LIMIT_EXCEEDED')
+                    import json
+                    payload = json.loads(result)
+                    if not isinstance(payload, dict) or payload.get('code') != 0 or 'data' not in payload:
+                        raise ControlError()
+                    return payload['data']
+            except (httpx.TransportError, ControlError, ValueError):
+                if attempt == 2:
+                    raise ControlError() from None
+                await asyncio.sleep(.25 * (2 ** attempt))
+
     async def media(self, task, ref, maximum):
         """Only current-run derivative capabilities; never accept a URL from a task."""
         run_id, attachment_id = task.get('run_id'), ref.get('attachment_id')

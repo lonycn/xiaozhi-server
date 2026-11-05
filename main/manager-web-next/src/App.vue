@@ -1,4 +1,9 @@
-<template><el-config-provider :locale="elementLocale"><router-view v-if="anonymous" /><AdminLayout v-else><router-view /></AdminLayout></el-config-provider></template>
+<template>
+  <el-config-provider :locale="elementLocale">
+    <router-view v-if="anonymous" />
+    <AdminLayout v-else><router-view class="admin-route-page" /></AdminLayout>
+  </el-config-provider>
+</template>
 <script>
 import i18n, { elementLocales } from './i18n';
 import AdminLayout from './layouts/AdminLayout.vue';
@@ -16,7 +21,7 @@ export default {
 };
 </script>
 <style lang="scss">
-#app { font-family: Avenir, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-align: center; color: #2c3e50; }
-.copyright { padding: 0 !important; color: #000; font-size: 12px; font-weight: 400; margin-top: auto; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+#app { font-family: var(--admin-font-family); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-align: center; color: #2c3e50; }
+.copyright { padding: 0 !important; color: #000; font-size: var(--admin-font-xs); font-weight: 400; margin-top: auto; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
 .el-message { top: 70px !important; }
 </style>

@@ -8,7 +8,7 @@
         :close-on-click-modal="false"
         class="chat-history-dialog">
         <template v-slot:title>
-            <span style="font-size: 18px;">
+            <span style="font-size: var(--admin-font-lg);">
                 {{ $t('chatHistory.with') + agentName + $t('chatHistory.dialogTitle') }}
                 <template v-if="currentMacAddress">
                     [<MacAddressMask :macAddress="currentMacAddress" />]
@@ -464,7 +464,7 @@ export default {
 }
 
 .session-time {
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     color: #272727;
     float: left;
     height: 30px;
@@ -477,7 +477,7 @@ export default {
 }
 
 .message-count {
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     color: #fff;
     background-color: #b4b4b4;
     border-radius: 20px;
@@ -518,7 +518,7 @@ export default {
 }
 
 .audio-icon {
-    font-size: 20px;
+    font-size: var(--admin-font-title);
     cursor: pointer;
     margin: 0 5px;
     color: #1890ff;
@@ -545,9 +545,9 @@ export default {
 
 .tool-call-text {
     color: #1890ff;
-    font-family: 'Courier New', monospace;
+    font-family: var(--admin-font-mono);
     font-weight: 500;
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
     display: block;
     margin-top: 4px;
 }
@@ -577,7 +577,7 @@ export default {
     top: 0;
     cursor: pointer;
     color: #1890ff;
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
 }
 
 .tool-toggle-btn:hover {
@@ -603,7 +603,7 @@ export default {
     text-align: center;
     margin: 10px 0;
     color: #999;
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
 }
 
 .time-divider::before,

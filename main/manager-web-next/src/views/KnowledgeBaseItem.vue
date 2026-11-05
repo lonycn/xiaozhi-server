@@ -418,13 +418,13 @@ export default {
 }
 
 .doc-section-title {
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   font-weight: 500;
   color: #1f2a44;
 }
 
 .doc-section-count {
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   color: #788ba8;
 }
 
@@ -496,7 +496,7 @@ export default {
 }
 
 .doc-card-name {
-  font-size: 15px;
+  font-size: var(--admin-font-base);
   font-weight: 500;
   color: #1f2a44;
   white-space: nowrap;
@@ -506,7 +506,7 @@ export default {
 }
 
 .doc-card-meta {
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   color: #7888a8;
 }
 
@@ -557,7 +557,7 @@ export default {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 10px;
+  font-size: var(--admin-font-xs);
   font-weight: 600;
   color: #7888a8;
 }
@@ -569,7 +569,7 @@ export default {
   justify-content: space-between;
   align-items: flex-start;
   .progress-label {
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
     color: #7888a8;
   
     &.complete { color: #34c759; }
@@ -577,10 +577,10 @@ export default {
   }
 
   .doc-slice-count {
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
     > b {
       font-weight: bold;
-      font-size: 14px;
+      font-size: var(--admin-font-base);
     }
   }
 }
@@ -593,7 +593,7 @@ export default {
 
   :deep(.el-button.is-link) {
     padding: 4px 8px;
-    font-size: 13px;
+    font-size: var(--admin-font-base);
   }
 
   .delete-btn {
@@ -612,10 +612,10 @@ export default {
   justify-content: center;
   min-height: 300px;
   color: #b0bbc9;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 
   i {
-    font-size: 48px;
+    font-size: var(--admin-font-illustration-lg);
     margin-bottom: 12px;
   }
 }

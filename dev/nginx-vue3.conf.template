@@ -18,6 +18,11 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+
+        location ~ "^/xiaozhi/api/v1/ai/conversations/[a-f0-9]{32}/stream$" {
+            proxy_buffering off;
+            proxy_read_timeout 60s;
+        }
     }
 
     location / {

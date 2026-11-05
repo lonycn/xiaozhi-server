@@ -1978,6 +1978,9 @@ export default {
       if (field === "summaryMemory") {
         return value === null || value === undefined || String(value).trim() === "" ? "" : String(value);
       }
+      if (field === "esp32ReplyLength") {
+        return value ?? "standard";
+      }
       if (field === "correctWordFileIds" || field === "tagNames") {
         return Array.isArray(value)
           ? value.filter((item) => item !== null && item !== undefined && String(item).trim() !== "")
@@ -2035,6 +2038,9 @@ export default {
       if (field === "chatHistoryConf") {
         return this.translateKey(CHAT_HISTORY_CONF_LABEL_KEYS[value] || CHAT_HISTORY_CONF_LABEL_KEYS[Number(value)])
           || this.formatValue(value);
+      }
+      if (field === "esp32ReplyLength") {
+        return this.$t(`roleConfig.esp32ReplyLength.${value ?? "standard"}`);
       }
       if (field === "correctWordFileIds") {
         return this.correctWordDisplayNames(value);
@@ -2138,14 +2144,14 @@ export default {
 
 :deep(.el-dialog__title) {
   color: #1a1a1a;
-  font-size: 16px;
+  font-size: var(--admin-font-md);
   font-weight: 500;
 }
 
 .snapshot-dialog-title {
   display: inline-flex;
   align-items: center;
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
 
   > span {
     line-height: 18px;
@@ -2161,7 +2167,7 @@ export default {
   height: 24px;
   margin-right: 8px;
   color: #4a7cfd;
-  font-size: 24px;
+  font-size: var(--admin-font-xl);
   line-height: 1;
 }
 
@@ -2181,7 +2187,7 @@ export default {
   .el-dialog__close {
     position: static;
     color: #666;
-    font-size: 18px;
+    font-size: var(--admin-font-lg);
     transform: none;
   }
 
@@ -2218,7 +2224,7 @@ export default {
   height: 36px;
   padding: 10px 20px;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   transition: all 0.3s ease;
 
   & + .snapshot-footer-button {
@@ -2276,7 +2282,7 @@ export default {
 
 .confirm-icon {
   margin-right: 5px;
-  font-size: 16px;
+  font-size: var(--admin-font-md);
 }
 
 .snapshot-table {
@@ -2342,7 +2348,7 @@ export default {
   gap: 8px;
   margin-bottom: 16px;
   color: #606266;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   text-align: left;
 }
 
@@ -2366,7 +2372,7 @@ export default {
   border-bottom: 1px solid #e9e9e9;
   background: #fafbff;
   color: #3d4566;
-  font-size: 16px;
+  font-size: var(--admin-font-md);
   font-weight: 700;
   text-align: left;
 }
@@ -2403,7 +2409,7 @@ export default {
 .diff-pane-title {
   margin-bottom: 8px;
   color: #3d4566;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   font-weight: 600;
   line-height: 1.4;
   text-align: left;
@@ -2417,7 +2423,7 @@ export default {
   padding: 9px 12px;
   margin: 0;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   line-height: 1.45;
   word-break: break-word;
   text-align: left;
@@ -2440,8 +2446,8 @@ export default {
 
 .diff-text {
   margin: 0;
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 12px;
+  font-family: var(--admin-font-mono);
+  font-size: var(--admin-font-xs);
   line-height: 1.45;
   white-space: pre-wrap;
   text-align: left;
@@ -2451,7 +2457,7 @@ export default {
 :deep(.code-diff-view .blob-num),
 :deep(.code-diff-view .blob-code-inner),
 :deep(.code-diff-view .file-header) {
-  font-family: Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--admin-font-family);
 }
 
 :deep(.code-diff-view::-webkit-scrollbar) {
@@ -2469,7 +2475,7 @@ export default {
 }
 
 :deep(.code-diff-view .blob-code-inner) {
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   line-height: 1.45;
   font-style: normal;
 }
@@ -2563,7 +2569,7 @@ export default {
 
 .function-change-name {
   color: #30415f;
-  font-size: 16px;
+  font-size: var(--admin-font-md);
   font-weight: 500;
   line-height: 1.4;
   word-break: break-word;
@@ -2574,7 +2580,7 @@ export default {
   border-radius: 999px;
   background: #eef4ff;
   color: #4d65d9;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   line-height: 1.5;
 }
 
@@ -2622,7 +2628,7 @@ export default {
   align-items: center;
   margin-bottom: 8px;
   color: #3d4566;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   font-weight: 600;
 }
 
@@ -2632,7 +2638,7 @@ export default {
   border-radius: 999px;
   background: #edf8e8;
   color: #4f9b2d;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   font-weight: 400;
   line-height: 1.5;
 }
@@ -2668,7 +2674,7 @@ export default {
   min-height: 28px;
   padding: 5px 10px 5px 0;
   color: #69738f;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   line-height: 1.35;
   text-align: right;
   overflow-wrap: anywhere;
@@ -2680,8 +2686,8 @@ export default {
   padding: 5px 0 5px 10px;
   border-left: 1px solid #e6ebf5;
   color: #303133;
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 12px;
+  font-family: var(--admin-font-mono);
+  font-size: var(--admin-font-xs);
   line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2689,18 +2695,18 @@ export default {
 
 .function-state-empty {
   color: #a3a8b8;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   line-height: 1.6;
 }
 
 .value-empty {
   color: #a3a8b8;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
 }
 
 .markdown-body {
   color: inherit;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   line-height: 1.7;
   text-align: left;
   white-space: normal;
@@ -2717,16 +2723,16 @@ export default {
 }
 
 .markdown-body :deep(h1) {
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
 }
 
 .markdown-body :deep(h2) {
-  font-size: 16px;
+  font-size: var(--admin-font-md);
 }
 
 .markdown-body :deep(h3),
 .markdown-body :deep(h4) {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 
 .markdown-body :deep(p) {
@@ -2754,8 +2760,8 @@ export default {
   border-radius: 4px;
   background: rgba(87, 120, 255, 0.12);
   color: #3d4566;
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 12px;
+  font-family: var(--admin-font-mono);
+  font-size: var(--admin-font-xs);
 }
 
 .markdown-body :deep(strong) {

@@ -232,7 +232,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
   }
 }
 </style>

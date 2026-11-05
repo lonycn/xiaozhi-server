@@ -1,6 +1,6 @@
 <template>
   <section class="attachment-composer" :aria-label="$t('attachments.draft')">
-    <div class="attachment-toolbar"><label class="attachment-picker" :class="{ disabled: disabled || !conversationId || unavailable }"><input ref="picker" type="file" multiple :accept="accept" :disabled="disabled || !conversationId || unavailable" @change="choose" /><span>{{ $t('attachments.add') }}</span></label><small>{{ $t('attachments.limits') }}</small></div>
+    <div class="attachment-toolbar"><label class="attachment-picker" :class="{ disabled: disabled || !conversationId || unavailable }"><input ref="picker" type="file" multiple :accept="pickerAccept" :disabled="disabled || !conversationId || unavailable" @change="choose" /><span>{{ $t('attachments.add') }}</span></label><small>{{ limitsLabel || $t('attachments.limits') }}</small></div>
     <p v-if="unavailable" role="status">{{ $t('attachments.unavailable') }}</p>
     <p v-if="validationError" role="alert">{{ $t(validationError) }}</p>
     <ol v-if="modelValue.length" class="attachment-list">
@@ -18,10 +18,10 @@ import attachmentApi from '../apis/module/attachment';
 import { ATTACHMENT_ACCEPT, ATTACHMENT_TYPES, attachmentValidation, attachmentRowsReady, createAttachmentDraftController } from '../utils/attachments.mjs';
 export default {
   name: 'AttachmentComposer',
-  props: { modelValue: { type: Array, default: () => [] }, conversationId: { type: String, default: '' }, identity: { type: String, default: '' }, disabled: Boolean },
+  props: { modelValue: { type: Array, default: () => [] }, conversationId: { type: String, default: '' }, identity: { type: String, default: '' }, disabled: Boolean, allowedKinds: {type:Array,default:null}, accept: {type:String,default:''}, maxFiles:{type:Number,default:10},limitsLabel:{type:String,default:''} },
   emits: ['update:modelValue'],
-  data: () => ({ accept: ATTACHMENT_ACCEPT, validationError: '', unavailable: false, controller: null }),
-  computed: { ready() { return attachmentRowsReady(this.modelValue); }, context() { return JSON.stringify([this.conversationId, this.identity]); } },
+  data: () => ({ validationError: '', unavailable: false, controller: null }),
+  computed: { pickerAccept(){return this.accept||(this.allowedKinds?Object.entries(ATTACHMENT_TYPES).filter(([,value])=>this.allowedKinds.includes(value.kind)).map(([mime])=>mime).join(','):ATTACHMENT_ACCEPT);},ready() { return attachmentRowsReady(this.modelValue); }, context() { return JSON.stringify([this.conversationId, this.identity]); } },
   watch: { context: { flush: 'sync', handler() { this.controller?.activate(this.conversationId); this.validationError = ''; } }, identity() { this.unavailable = false; } },
   created() {
     this.controller = markRaw(createAttachmentDraftController({ client: attachmentApi, rows: () => this.modelValue, changed: () => this.$emit('update:modelValue', [...this.modelValue]), unavailable: () => { this.unavailable = true; } }));
@@ -30,11 +30,35 @@ export default {
   beforeUnmount() { this.controller.cancel(); },
   methods: {
     formatSize(size) { return size < 1024 * 1024 ? `${Math.ceil(size / 1024)} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`; },
-    async choose(event) {
+    choose(event) {
       const files = Array.from(event.target.files || []); event.target.value = '';
+      return this.addFiles(files);
+    },
+    pasteImages(event) {
+      const clipboard = event.clipboardData;
+      if (event.defaultPrevented || !clipboard || this.disabled || !this.conversationId || this.unavailable) return;
+      let images = Array.from(clipboard.files || []).filter(file => file.type.startsWith('image/'));
+      if (!images.length) {
+        images = Array.from(clipboard.items || [])
+          .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+          .map(item => item.getAsFile())
+          .filter(Boolean);
+      }
+      if (!images.length) return;
+      if (!Array.from(clipboard.types || []).includes('text/plain')) event.preventDefault();
+      return this.addFiles(images.map(file => {
+        const extensions = ATTACHMENT_TYPES[file.type]?.extensions;
+        const extension = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+        if (!extensions || extensions.includes(extension)) return file;
+        return new File([file], `clipboard-image.${extensions[0]}`, { type: file.type, lastModified: file.lastModified });
+      }));
+    },
+    async addFiles(files) {
       if (this.disabled || !this.conversationId || this.unavailable) return;
       this.validationError = ''; const next = [...this.modelValue], added = [];
       for (const file of files) {
+        if(this.allowedKinds&&!this.allowedKinds.includes(ATTACHMENT_TYPES[file.type]?.kind)){this.validationError='attachments.type';continue;}
+        if(next.length>=this.maxFiles){this.validationError='attachments.count';continue;}
         const error = attachmentValidation(file, next);
         if (error) { this.validationError = `attachments.${error}`; continue; }
         const row = { file: markRaw(file), clientUploadId: crypto.randomUUID(), kind: ATTACHMENT_TYPES[file.type].kind, status: 'paused', progress: 0, error: '', sha256: '', attachment: null };
@@ -51,7 +75,7 @@ export default {
 };
 </script>
 <style scoped>
-.attachment-composer { margin: 8px 0; font-size: 12px; text-align: left; color: #65758b; }
+.attachment-composer { margin: 8px 0; font-size: var(--admin-font-xs); text-align: left; color: #65758b; }
 .attachment-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .attachment-picker { display: inline-flex; position: relative; overflow: hidden; border: 1px solid #dce5f6; border-radius: 6px; padding: 6px 10px; color: #386acf; background: #f7faff; cursor: pointer; }
 .attachment-picker:focus-within { outline: 2px solid #83a5f8; outline-offset: 2px; }.attachment-picker.disabled { opacity: .5; cursor: not-allowed; }

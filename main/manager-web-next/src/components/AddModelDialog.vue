@@ -335,7 +335,7 @@ export default {
 
   .section-title {
     margin-bottom: 10px;
-    font-size: 20px;
+    font-size: var(--admin-font-title);
     font-weight: bold;
     color: #3d4566;
     text-align: left;

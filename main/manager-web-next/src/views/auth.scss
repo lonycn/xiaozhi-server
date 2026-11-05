@@ -20,7 +20,7 @@
 
 .login-text {
   font-weight: 700;
-  font-size: 25px;
+  font-size: var(--admin-font-xl);
   text-align: left;
   color: #3d4566;
   white-space: nowrap;
@@ -29,7 +29,7 @@
 
 .login-welcome {
   font-weight: 400;
-  font-size: 9px;
+  font-size: var(--admin-font-xs);
   text-align: left;
   color: #818cae;
   align-self: flex-end;
@@ -50,7 +50,7 @@
 
 .el-dropdown-link {
   font-weight: 400;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   text-align: left;
   color: #979db1;
 }
@@ -66,7 +66,7 @@
   background: #5778ff;
   border-radius: 10px;
   font-weight: 400;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   cursor: pointer;
   color: #fff;
   line-height: 35px;
@@ -152,7 +152,7 @@
   .welcome .el-main { padding: 24px 16px; overflow: visible; }
   .login-person { display: none; }
   .login-box { position: relative; top: auto; right: auto; transform: none; margin: 24px auto; width: min(450px, 100%); }
-  .login-text { white-space: normal; font-size: 22px; }
+  .login-text { white-space: normal; font-size: var(--admin-font-title); }
   .login-welcome { display: none; }
   .input-box { min-width: 0; gap: 12px; }
   .input-box :deep(.el-select) { min-width: 80px; }

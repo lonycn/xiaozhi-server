@@ -8,11 +8,11 @@
     :confirmLoading="saving"
     @confirm="handleSave"
     @close="handleClose"
-    @open="handleOpen"
   >
     <div class="header-row">
       <div class="section-title">{{ $t("modelConfigDialog.modelInfo") }}</div>
       <div class="switch-group">
+        <el-button type="primary" plain :disabled="!form.id || !form.configJson.type" @click="openModelTest">{{ $t('modelTest.title') }}</el-button>
         <div class="switch-item">
           <span class="switch-label">{{ $t("modelConfigDialog.enable") }}</span>
           <el-switch v-model="form.isEnabled" :active-value="1" :inactive-value="0" class="custom-switch"></el-switch>
@@ -99,16 +99,18 @@
       </template>
     </el-form>
   </CustomDialog>
+  <ModelTestDialog v-model:visible="testVisible" :model-id="form.id" :model-name="form.modelName" :model-type="modelType" :config-json="testConfig" />
 </template>
 
 <script>
 import CustomDialog from './CustomDialog.vue';
+import ModelTestDialog from './ModelTestDialog.vue';
 import Api from "@/apis/api";
 
 export default {
   emits: ["update:visible","save"],
   name: "ModelEditDialog",
-  components: { CustomDialog },
+  components: { CustomDialog, ModelTestDialog },
   props: {
     visible: { type: Boolean, default: false },
     modelData: {
@@ -121,6 +123,8 @@ export default {
   data() {
     return {
       dialogVisible: this.visible,
+      testVisible: false,
+      testConfig: {},
       providers: [],
       providersLoaded: false,
       saving: false,
@@ -173,8 +177,16 @@ export default {
       this.resetProviders();
       this.loadProviders();
     },
-    visible(val) {
-      this.dialogVisible = val;
+    visible: {
+      immediate: true,
+      handler(val) {
+        this.dialogVisible = val;
+        if (val) {
+          this.$nextTick(() => {
+            if (this.dialogVisible) this.handleOpen();
+          });
+        }
+      },
     },
     dialogVisible(val) {
       this.$emit("update:visible", val);
@@ -186,6 +198,16 @@ export default {
     },
   },
   methods: {
+    openModelTest() {
+      const config = { ...this.form.configJson };
+      for (const [key, value] of Object.entries(this.fieldJsonMap)) {
+        const parsed = this.validateJson(value);
+        if (parsed === null) return;
+        config[key] = parsed;
+      }
+      this.testConfig = JSON.parse(JSON.stringify(config));
+      this.testVisible = true;
+    },
     handleOpen() {
       this.loadProviders();
       if (this.modelData.id) {
@@ -193,6 +215,7 @@ export default {
       }
     },
     handleClose() {
+      this.testVisible = false;
       this.saving = false;
       // 处理关闭弹窗闪动问题
       setTimeout(() => {
@@ -495,7 +518,7 @@ export default {
 
   .section-title {
     margin-bottom: 10px;
-    font-size: 20px;
+    font-size: var(--admin-font-title);
     font-weight: bold;
     color: #3d4566;
     text-align: left;

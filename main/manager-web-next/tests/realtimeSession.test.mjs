@@ -7,13 +7,28 @@ function harness(){
  const playback={resume:vi.fn(async()=>{}),close:vi.fn(async()=>{}),clear:vi.fn(),response:vi.fn(),append:vi.fn()},playbackFactory=vi.fn(()=>playback);
  const captureFactory=vi.fn(options=>{const capture={options,start:vi.fn(async()=>{}),stop:vi.fn(async()=>{}),stopCamera:vi.fn()};captures.push(capture);return capture;});
  const socketFactory=vi.fn(url=>{const ws={url,readyState:0,bufferedAmount:0,send:vi.fn(),close:vi.fn()};sockets.push(ws);return ws;});
- const networkTarget=new EventTarget();const changed=vi.fn(),history=vi.fn(),owner=createRealtimeSession({client,socketFactory,captureFactory,playbackFactory,changed,history,clock:()=>now,networkTarget});
+ const networkTarget=new EventTarget(),visibilityTarget=new EventTarget();visibilityTarget.hidden=false;const changed=vi.fn(),history=vi.fn(),owner=createRealtimeSession({client,socketFactory,captureFactory,playbackFactory,changed,history,clock:()=>now,networkTarget,visibilityTarget});
  const frame=(type,fields={})=>sockets.at(-1).onmessage?.({data:JSON.stringify({type,session_id:'session',control_epoch:3,...fields})});
  const connect=async(camera=false,mode='manual')=>{server=base({consent:{microphone:true,camera},turn_detection_mode:mode});await owner.start('c',{microphone:true,camera},'stable',mode);const ws=sockets.at(-1);ws.readyState=1;ws.onopen();frame('connected');frame('ready');};
- return {owner,client,playback,playbackFactory,captureFactory,captures,sockets,socketFactory,frame,connect,changed,history,networkTarget,setServer:value=>{server=value;},advance:ms=>{now+=ms;}};
+ return {owner,client,playback,playbackFactory,captureFactory,captures,sockets,socketFactory,frame,connect,changed,history,networkTarget,visibilityTarget,setServer:value=>{server=value;},advance:ms=>{now+=ms;}};
 }
 beforeEach(()=>vi.useFakeTimers());afterEach(()=>vi.useRealTimers());
 describe('realtime AI protocol, manual input and cancellation',()=>{
+ it('refuses startup while hidden or offline and requires a fresh explicit action after restoration',async()=>{
+  for(const cause of ['hidden','offline']){
+   const h=harness();if(cause==='hidden')h.visibilityTarget.hidden=true;else h.networkTarget.dispatchEvent(new Event('offline'));
+   await h.owner.start('c',{microphone:true,camera:false},'stable');expect(h.playbackFactory).not.toHaveBeenCalled();expect(h.client.create).not.toHaveBeenCalled();expect(h.socketFactory).not.toHaveBeenCalled();
+   h.visibilityTarget.hidden=false;h.visibilityTarget.dispatchEvent(new Event('visibilitychange'));h.networkTarget.dispatchEvent(new Event('online'));await vi.advanceTimersByTimeAsync(30000);expect(h.client.create).not.toHaveBeenCalled();await h.connect();expect(h.client.create).toHaveBeenCalledOnce();h.owner.dispose();
+  }
+ });
+ it('cancels hidden startup while playback is pending and never creates a remote session later',async()=>{
+  const h=harness();let resume;h.playback.resume.mockReturnValueOnce(new Promise(resolve=>{resume=resolve;}));const pending=h.owner.start('c',{microphone:true,camera:false},'stable');
+  h.visibilityTarget.hidden=true;h.visibilityTarget.dispatchEvent(new Event('visibilitychange'));expect(h.playback.close).toHaveBeenCalledOnce();resume();await pending;expect(h.client.create).not.toHaveBeenCalled();expect(h.socketFactory).not.toHaveBeenCalled();expect(h.owner.snapshot()).toMatchObject({status:'failed',error:'realtime.connectionLost'});h.owner.dispose();
+ });
+ it('fences a session-create response after the page hides, including an already accepted remote create',async()=>{
+  const h=harness();let finish;h.client.create.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));const pending=h.owner.start('c',{microphone:true,camera:false},'stable');await Promise.resolve();const signal=h.client.create.mock.calls[0][1];
+  h.visibilityTarget.hidden=true;h.visibilityTarget.dispatchEvent(new Event('visibilitychange'));expect(signal.aborted).toBe(true);finish(base());await pending;expect(h.client.ticket).not.toHaveBeenCalled();expect(h.socketFactory).not.toHaveBeenCalled();expect(h.captureFactory).not.toHaveBeenCalled();expect(h.playback.close).toHaveBeenCalledOnce();h.owner.dispose();
+ });
  it('starts continuous capture only on explicit action and retains it across automatic turns and barge-in',async()=>{
   const h=harness();await h.connect(false,'server_vad');expect(h.captureFactory).not.toHaveBeenCalled();expect(h.client.create.mock.calls[0][0].turn_detection_mode).toBe('server_vad');await h.owner.beginTurn();expect(h.captureFactory).not.toHaveBeenCalled();
   await h.owner.startListening();expect(h.owner.snapshot()).toMatchObject({listening:false,listeningPending:true});h.frame('listening.started');expect(h.owner.snapshot()).toMatchObject({listening:true,listeningPending:false});

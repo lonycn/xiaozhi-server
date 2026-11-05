@@ -590,14 +590,14 @@ export default {
     align-items: center;
     justify-content: center;
     font-weight: 600;
-    font-size: 16px;
+    font-size: var(--admin-font-md);
     z-index: 1;
 }
 
 .step-label {
     margin-left: 12px;
     color: #909399;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
 }
 
 .step-line {
@@ -628,7 +628,7 @@ export default {
         justify-content: center;
 
         .el-icon-upload {
-            font-size: 67px;
+            font-size: var(--admin-font-illustration-xl);
             color: #c0c4cc;
             margin: 0 0 16px;
             line-height: 50px;
@@ -637,12 +637,12 @@ export default {
 
     .el-upload__text {
         color: #606266;
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         margin-bottom: 8px;
     }
 
     .el-upload__tip {
-        font-size: 12px;
+        font-size: var(--admin-font-xs);
         color: #909399;
         margin-top: 7px;
     }
@@ -661,7 +661,7 @@ export default {
 
     p {
         margin: 4px 0;
-        font-size: 13px;
+        font-size: var(--admin-font-base);
         color: #606266;
 
         &:first-child {
@@ -703,7 +703,7 @@ export default {
     color: white;
     padding: 4px 8px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
 }
 
 .audio-controls {

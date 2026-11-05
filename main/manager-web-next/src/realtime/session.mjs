@@ -1,19 +1,23 @@
 import {base64Bytes,bytesBase64} from './pcm.mjs';
 import {createBrowserCapture,audioContext} from './browserMedia.mjs';
 import {createPcmPlayback} from './playback.mjs';
+import {createRealtimeMaterials} from './materials.mjs';
 export const REALTIME_TERMINAL=new Set(['ended','failed','expired','canceled']);
-export function realtimeErrorKey(error){const code=error?.code||error?.message;if(error?.name==='NotAllowedError'||error?.name==='SecurityError')return 'realtime.permission';if(error?.status===404)return 'realtime.unavailable';if(error?.status===401||error?.status===403)return 'realtime.denied';if(code==='AUDIO_UNAVAILABLE')return 'realtime.audioUnavailable';if(error?.name==='NotFoundError')return 'realtime.deviceMissing';if(code==='OMNI_AUDIO_LIMIT')return 'ai.omniAudioLimit';if(code==='SESSION_LIMIT')return 'realtime.sessionLimit';if(code==='NETWORK_UNAVAILABLE')return 'realtime.networkUnavailable';if(['SOCKET_ERROR','SOCKET_CLOSED','CLIENT_DISCONNECTED','CONNECTION_TIMEOUT'].includes(code))return 'realtime.connectionLost';if(code==='RESPONSE_IN_PROGRESS')return 'realtime.responseBusy';if(code==='INPUT_LIMIT')return 'realtime.inputLimit';if(code==='AUDIO_TURN_LIMIT')return 'realtime.turnLimit';if(['OUTPUT_LIMIT','FRAME_LIMIT','BACKPRESSURE'].includes(code))return 'realtime.resourceLimit';if(code==='TIMEOUT'||code==='PROVIDER_TIMEOUT')return 'realtime.timeout';if(code==='COMMAND_UNCONFIRMED')return 'realtime.unconfirmed';if(error?.status===409||code==='REALTIME_EPOCH_CHANGED')return 'realtime.changed';return 'realtime.failed';}
+export function realtimeErrorKey(error){const code=error?.code||error?.message;const runtime={AI_RUNTIME_USER_CONCURRENCY:'ai.runtimeConcurrency',AI_RUNTIME_SERVICE_CONCURRENCY:'ai.runtimeServiceBusy',AI_RUNTIME_USER_HOURLY_BUDGET:'ai.runtimeHourlyBudget',AI_RUNTIME_SERVICE_HOURLY_BUDGET:'ai.runtimeHourlyBudget'};if(runtime[code])return runtime[code];if(error?.name==='NotAllowedError'||error?.name==='SecurityError')return 'realtime.permission';if(error?.status===404)return 'realtime.unavailable';if(error?.status===401||error?.status===403)return 'realtime.denied';if(code==='AUDIO_UNAVAILABLE')return 'realtime.audioUnavailable';if(error?.name==='NotFoundError')return 'realtime.deviceMissing';if(code==='OMNI_AUDIO_LIMIT')return 'ai.omniAudioLimit';if(code==='SESSION_LIMIT')return 'realtime.sessionLimit';if(code==='NETWORK_UNAVAILABLE')return 'realtime.networkUnavailable';if(['SOCKET_ERROR','SOCKET_CLOSED','CLIENT_DISCONNECTED','CONNECTION_TIMEOUT'].includes(code))return 'realtime.connectionLost';if(code==='RESPONSE_IN_PROGRESS')return 'realtime.responseBusy';if(code==='INPUT_LIMIT')return 'realtime.inputLimit';if(code==='AUDIO_TURN_LIMIT')return 'realtime.turnLimit';if(['OUTPUT_LIMIT','FRAME_LIMIT','BACKPRESSURE'].includes(code))return 'realtime.resourceLimit';if(code==='TIMEOUT'||code==='PROVIDER_TIMEOUT')return 'realtime.timeout';if(code==='COMMAND_UNCONFIRMED')return 'realtime.unconfirmed';if(error?.status===409||code==='REALTIME_EPOCH_CHANGED')return 'realtime.changed';return 'realtime.failed';}
 /** A separate AI provider lifecycle; never reuse a human RTC room or JWT. */
-export function createRealtimeSession({client,changed=()=>{},history=()=>{},socketFactory=url=>new WebSocket(url),captureFactory=createBrowserCapture,playbackFactory=()=>createPcmPlayback(audioContext()),clock=()=>Date.now(),networkTarget=globalThis}){
+export function createRealtimeSession({client,changed=()=>{},history=()=>{},socketFactory=url=>new WebSocket(url),captureFactory=createBrowserCapture,playbackFactory=()=>createPcmPlayback(audioContext()),clock=()=>Date.now(),networkTarget=globalThis,visibilityTarget=globalThis.document}){
  let state={session:null,status:'idle',error:'',responseId:null,messageId:null,transcript:'',injections:[],cameraSampling:false,turnSeconds:0,turnDetectionMode:'manual',listening:false,listeningPending:false,listeningRequested:false,speechActive:false,connection:'idle',networkAvailable:globalThis.navigator?.onLine!==false};
- let generation=0,disposed=false,controller=new AbortController(),socket=null,capture=null,playback=null,recording=false,turnBytes=0,turnStarted=0,readyTimer=null,turnTimer=null,commandTimer=null,busy=false,lastImageAt=0,commandId=null,cameraStopped=false,listeningRequested=false,listeningTimer=null,captureReady=false,listeningAcknowledged=false;let heartbeatTimer=null,pongTimer=null,pendingPing=null,pingSequence=0,refreshing=false,pollFailures=0;const finishedResponses=new Set();
+ let generation=0,disposed=false,controller=new AbortController(),socket=null,capture=null,playback=null,recording=false,turnBytes=0,turnStarted=0,readyTimer=null,turnTimer=null,commandTimer=null,busy=false,lastImageAt=0,commandId=null,cameraStopped=false,listeningRequested=false,listeningTimer=null,captureReady=false,listeningAcknowledged=false;let heartbeatTimer=null,pongTimer=null,pendingPing=null,pingSequence=0,refreshing=false,pollFailures=0;const finishedResponses=new Set();let materialFrames=[],materialFrameBytes=0,materialResponseKey=null,captureProtocol=false,captureToken=null,captureInputToken=null;
+ const materials=createRealtimeMaterials({client,session:()=>state.session,available:()=>!!socket&&socket.readyState===1&&!['failed','existing','ending'].includes(state.status)&&!REALTIME_TERMINAL.has(state.status),stopLocal:()=>{stopInput();cameraStopped=true;turnBytes=0;clearTimeout(readyTimer);playback?.clear();if(state.responseId)finishedResponses.add(state.responseId);state.responseId=null;state.messageId=null;if(['recording','requesting','committing','waiting','responding','interrupting'].includes(state.status))state.status='active';},changed:value=>{state.materialInput=value;if(value.locked)state.materialResponsePending=false;else if(value.resumeAcknowledged&&value.material?.status==='acknowledged'&&materialResponseKey!==value.pause?.id){materialResponseKey=value.pause.id;state.materialResponsePending=true;}emit();if(!value.locked&&materialFrames.length){const pending=materialFrames;materialFrames=[];materialFrameBytes=0;for(const [frame,version] of pending)onFrame(frame,version);}},history,denied:error=>fail(error)});
  const emit=()=>changed({...state,injections:[...state.injections]});
  const fresh=version=>!disposed&&version===generation&&!controller.signal.aborted;
  function clearTimers(){clearTimeout(readyTimer);clearInterval(turnTimer);clearTimeout(commandTimer);clearTimeout(listeningTimer);clearInterval(heartbeatTimer);clearTimeout(pongTimer);pendingPing=null;}
  function stopInput(){recording=false;listeningRequested=false;state.listeningRequested=false;captureReady=false;listeningAcknowledged=false;state.listeningPending=false;clearTimeout(listeningTimer);state.listening=false;state.speechActive=false;clearInterval(turnTimer);state.cameraSampling=false;const resource=capture;capture=null;resource?.stop().catch(()=>{});}
- function release({keepTransport=false}={}){++generation;controller.abort();controller=new AbortController();clearTimers();stopInput();playback?.close().catch(()=>{});playback=null;const old=socket;if(!keepTransport)socket=null;if(old){old.onopen=null;old.onmessage=null;old.onerror=null;old.onclose=null;if(!keepTransport)old.close(1000);}busy=false;refreshing=false;pollFailures=0;}
+ function release({keepTransport=false}={}){++generation;controller.abort();controller=new AbortController();clearTimers();stopInput();playback?.close().catch(()=>{});playback=null;captureToken=null;captureInputToken=null;captureProtocol=false;materialFrames=[];materialFrameBytes=0;materialResponseKey=null;state.materialResponsePending=false;materials.reset();const old=socket;if(!keepTransport)socket=null;if(old){old.onopen=null;old.onmessage=null;old.onerror=null;old.onclose=null;if(!keepTransport)old.close(1000);}busy=false;refreshing=false;pollFailures=0;}
  function fail(error){release();state={...state,status:'failed',connection:'disconnected',responseId:null,messageId:null,error:realtimeErrorKey(error)};emit();}
  function send(frame){if(!socket||socket.readyState!==1)throw new Error('SOCKET_CLOSED');if(socket.bufferedAmount>256000)throw new Error('BACKPRESSURE');socket.send(JSON.stringify(frame));}
+ const validCaptureToken=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{32}$/.test(value);
+ function sendInput(type,payload={},token=captureInputToken){if(captureProtocol&&!validCaptureToken(token))throw new Error('PROTOCOL_ERROR');send({type,...payload,...(captureProtocol?{capture_token:token}:{})});}
  function monitorConnection(frame,version){
   if(frame.heartbeat_seconds===undefined&&frame.heartbeat_timeout_seconds===undefined)return;
   const interval=frame.heartbeat_seconds,timeout=frame.heartbeat_timeout_seconds;
@@ -24,6 +28,7 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
  const offline=()=>{state.networkAvailable=false;if(socket||state.status==='connecting')fail({code:'NETWORK_UNAVAILABLE'});else emit();};
  const online=()=>{state.networkAvailable=true;if(state.status==='failed'&&['realtime.networkUnavailable','realtime.connectionLost'].includes(state.error))state.error='realtime.networkRestored';emit();};
  networkTarget?.addEventListener?.('offline',offline);networkTarget?.addEventListener?.('online',online);
+ const hidden=()=>{if(visibilityTarget?.hidden&&(capture||socket||state.status==='connecting'))fail({code:'CLIENT_DISCONNECTED'});};visibilityTarget?.addEventListener?.('visibilitychange',hidden);
  function mergeInjections(items){for(const item of items){const index=state.injections.findIndex(old=>old.id===item.id);if(index<0)state.injections.push(item);else if(!['acknowledged','failed'].includes(state.injections[index].status)||item.status===state.injections[index].status)state.injections[index]={...state.injections[index],...item};}}
  function identity(frame){return state.session&&frame.session_id===state.session.id&&frame.control_epoch===state.session.control_epoch;}
  function onFrame(frame,version){
@@ -31,14 +36,20 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
   if(!frame||typeof frame!=='object'||Array.isArray(frame)){fail(new Error('PROTOCOL_ERROR'));return;}
   if(frame?.type==='error'&&!frame.session_id){fail({code:frame.code});return;}
   if(!identity(frame)){fail({code:'REALTIME_EPOCH_CHANGED'});return;}
+  if(state.materialInput?.locked&&['response.started','audio.delta','transcript.delta','response.completed'].includes(frame.type)){
+   if(state.materialInput.resumeAcknowledged&&state.materialInput.phase==='resuming'){
+    materialFrameBytes+=JSON.stringify(frame).length;if(materialFrames.length>=64||materialFrameBytes>1048576){fail(new Error('OUTPUT_LIMIT'));return;}materialFrames.push([frame,version]);
+   }return;
+  }
   switch(frame.type){
+   case 'material.resume_ready':materials.resumeReady(frame,()=>{if(captureProtocol){if(frame.capture_protocol!=='material_capture_v1'||!validCaptureToken(frame.capture_token)||frame.capture_token===captureToken){fail(new Error('PROTOCOL_ERROR'));return false;}captureToken=frame.capture_token;}return true;});return;
    case 'connected':state.status='connecting';break;
    case 'listening.started':if(listeningRequested){clearTimeout(listeningTimer);listeningAcknowledged=true;state.listeningPending=!captureReady;state.listening=captureReady;}break;
    case 'listening.stopped':clearTimeout(listeningTimer);state.listeningPending=false;state.listening=false;state.speechActive=false;state.turnSeconds=0;break;
    case 'speech.started':playback?.clear();if(!listeningRequested)break;state.speechActive=true;turnStarted=clock();state.turnSeconds=0;break;
    case 'speech.stopped':state.speechActive=false;state.turnSeconds=0;break;
    case 'pong':if(pendingPing!==null&&frame.id===pendingPing){pendingPing=null;clearTimeout(pongTimer);state.connection=pollFailures?'degraded':'connected';}break;
-   case 'ready':clearTimeout(readyTimer);state.session={...state.session,status:'active'};state.status='active';state.connection='connected';monitorConnection(frame,version);break;
+   case 'ready':if(captureProtocol){if(frame.capture_protocol!=='material_capture_v1'||!validCaptureToken(frame.capture_token)||captureToken&&captureToken!==frame.capture_token){fail(new Error('PROTOCOL_ERROR'));return;}captureToken=frame.capture_token;}clearTimeout(readyTimer);state.session={...state.session,status:'active'};state.status='active';state.connection='connected';monitorConnection(frame,version);break;
    case 'response.started':
     if(typeof frame.response_id!=='string'||typeof frame.message_id!=='string'||finishedResponses.has(frame.response_id)||state.status==='interrupting')return;
     if(state.turnDetectionMode!=='server_vad')stopInput();state.responseId=frame.response_id;state.messageId=frame.message_id;state.transcript='';state.status='responding';commandId=null;playback?.response(frame.response_id);history();break;
@@ -50,12 +61,12 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
     if(state.transcript.length+frame.delta.length>128000){fail(new Error('OUTPUT_LIMIT'));return;}state.transcript+=frame.delta;break;
    case 'response.completed':
     if(frame.response_id!==state.responseId||state.status==='interrupting')return;
-    state.transcript=typeof frame.text==='string'?frame.text.slice(0,128000):state.transcript;finishedResponses.add(frame.response_id);state.responseId=null;state.status='active';history();break;
+    state.transcript=typeof frame.text==='string'?frame.text.slice(0,128000):state.transcript;finishedResponses.add(frame.response_id);state.responseId=null;state.materialResponsePending=false;state.status='active';history();break;
    case 'response.canceled':
     if(frame.response_id!==state.responseId)return;
     playback?.clear();if(state.turnDetectionMode!=='server_vad')stopInput();
     if(frame.status==='interrupting'){state.status='interrupting';}
-    else if(frame.status==='canceled'){clearTimeout(commandTimer);finishedResponses.add(frame.response_id);state.responseId=null;state.status='active';history();}else return;break;
+    else if(frame.status==='canceled'){clearTimeout(commandTimer);finishedResponses.add(frame.response_id);state.responseId=null;state.materialResponsePending=false;state.status='active';history();}else return;break;
    case 'injection.status':{
     const item=state.injections.find(item=>item.id===frame.injection_id);if(['queued','dispatched','acknowledged','failed'].includes(frame.status))mergeInjections([{...(item||{}),id:frame.injection_id,message_id:frame.message_id||item?.message_id,status:frame.status,provider_item_id:frame.provider_item_id}]);history();break;}
    case 'error':
@@ -73,10 +84,14 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
   mergeInjections(items);
  }
  return {
+  configureMaterials:enabled=>materials.configure(enabled),
+  pauseForMaterials:()=>materials.pause(),submitMaterials:(text,rows)=>materials.submit(text,rows),resumeMaterials:()=>materials.resume(),cancelMaterials:()=>materials.cancel(),refreshMaterials:()=>materials.refresh(),
   snapshot:()=>({...state,injections:[...state.injections]}),
   async discover(conversationId){const version=generation;try{const session=await client.current(conversationId,controller.signal);if(!fresh(version))return;state.session=session;state.turnDetectionMode=session?.turn_detection_mode||'manual';state.status=session&&!REALTIME_TERMINAL.has(session.status)?'existing':'idle';state.error='';emit();}catch(error){if(fresh(version)&&error.name!=='AbortError'){state.status=error.status===404?'unavailable':'failed';state.error=realtimeErrorKey(error);emit();}}},
   async start(conversationId,consent,clientId,turnDetectionMode='manual'){
-   if(busy||disposed||!consent.microphone||!['manual','server_vad'].includes(turnDetectionMode))return;release();cameraStopped=false;finishedResponses.clear();const version=generation;busy=true;state={...state,session:null,status:'connecting',error:'',transcript:'',responseId:null,messageId:null,injections:[],turnDetectionMode,listening:false,listeningPending:false,listeningRequested:false,speechActive:false,connection:'connecting'};emit();
+   if(busy||disposed||!consent.microphone||!['manual','server_vad'].includes(turnDetectionMode))return;
+   if(!state.networkAvailable||visibilityTarget?.hidden){fail({code:!state.networkAvailable?'NETWORK_UNAVAILABLE':'CLIENT_DISCONNECTED'});return;}
+   release();captureProtocol=materials.snapshot().enabled===true;cameraStopped=false;finishedResponses.clear();const version=generation;busy=true;state={...state,session:null,status:'connecting',error:'',transcript:'',responseId:null,messageId:null,injections:[],turnDetectionMode,listening:false,listeningPending:false,listeningRequested:false,speechActive:false,connection:'connecting'};emit();
    try{
     // Resume playback within this explicit user action; microphone permission is a
     // separate manual-recording action after the real provider ready event.
@@ -86,7 +101,7 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
     if(REALTIME_TERMINAL.has(session.status))throw new Error('SESSION_TERMINAL');
     const ticket=await client.ticket(session.id,{expected_epoch:session.control_epoch},controller.signal);if(!fresh(version))return;
     const url=new URL(ticket.websocket_url);if(!['ws:','wss:'].includes(url.protocol)||url.search||url.hash||url.username||url.password||ticket.session_id!==session.id||ticket.control_epoch!==session.control_epoch)throw new Error('INVALID_CONNECT_TICKET');
-    const ws=socketFactory(url.href);socket=ws;ws.onopen=()=>{if(fresh(version)&&socket===ws){try{send({type:'connect',ticket:ticket.ticket});}catch(error){fail(error);}}};
+    const ws=socketFactory(url.href);socket=ws;ws.onopen=()=>{if(fresh(version)&&socket===ws){try{send({type:'connect',ticket:ticket.ticket,...(captureProtocol?{capture_protocol:'material_capture_v1'}:{})});}catch(error){fail(error);}}};
     ws.onmessage=event=>{if(!fresh(version)||typeof event.data!=='string'||event.data.length>300000){if(fresh(version))fail(new Error('OUTPUT_LIMIT'));return;}let frame;try{frame=JSON.parse(event.data);}catch{fail(new Error('PROTOCOL_ERROR'));return;}onFrame(frame,version);};
     ws.onerror=()=>{if(fresh(version))fail(new Error('SOCKET_ERROR'));};
     ws.onclose=()=>{if(!fresh(version))return;socket=null;fail(new Error('CLIENT_DISCONNECTED'));};
@@ -95,33 +110,33 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
   },
   /** Called only by an explicit user action after microphone consent. */
   async startListening(){
-   if(disposed||busy||recording||state.listening||state.listeningPending||state.turnDetectionMode!=='server_vad'||!state.session?.consent?.microphone||!['active','responding'].includes(state.status)||!socket||!playback)return;
-   const version=generation;busy=true;state.error='';recording=true;listeningRequested=true;state.listeningRequested=true;state.listeningPending=true;turnBytes=0;lastImageAt=0;state.turnSeconds=0;
-   const resource=captureFactory({onPcm:bytes=>{if(!fresh(version)||!recording||capture!==resource)return;try{if(!bytes.length||bytes.length%2||bytes.length>65536)throw new Error('INPUT_LIMIT');send({type:'audio.append',audio:bytesBase64(bytes)});turnBytes+=bytes.length;}catch(error){fail(error);}},onFrame:image=>{if(!fresh(version)||!recording||capture!==resource||cameraStopped||!state.session.consent.camera||!turnBytes||clock()-lastImageAt<1000)return false;try{if(image.length>256000)throw new Error('FRAME_LIMIT');send({type:'frame.append',image,mime_type:'image/jpeg'});lastImageAt=clock();return true;}catch(error){fail(error);return false;}},onError:error=>{if(fresh(version)&&capture===resource)fail(error);}});
+   if(disposed||state.materialInput?.locked||state.materialResponsePending||busy||recording||state.listening||state.listeningPending||state.turnDetectionMode!=='server_vad'||!state.session?.consent?.microphone||!['active','responding'].includes(state.status)||!socket||!playback)return;
+   const version=generation,inputToken=captureToken;captureInputToken=inputToken;busy=true;state.error='';recording=true;listeningRequested=true;state.listeningRequested=true;state.listeningPending=true;turnBytes=0;lastImageAt=0;state.turnSeconds=0;
+   const resource=captureFactory({onPcm:bytes=>{if(!fresh(version)||!recording||capture!==resource)return;try{if(!bytes.length||bytes.length%2||bytes.length>65536)throw new Error('INPUT_LIMIT');sendInput('audio.append',{audio:bytesBase64(bytes)},inputToken);turnBytes+=bytes.length;}catch(error){fail(error);}},onFrame:image=>{if(!fresh(version)||!recording||capture!==resource||cameraStopped||!state.session.consent.camera||!turnBytes||clock()-lastImageAt<1000)return false;try{if(image.length>256000)throw new Error('FRAME_LIMIT');sendInput('frame.append',{image,mime_type:'image/jpeg'},inputToken);lastImageAt=clock();return true;}catch(error){fail(error);return false;}},onError:error=>{if(fresh(version)&&capture===resource)fail(error);}});
    capture=resource;emit();
    try{
-    send({type:'listening.start'});listeningTimer=setTimeout(()=>{if(fresh(version)&&state.listeningPending)fail({code:'PROVIDER_TIMEOUT'});},10000);
+    sendInput('listening.start',{},inputToken);listeningTimer=setTimeout(()=>{if(fresh(version)&&state.listeningPending)fail({code:'PROVIDER_TIMEOUT'});},10000);
     await resource.start(!!state.session.consent.camera&&!cameraStopped);
     if(!fresh(version)||!recording||capture!==resource){await resource.stop();return;}
     captureReady=true;state.listening=listeningAcknowledged;state.listeningPending=!listeningAcknowledged;state.cameraSampling=!!state.session.consent.camera&&!cameraStopped;
-    turnTimer=setInterval(()=>{if(!fresh(version)||!recording)return;state.turnSeconds=state.speechActive?Math.floor((clock()-turnStarted)/1000):0;if(state.turnSeconds>=60){this.pauseListening();state.error='realtime.turnLimit';}emit();},250);
+    turnTimer=setInterval(()=>{if(!fresh(version)||!recording||capture!==resource)return;state.turnSeconds=state.speechActive?Math.floor((clock()-turnStarted)/1000):0;if(state.turnSeconds>=60){this.pauseListening();state.error='realtime.turnLimit';}emit();},250);
    }catch(error){if(fresh(version)){await this.pauseListening();state.error=realtimeErrorKey(error);}}
    finally{if(fresh(version)){busy=false;emit();}}
   },
   async pauseListening(){
    if(state.turnDetectionMode!=='server_vad'||disposed)return;
    const hadInput=recording||state.listening;if(!hadInput)return;stopInput();emit();
-   if(hadInput){state.listeningPending=true;emit();const version=generation;try{send({type:'listening.stop'});listeningTimer=setTimeout(()=>{if(fresh(version)&&state.listeningPending)fail({code:'PROVIDER_TIMEOUT'});},10000);}catch(error){fail(error);}}
+   if(hadInput){state.listeningPending=true;emit();const version=generation;try{sendInput('listening.stop');listeningTimer=setTimeout(()=>{if(fresh(version)&&state.listeningPending)fail({code:'PROVIDER_TIMEOUT'});},10000);}catch(error){fail(error);}}
   },
   async beginTurn(){
-   if(disposed||busy||state.turnDetectionMode!=='manual'||state.status!=='active'||!socket||!playback)return;const version=generation;busy=true;state.error='';state.status='requesting';playback.clear();turnBytes=0;turnStarted=0;lastImageAt=0;recording=true;state.turnSeconds=0;
-   const resource=captureFactory({onPcm:bytes=>{if(!fresh(version)||!recording)return;try{if(!bytes.length||bytes.length%2||bytes.length>65536)throw new Error('INPUT_LIMIT');const remaining=1920000-turnBytes,packet=bytes.subarray(0,Math.max(0,remaining));if(packet.length){if(!turnStarted)turnStarted=clock();send({type:'audio.append',audio:bytesBase64(packet)});turnBytes+=packet.length;}if(turnBytes>=1920000&&state.status==='recording')this.commitTurn();}catch(error){fail(error);}},onFrame:image=>{if(!fresh(version)||!recording||state.status!=='recording'||cameraStopped||!state.session.consent.camera||!turnBytes||clock()-lastImageAt<1000)return false;try{if(image.length>256000)throw new Error('FRAME_LIMIT');send({type:'frame.append',image,mime_type:'image/jpeg'});lastImageAt=clock();return true;}catch(error){fail(error);return false;}},onError:error=>{if(fresh(version))fail(error);}});capture=resource;emit();
-   try{await resource.start(!!state.session.consent.camera&&!cameraStopped);if(!fresh(version)||!recording){await resource.stop();return;}if(!turnStarted)turnStarted=clock();state.status='recording';state.cameraSampling=!!state.session.consent.camera&&!cameraStopped;turnTimer=setInterval(()=>{if(!fresh(version)||!recording)return;state.turnSeconds=Math.floor((clock()-turnStarted)/1000);if(state.turnSeconds>=60){this.commitTurn();return;}emit();},250);}
+   if(disposed||state.materialInput?.locked||state.materialResponsePending||busy||state.turnDetectionMode!=='manual'||state.status!=='active'||!socket||!playback)return;const version=generation,inputToken=captureToken;captureInputToken=inputToken;busy=true;state.error='';state.status='requesting';playback.clear();turnBytes=0;turnStarted=0;lastImageAt=0;recording=true;state.turnSeconds=0;
+   const resource=captureFactory({onPcm:bytes=>{if(!fresh(version)||!recording||capture!==resource)return;try{if(!bytes.length||bytes.length%2||bytes.length>65536)throw new Error('INPUT_LIMIT');const remaining=1920000-turnBytes,packet=bytes.subarray(0,Math.max(0,remaining));if(packet.length){if(!turnStarted)turnStarted=clock();sendInput('audio.append',{audio:bytesBase64(packet)},inputToken);turnBytes+=packet.length;}if(turnBytes>=1920000&&state.status==='recording')this.commitTurn();}catch(error){fail(error);}},onFrame:image=>{if(!fresh(version)||!recording||capture!==resource||state.status!=='recording'||cameraStopped||!state.session.consent.camera||!turnBytes||clock()-lastImageAt<1000)return false;try{if(image.length>256000)throw new Error('FRAME_LIMIT');sendInput('frame.append',{image,mime_type:'image/jpeg'},inputToken);lastImageAt=clock();return true;}catch(error){fail(error);return false;}},onError:error=>{if(fresh(version)&&capture===resource)fail(error);}});capture=resource;emit();
+   try{await resource.start(!!state.session.consent.camera&&!cameraStopped);if(!fresh(version)||!recording||capture!==resource){await resource.stop();return;}if(!turnStarted)turnStarted=clock();state.status='recording';state.cameraSampling=!!state.session.consent.camera&&!cameraStopped;turnTimer=setInterval(()=>{if(!fresh(version)||!recording||capture!==resource)return;state.turnSeconds=Math.floor((clock()-turnStarted)/1000);if(state.turnSeconds>=60){this.commitTurn();return;}emit();},250);}
    catch(error){if(fresh(version)){stopInput();state.status='active';state.error=realtimeErrorKey(error);}}finally{if(fresh(version)){busy=false;emit();}}
   },
   async commitTurn(){
    if(!recording||state.status!=='recording'||busy)return;busy=true;const version=generation,resource=capture;clearInterval(turnTimer);state.status='committing';emit();
-   try{await resource?.stop({flush:true});if(!fresh(version))return;capture=null;recording=false;state.cameraSampling=false;if(!turnBytes){state.status='active';state.error='realtime.emptyTurn';}else{send({type:'audio.commit'});state.status='waiting';readyTimer=setTimeout(()=>{if(fresh(version)&&state.status==='waiting')fail({code:'PROVIDER_TIMEOUT'});},15000);}}
+   try{await resource?.stop({flush:true});if(!fresh(version))return;capture=null;recording=false;state.cameraSampling=false;if(!turnBytes){state.status='active';state.error='realtime.emptyTurn';}else{sendInput('audio.commit');state.status='waiting';readyTimer=setTimeout(()=>{if(fresh(version)&&state.status==='waiting')fail({code:'PROVIDER_TIMEOUT'});},15000);}}
    catch(error){if(fresh(version))fail(error);}finally{if(fresh(version)){busy=false;emit();}}
   },
   stopCamera(){cameraStopped=true;capture?.stopCamera();state.cameraSampling=false;emit();},
@@ -140,7 +155,7 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
      const changedEpoch=next.control_epoch!==state.session.control_epoch;release();state.session=next;state.status=REALTIME_TERMINAL.has(next.status)?next.status:'failed';state.connection='disconnected';state.responseId=null;state.messageId=null;
      if(next.error_code)state.error=realtimeErrorKey({code:next.error_code});else if(changedEpoch&&!REALTIME_TERMINAL.has(next.status))state.error='realtime.changed';emit();return;
     }
-    state.session=next;await pollInjections(version);if(fresh(version)){pollFailures=0;if(activeTransport()&&state.connection==='degraded'){state.connection='connected';state.error='';}emit();}
+    state.session=next;await pollInjections(version);if(fresh(version))await materials.refresh();if(fresh(version)){pollFailures=0;if(activeTransport()&&state.connection==='degraded'){state.connection='connected';state.error='';}emit();}
    }catch(error){
     if(fresh(version)&&error.name!=='AbortError'){
      if([401,403,404,409,410].includes(error.status))fail(error);
@@ -166,6 +181,6 @@ export function createRealtimeSession({client,changed=()=>{},history=()=>{},sock
     release();state.session=ended;state.status=ended.status;state.connection='disconnected';state.responseId=null;state.messageId=null;history();emit();
    }catch(error){if(fresh(version)){release();state.status='failed';state.connection='disconnected';state.error=realtimeErrorKey(error);emit();}}
   },
-  dispose(){disposed=true;networkTarget?.removeEventListener?.('offline',offline);networkTarget?.removeEventListener?.('online',online);release();},
+  dispose(){disposed=true;networkTarget?.removeEventListener?.('offline',offline);networkTarget?.removeEventListener?.('online',online);visibilityTarget?.removeEventListener?.('visibilitychange',hidden);release();},
  };
 }

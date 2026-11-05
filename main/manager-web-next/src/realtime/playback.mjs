@@ -9,7 +9,7 @@ export function createPcmPlayback(context,{maxSeconds=12,maxBytes=65536,resumeTi
   pendingSeconds:()=>Math.max(0,nextAt-context.currentTime),clear,
   async resume(){
    if(closed)return;let timer;
-   try{await Promise.race([context.resume(),new Promise(resolve=>{cancelResume=resolve;}),new Promise((_resolve,reject)=>{timer=setTimeout(()=>reject(new Error('TIMEOUT')),resumeTimeoutMs);})]);}
+   try{await Promise.race([context.resume(),new Promise(resolve=>{cancelResume=resolve;}),new Promise((_resolve,reject)=>{timer=setTimeout(()=>reject(new Error('AUDIO_UNAVAILABLE')),resumeTimeoutMs);})]);}
    finally{clearTimeout(timer);cancelResume=null;}
   },
   async close(){if(closed)return;closed=true;cancelResume?.();clear();await context.close();},

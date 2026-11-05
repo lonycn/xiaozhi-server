@@ -376,7 +376,7 @@ export default {
 
 .page-title {
   font-weight: 500;
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
 }
 
@@ -533,7 +533,7 @@ export default {
   white-space: normal;
   word-break: break-word;
   overflow-wrap: break-word;
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   line-height: 1.4;
   font-weight: 600;
   color: #333;
@@ -542,7 +542,7 @@ export default {
 }
 
 .feature-description {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   line-height: 1.6;
   color: #666;
   margin: 0;
@@ -583,7 +583,7 @@ export default {
   margin-top: 0;
   display: flex;
   align-items: center;
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   line-height: 18px;
   font-weight: 600;
   color: #303133;
@@ -601,7 +601,7 @@ export default {
 
 .module-count {
   margin-left: 13px;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   background: #ebebfe;
   color: #5778ff;
   padding: 2px 10px;
@@ -611,7 +611,7 @@ export default {
 .group-description {
   margin-top: 6px;
   text-align: left;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   font-weight: 500;
 }
 
@@ -625,7 +625,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

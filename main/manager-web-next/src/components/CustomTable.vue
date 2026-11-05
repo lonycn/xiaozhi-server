@@ -304,7 +304,7 @@ export default {
 
 :deep(.el-loading-text) {
   color: #6b8cff !important;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   margin-top: 8px;
 }
 </style>

@@ -5,6 +5,16 @@ import { fileURLToPath, URL } from 'node:url';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const proxy = { '/xiaozhi': { target: env.API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:18893', changeOrigin: true, ws: true } };
+  if (env.VITE_DEVICE_HISTORY_ONLY === 'true') {
+    proxy['/xiaozhi'].ws = false;
+    proxy['/xiaozhi'].bypass = req => {
+      const path = req.url.split('?')[0];
+      const read = /^\/xiaozhi\/(?:user\/(?:pub-config|captcha|info)|api\/v1\/esp32\/(?:text-input\/target|commands\/[\w-]+)|api\/v1\/app\/capabilities|api\/v1\/ai\/conversations\/(?:index(?:\/options)?|[a-f0-9]{32}(?:\/(?:messages|events|runs|stream))?)|agent\/(?:[\w-]+\/(?:history-devices|sessions|chat-history\/[\w-]+)|play\/[\w-]+|chat-history\/download\/[\w-]+\/(?:current|previous)))$/;
+      const loginOrGrant = /^\/xiaozhi\/(?:api\/v1\/esp32\/devices\/(?:[\w-]{1,32}|[0-9a-fA-F]{2}(?:(?::|%3[aA])[0-9a-fA-F]{2}){5})\/text-input|user\/(?:login|refresh)|agent\/(?:audio\/[\w-]+|chat-history\/getDownloadUrl\/[\w-]+\/[\w-]+))$/;
+      if ((req.method === 'GET' && (read.test(path) || path === '/xiaozhi/api/v1/support/me')) || (req.method === 'POST' && loginOrGrant.test(path))) return;
+      return false;
+    };
+  }
   return {
     base: env.VITE_PUBLIC_PATH || '/',
     plugins: [vue()],

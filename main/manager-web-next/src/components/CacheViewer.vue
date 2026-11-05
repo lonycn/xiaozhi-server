@@ -195,7 +195,7 @@ export default {
 }
 
 .no-cache-message i {
-  font-size: 48px;
+  font-size: var(--admin-font-illustration-lg);
   color: #E6A23C;
   margin-bottom: 10px;
 }

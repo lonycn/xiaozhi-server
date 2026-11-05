@@ -595,7 +595,7 @@ export default {
 }
 
 .page-title {
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
 }
 
@@ -662,7 +662,7 @@ export default {
 }
 
 .menu-text {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   color: #606266;
   text-align: right;
   width: 100%;
@@ -755,7 +755,7 @@ export default {
 //   min-width: 72px;
 //   height: 32px;
 //   padding: 7px 12px 7px 10px;
-//   font-size: 12px;
+//   font-size: var(--admin-font-xs);
 //   border-radius: 4px;
 //   line-height: 1;
 //   font-weight: 500;
@@ -935,7 +935,7 @@ export default {
         font-weight: 600;
         height: 40px;
         padding: 8px 0;
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         border-bottom: 1px solid #e4e7ed;
     }
 
@@ -948,7 +948,7 @@ export default {
             padding: 8px 0;
             height: 40px;
             color: #606266;
-            font-size: 14px;
+            font-size: var(--admin-font-base);
         }
     }
 
@@ -978,7 +978,7 @@ export default {
 
 :deep(.el-loading-text) {
   color: #6b8cff !important;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   margin-top: 8px;
 }
 </style>
@@ -987,7 +987,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

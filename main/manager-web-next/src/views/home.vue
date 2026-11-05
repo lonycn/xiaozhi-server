@@ -7,6 +7,7 @@
         <!-- 首页内容 -->
         <div class="agent-page-heading">
           <h1>{{ $t('header.smartManagement') }}</h1>
+          <el-button v-if="conversationEnabled" @click="$router.push('/conversations?source=web')">{{ $t('conversationManagement.aiTest') }}</el-button>
         </div>
         <div class="add-device">
           <div class="add-device-bg">
@@ -123,7 +124,7 @@
       </el-dialog>
     </el-main>
     
-    <chat-history-dialog v-model:visible="showChatHistory" :agent-id="currentAgentId" :agent-name="currentAgentName" />
+
   </div>
 
 </template>
@@ -132,13 +133,12 @@
 import Api from '@/apis/api';
 import { mapState } from "vuex";
 import AddWisdomBodyDialog from '@/components/AddWisdomBodyDialog.vue';
-import ChatHistoryDialog from '@/components/ChatHistoryDialog.vue';
 import DeviceItem from '@/components/DeviceItem.vue';
 import featureManager from '@/utils/featureManager';
 
 export default {
   name: 'HomePage',
-  components: { DeviceItem, AddWisdomBodyDialog, ChatHistoryDialog },
+  components: { DeviceItem, AddWisdomBodyDialog },
   data() {
     return {
       addDeviceDialogVisible: false,
@@ -148,9 +148,6 @@ export default {
       searchRegex: null,
       isLoading: true,
       skeletonCount: localStorage.getItem('skeletonCount') || 8,
-      showChatHistory: false,
-      currentAgentId: '',
-      currentAgentName: '',
       // 功能状态
       featureStatus: {
         voiceprintRecognition: false,
@@ -169,6 +166,7 @@ export default {
   },
 
   computed: {
+    conversationEnabled() { return import.meta.env.VITE_CONVERSATION_ENABLED === 'true'; },
     ...mapState({
       userInfo: (state) => state.userInfo,
     }),
@@ -302,9 +300,10 @@ export default {
       });
     },
     handleShowChatHistory({ agentId, agentName }) {
-      this.currentAgentId = agentId;
-      this.currentAgentName = agentName;
-      this.showChatHistory = true;
+      const target = this.$router.hasRoute('DeviceConversations')
+        ? { name: 'DeviceConversations', query: { source: 'hardware', agent_id: agentId } }
+        : { name: 'AgentChatHistory', query: { agentId, agentName } };
+      this.$router.push(target);
     },
     // 处理搜索
     handleSearch() {
@@ -424,7 +423,7 @@ export default {
 <style scoped>
 .agent-page-content { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: auto; }
 .agent-page-heading { display: flex; align-items: center; margin-bottom: 20px; }
-.agent-page-heading h1 { margin: 0; font-size: 22px; font-weight: 600; color: #263445; }
+.agent-page-heading h1 { margin: 0; font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .add-device { background: #fff; border: 1px solid #e5e9ef; border-bottom: 0; border-radius: 6px 6px 0 0; padding: 18px 20px; }
 .add-device-options { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .add-device-btn { border-radius: 4px; }
@@ -449,7 +448,7 @@ export default {
     cursor: pointer;
   }
   .search-icon {
-    font-size: 14px;
+    font-size: var(--admin-font-base);
   }
 }
 
@@ -476,13 +475,13 @@ export default {
   align-items: center;
   padding: 8px 12px;
   border-bottom: 1px solid #f0f0f0;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #909399;
 }
 
 .clear-history-btn {
   color: #909399;
-  font-size: 11px;
+  font-size: var(--admin-font-xs);
   padding: 0;
   height: auto;
 }
@@ -502,7 +501,7 @@ export default {
   align-items: center;
   padding: 8px 12px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #606266;
 }
 
@@ -529,7 +528,7 @@ export default {
 
 .clear-history-btn {
   color: #909399;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   padding: 0;
   height: auto;
 }
@@ -549,7 +548,7 @@ export default {
   align-items: center;
   padding: 8px 12px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #606266;
 }
 
@@ -566,7 +565,7 @@ export default {
 }
 
 .clear-item-icon {
-  font-size: 10px;
+  font-size: var(--admin-font-xs);
   color: #909399;
   visibility: hidden;
 }
@@ -589,7 +588,7 @@ export default {
 }
 
 .footer {
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   font-weight: 400;
   margin-top: auto;
   padding-top: 30px;
@@ -669,7 +668,7 @@ export default {
 .delete-agent-title {
   display: inline-flex;
   align-items: center;
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   font-weight: 500;
   color: #2f3a5f;
 }
@@ -682,14 +681,14 @@ export default {
 
 .delete-agent-warning {
   color: #e6a23c;
-  font-size: 24px;
+  font-size: var(--admin-font-xl);
   margin-top: 4px;
 }
 
 .delete-agent-message {
   flex: 1;
   color: #606266;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   line-height: 1.6;
 }
 
@@ -719,14 +718,14 @@ export default {
   border-radius: 4px;
   background: #fff;
   color: #303133;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 
 .delete-agent-helper {
   min-height: 18px;
   margin-top: 6px;
   color: #f56c6c;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
 }
 
 .delete-agent-footer {
@@ -761,7 +760,7 @@ export default {
 }
 
 .delete-agent-dialog:deep(.el-dialog__headerbtn .el-dialog__close) {
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   color: #666;
   position: static;
   transform: none;
@@ -790,7 +789,7 @@ export default {
   height: 40px;
   padding: 0 20px;
   border-radius: 6px;
-  font-size: 15px;
+  font-size: var(--admin-font-base);
 }
 
 .delete-agent-cancel {
@@ -830,7 +829,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

@@ -2,7 +2,8 @@ import { mount } from '@vue/test-utils';
 import ElementPlus from 'element-plus';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import component from '../src/components/ModelEditDialog.vue';
-vi.mock('../src/apis/api', () => ({ default: { model: { getModelProviders: vi.fn() } } }));
+import Api from '../src/apis/api';
+vi.mock('../src/apis/api', () => ({ default: { model: { getModelProviders: vi.fn(), getModelConfig: vi.fn() } } }));
 let wrapper;
 let vm;
 let saved;
@@ -17,6 +18,7 @@ function openModel(value) {
 }
 
 beforeEach(() => {
+  vi.resetAllMocks();
   vi.useFakeTimers();
   saved = vi.fn();
   wrapper = mount(component, {
@@ -35,6 +37,25 @@ afterEach(() => {
 });
 
 describe('stored dictionary fields', () => {
+  it('loads the model and voice when the edit dialog becomes visible', async () => {
+    Api.model.getModelProviders.mockImplementation((_type, callback) => callback([{
+      name: '百炼', providerCode: 'alibl_stream',
+      fields: JSON.stringify([{ key: 'model', label: '模型' }, { key: 'voice', label: '音色' }]),
+    }]));
+    Api.model.getModelConfig.mockImplementation((_id, callback) => callback({ data: { code: 0, data: {
+      id: 'TTS_BailianCosyVoice35Flash', modelName: '百炼 CosyVoice 3.5 Flash',
+      modelCode: 'TTS_BailianCosyVoice', isEnabled: 1, isDefault: 0,
+      configJson: { type: 'alibl_stream', model: 'cosyvoice-v3.5-flash', voice: 'longantai_v3' },
+    } } }));
+
+    await wrapper.setProps({ visible: true, modelData: { id: 'TTS_BailianCosyVoice35Flash' } });
+    await vi.waitFor(() => {
+      expect(Api.model.getModelConfig).toHaveBeenCalledWith('TTS_BailianCosyVoice35Flash', expect.any(Function));
+      expect(wrapper.get('input[placeholder="请输入model"]').element.value).toBe('cosyvoice-v3.5-flash');
+      expect(wrapper.get('input[placeholder="请输入voice"]').element.value).toBe('longantai_v3');
+    });
+  });
+
   it('opens a JSON string as an editable dictionary instead of a quoted string', () => {
     openModel('{"speed":1,"volume":10}');
 

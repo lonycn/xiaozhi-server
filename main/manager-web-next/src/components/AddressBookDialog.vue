@@ -134,13 +134,13 @@ export default {
   :deep(.el-form-item__label) {
     font-weight: 500;
     color: #34495e;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
   }
 
   :deep(.el-input) {
     .el-input__inner {
       height: 36px;
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       border-radius: 4px;
       border: 1px solid #ddd;
       transition: all 0.3s ease;
@@ -154,7 +154,7 @@ export default {
 
   :deep(.el-textarea) {
     .el-textarea__inner {
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       border-radius: 4px;
       border: 1px solid #ddd;
       transition: all 0.3s ease;

@@ -767,13 +767,13 @@ export default {
 
 .page-title {
   font-weight: 500;
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
 }
 
 .total-hint {
   color: #8b93b5;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
 }
 
 .right-operations {
@@ -841,7 +841,7 @@ export default {
   border-radius: 8px;
   padding: 7px 12px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   transition: all 0.15s ease;
 
   &:hover {
@@ -870,7 +870,7 @@ export default {
   border-radius: 10px;
   background: #e8ecfb;
   color: #5a648f;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   text-align: center;
 }
 
@@ -885,7 +885,7 @@ export default {
   border: none;
   background: transparent;
   color: #7079aa;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   padding: 4px 10px;
   border-radius: 14px;
   cursor: pointer;
@@ -957,11 +957,11 @@ export default {
 }
 
 .section-name {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 
 .section-count {
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #7b84ad;
   background: #eef1fb;
   border-radius: 10px;
@@ -971,7 +971,7 @@ export default {
 }
 
 .section-hint {
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #9aa3c7;
 }
 
@@ -986,8 +986,8 @@ export default {
 }
 
 .param-code {
-  font-family: Consolas, 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 12px;
+  font-family: var(--admin-font-mono);
+  font-size: var(--admin-font-xs);
   color: #3d4a7a;
   background: #f3f6ff;
   padding: 2px 6px;
@@ -996,7 +996,7 @@ export default {
 
 .type-tag {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--admin-font-xs);
   padding: 1px 6px;
   border-radius: 4px;
   background: #eef1f8;
@@ -1023,7 +1023,7 @@ export default {
   padding: 64px 0;
   text-align: center;
   color: #9aa3c7;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 
 .table-footer {
@@ -1044,7 +1044,7 @@ export default {
 
 .footer-meta {
   color: #8b93b5;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   white-space: nowrap;
 
   .sep {
@@ -1065,7 +1065,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

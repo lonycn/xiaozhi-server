@@ -176,8 +176,8 @@ export default {
 </script>
 <style scoped>
 .summary-panel { margin: 14px 0; padding: 12px; border: 1px solid #e6ebf3; border-radius: 8px; }
-summary { cursor: pointer; font-weight: 600; } .note,small { color: #7b8ca5; font-size: 12px; }
+summary { cursor: pointer; font-weight: 600; } .note,small { color: #7b8ca5; font-size: var(--admin-font-xs); }
 .summary-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; } .el-select { min-width: 180px; max-width: 100%; }
 .summary-field { margin: 12px 0; border-top: 1px solid #edf1f5; padding-top: 8px; } .summary-item { padding: 8px 0; }
-p,blockquote { white-space: pre-wrap; overflow-wrap: anywhere; } blockquote { margin: 4px 0; padding-left: 10px; border-left: 2px solid #dce3ec; color: #7b8ca5; font-size: 12px; }
+p,blockquote { white-space: pre-wrap; overflow-wrap: anywhere; } blockquote { margin: 4px 0; padding-left: 10px; border-left: 2px solid #dce3ec; color: #7b8ca5; font-size: var(--admin-font-xs); }
 </style>

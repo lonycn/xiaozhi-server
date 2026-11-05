@@ -12,7 +12,7 @@
         <el-select v-model="form.audioId" :placeholder="$t('voicePrintDialog.selectVoiceMessage')" class="custom-select" filterable>
           <el-option v-for="item in valueTypeOptions" :key="item.audioId" :label="item.content" :value="item.audioId">
             <span style="float: left">{{ item.content }}</span>
-            <span style="float: right; color: #8492a6; font-size: 13px">
+            <span style="float: right; color: #8492a6; font-size: var(--admin-font-base)">
               <LegacyIcon :class="getAudioIconClass(item.audioId)" @click.stop="playAudio(item.audioId)"
                 class="audio-icon"></LegacyIcon>
             </span>
@@ -193,7 +193,7 @@ export default {
 
 <style scoped lang="scss">
 .audio-icon {
-  font-size: 20px;
+  font-size: var(--admin-font-title);
   cursor: pointer;
   margin: 0 5px;
   color: #1890ff;
@@ -208,7 +208,7 @@ export default {
       font-weight: 500;
       padding-right: 12px;
       text-align: right;
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       letter-spacing: 0.2px;
     }
   }
@@ -221,7 +221,7 @@ export default {
       height: 42px;
       padding: 0 14px;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       color: #334155;
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
@@ -247,7 +247,7 @@ export default {
       border: 1px solid #e2e8f0;
       height: 42px;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       color: #334155;
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
@@ -271,7 +271,7 @@ export default {
       border: 1px solid #e2e8f0;
       padding: 12px 14px;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       color: #334155;
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
       line-height: 1.5;

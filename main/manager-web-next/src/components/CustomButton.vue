@@ -38,7 +38,7 @@ export default {
 
   &.el-button--small {
     padding: 9px 14px;
-    font-size: 12px;
+    font-size: var(--admin-font-base);
   }
   &.el-button--medium {
     padding: 12px 20px;
@@ -73,7 +73,7 @@ export default {
 
   &.el-button--small {
     padding: 9px 14px;
-    font-size: 12px;
+    font-size: var(--admin-font-base);
   }
   &.el-button--medium {
     padding: 12px 20px;
@@ -107,7 +107,7 @@ export default {
 
   &.el-button--small {
     padding: 9px 14px;
-    font-size: 12px;
+    font-size: var(--admin-font-base);
   }
   &.el-button--medium {
     padding: 12px 20px;
@@ -141,7 +141,7 @@ export default {
 
   &.el-button--small {
     padding: 9px 14px;
-    font-size: 12px;
+    font-size: var(--admin-font-base);
   }
   &.el-button--medium {
     padding: 12px 20px;

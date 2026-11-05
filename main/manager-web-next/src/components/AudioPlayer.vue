@@ -288,7 +288,7 @@ onUnmounted(() => {
 }
 
 .time-display {
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #5f7ba7;
   min-width: 40px;
   text-align: center;

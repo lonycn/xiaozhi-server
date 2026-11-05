@@ -73,7 +73,12 @@ class CommandTests(unittest.TestCase):
         legacy.assert_called_once()
         wait.assert_called_once_with(manage.WEB_URL)
         _, _, _, _, kill = self.run_action('legacy-stop')
-        kill.assert_called_once_with(12, manage.signal.SIGTERM)
+        self.assertEqual([call.args[0] for call in kill.call_args_list], [11, 12])
+
+    def test_legacy_launcher_delegates_to_vue3(self):
+        with patch.object(manage, 'start_candidate') as candidate:
+            manage.start_web()
+        candidate.assert_called_once_with()
 
     def test_legacy_reused_pid_does_not_signal(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(manage, 'RUNTIME', Path(tmp)):

@@ -1,0 +1,10 @@
+import { vi } from 'vitest';
+import { config } from '@vue/test-utils';
+import LegacyIcon from '../src/adapters/LegacyIcon.vue';
+import { assetUrl } from '../src/adapters/assets';
+globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+if (!window.matchMedia) window.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = vi.fn();
+config.global.components.LegacyIcon = LegacyIcon;
+config.global.config.globalProperties ||= {};
+config.global.config.globalProperties.assetUrl = assetUrl;

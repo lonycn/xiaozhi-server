@@ -5,8 +5,8 @@
 | 分类 | 入口 | 内容 |
 | --- | --- | --- |
 | 目录与源码位置 | [工作区目录](WORKSPACE_LAYOUT.md) | 前端、后端、硬件、文档、发布、备份和历史资料 |
-| Git 管理 | [Git 工作流程](GIT_WORKFLOW.md) | 前后端独立仓库、分支、提交范围和忽略规则 |
-| GitHub 远程 | [仓库与远程映射](REPOSITORY_REMOTES.md) | 硬件 fork、server 远程和独立前端对应关系 |
+| Git 管理 | [Git 工作流程](GIT_WORKFLOW.md) | Server 前后端同仓库、硬件独立、提交范围和忽略规则 |
+| GitHub 远程 | [仓库与远程映射](REPOSITORY_REMOTES.md) | 硬件 fork 与包含 Vue 3 网页的 Server 远程对应关系 |
 | 开发与服务运维 | [Dev 说明](../dev/README.md) | 统一启停、端口、功能开关和本地环境 |
 | 固件发布 | [发布说明](../releases/README.md) | 已发布版本、源码快照与本地二进制的位置 |
 | 备份 | [备份说明](BACKUPS.md) | Flash、NVS、数据库、私有配置的保存位置 |
@@ -14,4 +14,6 @@
 
 工作区根目录的 README 保留设备与环境沿革。这里是日常开发的分类入口；历史记录中的旧版本和端口以其记录日期理解，当前统一服务说明见 Dev 文档。
 
-前端独立入口见 [前端 README](../../../../frontend/README.md)，本次历史与目录迁移见 [拆分记录](REPOSITORY_SPLIT_20261105.md)。
+当前网页入口见 [前端 README](../main/manager-web/README.md)，当前目录与历史整合见 [整合记录](SERVER_FRONTEND_INTEGRATION_20261105.md)。
+
+当前整合结果见 [Server Vue 3 整合](SERVER_FRONTEND_INTEGRATION_20261105.md)。

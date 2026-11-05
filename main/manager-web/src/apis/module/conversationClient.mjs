@@ -1,0 +1,70 @@
+/** Async API client with explicit HTTP errors and injectable transport for tests. */
+export function createConversationClient({ baseUrl, getToken, onUnauthorized, fetchImpl = globalThis.fetch, errorMessage }) {
+  async function request(path = '', options = {}, { runsNotFound = false } = {}) {
+    const token = getToken() || '';
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (options.signal?.aborted) abort();
+    options.signal?.addEventListener('abort', abort, { once: true });
+    const timeout = setTimeout(abort, 30000);
+    const assertCurrent = () => {
+      if (controller.signal.aborted || token !== (getToken() || '')) throw new DOMException('Aborted', 'AbortError');
+    };
+    try {
+      assertCurrent();
+      const { webSource, ...fetchOptions } = options;
+      const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/api/v1/ai/conversations${path}`, {
+        ...fetchOptions,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(webSource ? { 'X-Conversation-Source': 'web' } : {}) },
+        signal: controller.signal,
+      });
+      assertCurrent();
+      const body = await response.json().catch(() => null);
+      assertCurrent();
+      if (response.status === 401 || body?.code === 401) {
+        onUnauthorized();
+        throw new Error('登录已过期，请重新登录');
+      }
+      if (!response.ok || body?.code !== 0) {
+        // A disabled AI runs route can be wrapped as HTTP 200 with application 404.
+        // Restrict this compatibility case to the runs list; never mask other failures.
+        const status = runsNotFound && response.status === 200 && body?.code === 404 ? 404 : response.status;
+        if (errorMessage && /\/(handoff|resume-ai)$/.test(path)) throw Object.assign(new Error(errorMessage(body?.msg, response.status)), { code: body?.msg, status: response.status });
+        const messages = {
+          AI_RUNTIME_USER_CONCURRENCY: '同时进行的 AI 任务已达上限，请结束其他任务后重试',
+          AI_RUNTIME_SERVICE_CONCURRENCY: 'AI 服务当前繁忙，请稍后重试',
+          AI_RUNTIME_USER_HOURLY_BUDGET: '最近一小时的 AI 请求已达上限，请稍后再试',
+          AI_RUNTIME_SERVICE_HOURLY_BUDGET: 'AI 服务近期请求已达上限，请稍后再试',
+          CLIENT_MESSAGE_ID_REUSED: '消息编号冲突，请刷新后再试',
+          CONVERSATION_NOT_FOUND: '会话不存在或当前账号无权访问',
+          MESSAGE_PART_NOT_SUPPORTED: '当前版本还不支持这种消息类型',
+        };
+        throw Object.assign(new Error(messages[body?.msg] || (response.status === 404 && (!path || path.startsWith('?'))
+          ? '当前服务尚未启用统一对话，请检查开发环境配置'
+          : body?.msg || '请求未成功，请稍后重试')), { status });
+      }
+      return body.data;
+    } catch (error) {
+      if (error.name === 'AbortError' && !options.signal?.aborted && token === (getToken() || '')) throw new Error('连接超时，内容已保留，可以重试');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abort);
+    }
+  }
+  return {
+    index: (params, signal) => request(`/index?${new URLSearchParams(Object.entries(params).filter(([,value]) => value !== '' && value != null))}`, { signal }),
+    indexOptions: signal => request('/index/options', { signal }),
+    runs: (id, signal) => request(`/${encodeURIComponent(id)}/runs?before=0&limit=50`, { signal }, { runsNotFound: true }),
+    runAction: (id, runId, action, signal) => request(`/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/${action}`, { method: 'POST', body: '{}', signal }),
+    stream: (id, after, signal) => fetchImpl(`${baseUrl.replace(/\/$/, '')}/api/v1/ai/conversations/${encodeURIComponent(id)}/stream?after=${encodeURIComponent(after)}`, { headers: { Accept: 'text/event-stream', Authorization: `Bearer ${getToken() || ''}`, 'Last-Event-ID': String(after) }, signal }),
+    detail: (id, signal) => request(`/${encodeURIComponent(id)}`, { signal }),
+    events: (id, after = 0, signal) => request(`/${encodeURIComponent(id)}/events?after=${after}&limit=100`, { signal }),
+    handoff: (id, payload) => request(`/${encodeURIComponent(id)}/handoff`, { method: 'POST', body: JSON.stringify(payload) }),
+    resume: id => request(`/${encodeURIComponent(id)}/resume-ai`, { method: 'POST', body: '{}' }),
+    list: (before = 0, signal) => request(`?before=${before}&limit=50`, { signal }),
+    create: (title, signal) => request('', { method: 'POST', body: JSON.stringify({ title }), webSource: true, signal }),
+    messages: (id, after = 0, signal, limit = 100) => request(`/${encodeURIComponent(id)}/messages?after=${after}&limit=${limit}`, { signal }),
+    send: (id, payload, signal) => request(`/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify(payload), signal }),
+  };
+}

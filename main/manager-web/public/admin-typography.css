@@ -1,0 +1,35 @@
+/* 所有后台页面共享字号与字体；普通 UI 最小 12px，保留用户浏览器缩放。 */
+:root {
+  --admin-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  --admin-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+  --admin-font-xs: 12px;
+  --admin-font-base: 14px;
+  --admin-font-md: 16px;
+  --admin-font-lg: 18px;
+  --admin-font-title: 20px;
+  --admin-font-xl: 24px;
+  --admin-font-illustration: 32px;
+  --admin-font-illustration-lg: 48px;
+  --admin-font-illustration-xl: 64px;
+  --el-font-family: var(--admin-font-family);
+  --el-font-size-extra-small: var(--admin-font-xs);
+  --el-font-size-small: var(--admin-font-xs);
+  --el-font-size-base: var(--admin-font-base);
+  --el-font-size-medium: var(--admin-font-md);
+  --el-font-size-large: var(--admin-font-lg);
+  --el-font-size-extra-large: var(--admin-font-title);
+}
+body {
+  font-family: var(--admin-font-family);
+  font-size: var(--admin-font-base);
+  line-height: 1.5;
+}
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: var(--admin-font-base);
+}
+h1 { font-size: var(--admin-font-title); }
+h2, h3 { font-size: var(--admin-font-md); }
+h4, h5, h6 { font-size: var(--admin-font-base); }
+small, sub, sup { font-size: var(--admin-font-xs); }
+code, pre, kbd, samp { font-family: var(--admin-font-mono); }

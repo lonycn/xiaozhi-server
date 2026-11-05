@@ -1,4 +1,6 @@
-# 前后端 Git 拆分记录
+# 前后端 Git 拆分记录（历史）
+
+本记录已由 [Server Vue 3 整合](SERVER_FRONTEND_INTEGRATION_20261105.md) 替代。当前 Server 前后端共用同一 Git 仓库，以下保留当时操作证据。
 
 拆分前后端提交基线：`f91e2d4b775be9a7230530f6e617294b3b261a5d`；原仓库保留备份分支 `backup/pre-frontend-backend-split-20261105`。
 

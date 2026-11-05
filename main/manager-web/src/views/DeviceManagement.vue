@@ -1,0 +1,597 @@
+<template>
+  <div class="welcome admin-page">
+    
+
+    <div class="main-wrapper">
+      <div class="content-panel">
+        <div class="content-area">
+          <el-card class="device-card" shadow="never">
+            <div class="operation-header">
+              <h2 class="page-title">{{ $t('device.management') }}</h2>
+              <div class="right-operations">
+                <el-input :placeholder="$t('device.searchPlaceholder')" v-model="searchKeyword" class="search-input"
+                  @keyup.enter="handleSearch" clearable />
+                <CustomButton icon="el-icon-search" type="confirm" @click="handleSearch">{{ $t('device.search') }}</CustomButton>
+              </div>
+            </div>
+            <CustomTable
+              ref="deviceTable"
+              :data="paginatedDeviceList"
+              :columns="tableColumns"
+              :loading="loading"
+              :loading-text="$t('deviceManagement.loading')"
+              :show-selection="true"
+              :show-operations="true"
+              :operations-label="$t('device.operation')"
+              :total="filteredDeviceList.length"
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-size-options="pageSizeOptions"
+              @size-change="handlePageSizeChange"
+              @page-change="goToPage"
+            >
+              <template #model="scope" >
+                {{ getFirmwareTypeName(scope.row.model) }}
+              </template>
+              <template #macAddress="scope" >
+                <MacAddressMask :macAddress="scope.row.macAddress" />
+              </template>
+              <template #deviceStatus="scope" >
+                <el-tag v-if="scope.row.deviceStatus === 'online'" type="success">{{ $t('device.online') }}</el-tag>
+                <el-tag v-else type="danger">{{ $t('device.offline') }}</el-tag>
+              </template>
+              <template #alias="scope" >
+                <el-input v-show="scope.row.isEdit" v-model="scope.row.alias" size="small" maxlength="64" show-word-limit
+                  @blur="onAliasBlur(scope.row)" @keyup.enter="onAliasEnter(scope.row)" />
+                <span v-show="!scope.row.isEdit" class="alias-view">
+                  <LegacyIcon class="el-icon-edit" @click="scope.row.isEdit = true" style="cursor: pointer;"></LegacyIcon>
+                  <span @click="scope.row.isEdit = true">
+                    {{ scope.row.alias || '-' }}
+                  </span>
+                </span>
+              </template>
+              <template #otaSwitch="scope" >
+                <el-switch v-model="scope.row.otaSwitch" size="small" active-color="#13ce66" inactive-color="#ff4949"
+                  @change="handleOtaSwitchChange(scope.row)"></el-switch>
+              </template>
+              <template #operations="scope" >
+                <el-button v-if="esp32Available" size="small" link type="primary" @click="openEsp32(scope.row.device_id)">AI 设备状态</el-button>
+                <el-button size="small" link type="primary" @click="handleUnbind(scope.row.device_id)">
+                  {{ $t('device.unbind') }}
+                </el-button>
+                <el-button v-if="isGenerate(scope.row)" size="small" link type="primary" @click="handleGenertor(scope.row)">
+                  {{ $t('device.deviceThemeGeneration') }}
+                </el-button>
+              </template>
+              <template #footer-btns>
+                <div class="ctrl_btn">
+                  <CustomButton :icon="isCurrentPageAllSelected ? 'el-icon-circle-close' : 'el-icon-circle-check'" size="small" @click="handleSelectAll">
+                    {{ isCurrentPageAllSelected ? $t('common.deselectAll') : $t('common.selectAll') }}
+                  </CustomButton>
+                  <CustomButton icon="el-icon-plus" type="add" size="small" @click="handleAddDevice">
+                    {{ $t('device.bindWithCode') }}
+                  </CustomButton>
+                  <CustomButton icon="el-icon-plus" type="add" size="small" @click="handleManualAddDevice">
+                    {{ $t('device.manualAdd') }}
+                  </CustomButton>
+                  <CustomButton size="small" type="delete" icon="el-icon-delete" @click="deleteSelected">
+                    {{ $t('device.unbind') }}
+                  </CustomButton>
+                </div>
+              </template>
+            </CustomTable>
+          </el-card>
+        </div>
+      </div>
+    </div>
+
+    <el-dialog v-model="esp32Open" title="ESP32 AI 设备" width="min(680px, 94vw)" destroy-on-close>
+      <Esp32DevicePanel v-if="esp32Open" :device-id="esp32DeviceId" :token="esp32Token" @show-history="esp32Sessions = $event" />
+      <el-table v-if="esp32Sessions.length" :data="esp32Sessions" style="width:100%; margin-top:12px" aria-label="设备 AI 会话">
+        <el-table-column prop="conversation_id" label="统一会话编号" min-width="200" />
+        <el-table-column prop="execution_mode" label="AI 执行模式" min-width="140" />
+      </el-table>
+    </el-dialog>
+
+    <AddDeviceDialog v-model:visible="addDeviceDialogVisible" :agent-id="currentAgentId"
+      @refresh="fetchBindDevices(currentAgentId)" />
+    <ManualAddDeviceDialog v-model:visible="manualAddDeviceDialogVisible" :agent-id="currentAgentId"
+      @refresh="fetchBindDevices(currentAgentId)" />
+    
+  </div>
+</template>
+
+<script>
+import Api from '@/apis/api';
+import Esp32DevicePanel from '../components/Esp32DevicePanel.vue';
+import store from '../store';
+import { getServiceUrl } from '../apis/serviceUrl';
+import AddDeviceDialog from "@/components/AddDeviceDialog.vue";
+import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
+import MacAddressMask from "@/components/MacAddressMask.vue";
+import CustomButton from "@/components/CustomButton.vue";
+import CustomTable from "@/components/CustomTable.vue";
+import {
+  compareTimestamps,
+  formatCreateDate,
+  formatTimestamp,
+  hasTimestampValue,
+  parseLegacyDate,
+  parseTimestamp,
+} from '@/utils/deviceTime.mjs';
+
+export default {
+  components: {
+    Esp32DevicePanel,
+    AddDeviceDialog,
+    ManualAddDeviceDialog,
+    MacAddressMask,
+    CustomButton,
+    CustomTable,
+  },
+  data() {
+    return {
+      addDeviceDialogVisible: false,
+      manualAddDeviceDialogVisible: false,
+      selectedDeviceId: '',
+      searchKeyword: "",
+      activeSearchKeyword: "",
+      currentAgentId: this.$route.query.agentId || '',
+      currentPage: 1,
+      pageSize: 10,
+      pageSizeOptions: [10, 20, 50, 100],
+      deviceList: [],
+      esp32Available: false, esp32DeviceId: '', esp32Open: false, esp32Sessions: [], esp32CapabilityController: null,
+      loading: false,
+      userApi: null,
+      firmwareTypes: [],
+      mqttServiceAvailable: false,
+    };
+  },
+  computed: {
+    esp32Token() {try{return JSON.parse(store.getters.getToken || '{}').token || '';}catch{return '';}},
+    filteredDeviceList() {
+      const keyword = this.activeSearchKeyword.toLowerCase();
+      if (!keyword) return this.deviceList;
+      return this.deviceList.filter(device =>
+        (device.model && device.model.toLowerCase().includes(keyword)) ||
+        (device.macAddress && device.macAddress.toLowerCase().includes(keyword))
+      );
+    },
+
+    paginatedDeviceList() {
+      const start = (this.currentPage - 1) * this.pageSize;
+      const end = start + this.pageSize;
+      return this.filteredDeviceList.slice(start, end);
+    },
+    isCurrentPageAllSelected() {
+      return this.paginatedDeviceList.length > 0 &&
+        this.paginatedDeviceList.every(device => device.selected);
+    },
+    tableColumns() {
+      const columns = [
+        { prop: 'model', label: this.$t('device.model'), align: 'center' },
+        { prop: 'firmwareVersion', label: this.$t('device.firmwareVersion'), align: 'center' },
+        { prop: 'macAddress', label: this.$t('device.macAddress'), align: 'center' },
+        { prop: 'bindTime', label: this.$t('device.bindTime'), align: 'center' },
+        { prop: 'lastConversation', label: this.$t('device.lastConversation'), align: 'center' },
+      ];
+      if (this.mqttServiceAvailable) {
+        columns.push({ prop: 'deviceStatus', label: this.$t('device.deviceStatus'), align: 'center' });
+      }
+      columns.push({ prop: 'alias', label: this.$t('device.alias'), align: 'center' });
+      columns.push({ prop: 'otaSwitch', label: this.$t('device.autoUpdate'), align: 'center' });
+      return columns;
+    },
+  },
+  watch: {
+    esp32Token() { this.esp32Open=false;this.esp32Sessions=[];this.esp32Available=false;this.fetchEsp32Capabilities(); },
+  },
+  beforeUnmount() { this.esp32CapabilityController?.abort(); },
+  mounted() {
+    this.fetchEsp32Capabilities();
+    const agentId = this.$route.query.agentId;
+    if (agentId) {
+      this.fetchBindDevices(agentId);
+    }
+  },
+  created() {
+    this.getFirmwareTypes()
+  },
+  methods: {
+    openEsp32(id) {this.esp32DeviceId=String(id);this.esp32Sessions=[];this.esp32Open=true;},
+    async fetchEsp32Capabilities() {
+      const token=this.esp32Token;if(!token)return;
+      this.esp32CapabilityController?.abort();
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);this.esp32CapabilityController=controller;
+      try {
+        const r=await fetch(`${getServiceUrl().replace(/\/$/,'')}/api/v1/esp32/capabilities`,{headers:{Authorization:`Bearer ${token}`},signal:controller.signal});
+        const body=await r.json();if(token!==this.esp32Token||this.esp32CapabilityController!==controller)return;
+        this.esp32Available=r.ok&&body.code===0&&body.data?.ai_only===true;
+      }catch {if(token===this.esp32Token&&this.esp32CapabilityController===controller)this.esp32Available=false;}finally {clearTimeout(timer);if(this.esp32CapabilityController===controller)this.esp32CapabilityController=null;}
+    },
+    async getFirmwareTypes() {
+      try {
+        const res = await Api.dict.getDictDataByType('FIRMWARE_TYPE')
+        this.firmwareTypes = res.data
+      } catch (error) {
+        console.error(this.$t('device.getFirmwareTypeFailed') + ':', error)
+        this.$message.error(error.message || this.$t('device.getFirmwareTypeFailed'))
+      }
+    },
+    handlePageSizeChange(val) {
+      this.pageSize = val;
+      this.currentPage = 1;
+    },
+    handleSearch() {
+      this.activeSearchKeyword = this.searchKeyword;
+      this.currentPage = 1;
+    },
+
+    handleSelectAll() {
+      const shouldSelectAll = !this.isCurrentPageAllSelected;
+      this.paginatedDeviceList.forEach(row => {
+        row.selected = shouldSelectAll;
+      });
+    },
+
+    deleteSelected() {
+      const selectedDevices = this.paginatedDeviceList.filter(device => device.selected);
+      if (selectedDevices.length === 0) {
+        this.$message.warning({
+          message: this.$t('device.selectAtLeastOne'),
+          showClose: true
+        });
+        return;
+      }
+
+      this.$confirm(this.$t('device.confirmBatchUnbind').replace('{count}', selectedDevices.length), this.$t('message.warning'), {
+        confirmButtonText: this.$t('button.ok'),
+        cancelButtonText: this.$t('button.cancel'),
+        type: 'warning'
+      }).then(() => {
+        const deviceIds = selectedDevices.map(device => device.device_id);
+        this.batchUnbindDevices(deviceIds);
+      });
+    },
+    batchUnbindDevices(deviceIds) {
+      const promises = deviceIds.map(id => {
+        return new Promise((resolve, reject) => {
+          Api.device.unbindDevice(id, ({ data }) => {
+            if (data.code === 0) {
+              resolve();
+            } else {
+              reject(data.msg || this.$t('device.bindFailed'));
+            }
+          });
+        });
+      });
+      Promise.all(promises)
+        .then(() => {
+          this.$message.success({
+            message: this.$t('device.batchUnbindSuccess').replace('{count}', deviceIds.length),
+            showClose: true
+          });
+          this.fetchBindDevices(this.currentAgentId);
+        })
+        .catch(error => {
+          this.$message.error({
+            message: error || this.$t('device.batchUnbindError'),
+            showClose: true
+          });
+        });
+    },
+    handleAddDevice() {
+      this.addDeviceDialogVisible = true;
+    },
+    handleManualAddDevice() {
+      this.manualAddDeviceDialogVisible = true;
+    },
+    submitAlias(row) {
+      if (row._submitting) return;
+
+      const text = (row.alias || '').trim();
+      if (text.length > 64) {
+        this.$message.warning(this.$t('device.aliasTooLong'));
+        return;
+      }
+      if (text === row._originalAlias) {
+        return;
+      }
+
+      row._submitting = true;
+      this.updateDeviceInfo(row.device_id, { alias: text }, (ok, resp) => {
+        if (ok) {
+          row._originalAlias = text;
+          this.$message.success(this.$t('device.aliasSaved'));
+        } else {
+          row.alias = row._originalAlias;
+          this.$message.error(resp.msg || this.$t('device.aliasSaveFailed'));
+        }
+        row._submitting = false;
+      });
+    },
+    onAliasBlur(row) {
+      row.isEdit = false;
+      setTimeout(() => {
+        this.submitAlias(row);
+      }, 100);
+    },
+    onAliasEnter(row) {
+      row.isEdit = false;
+      this.submitAlias(row);
+    },
+    handleUnbind(device_id) {
+      this.$confirm(this.$t('device.confirmUnbind'), this.$t('message.warning'), {
+        confirmButtonText: this.$t('button.ok'),
+        cancelButtonText: this.$t('button.cancel'),
+        type: 'warning'
+      }).then(() => {
+        Api.device.unbindDevice(device_id, ({ data }) => {
+          if (data.code === 0) {
+            this.$message.success({
+              message: this.$t('device.unbindSuccess'),
+              showClose: true
+            });
+            this.fetchBindDevices(this.$route.query.agentId);
+          } else {
+            this.$message.error({
+              message: data.msg || this.$t('device.unbindFailed'),
+              showClose: true
+            });
+          }
+        });
+      });
+    },
+    handleGenertor(row) {
+      const pathname = window.location.pathname;
+      const basePath = pathname.split('/').slice(0, -1).join('/');
+      const url = `${window.location.origin}${basePath}/generator/?deviceId=${row.device_id}`;
+      sessionStorage.setItem('devicePath', window.location.href);
+      window.location.href = url;
+    },
+    goToPage(page) {
+      this.currentPage = page;
+    },
+
+    fetchBindDevices(agentId) {
+      this.loading = true;
+      Api.device.getAgentBindDevices(agentId, ({ data }) => {
+        this.loading = false;
+        if (data.code === 0) {
+          this.deviceList = data.data.map(device => {
+            const hasCreateDateTimestamp = hasTimestampValue(device.createDateTimestamp);
+            const rawBindTime = hasCreateDateTimestamp
+              ? parseTimestamp(device.createDateTimestamp)
+              : parseLegacyDate(device.createDate);
+            return {
+              device_id: device.id,
+              model: device.board,
+              firmwareVersion: device.appVersion,
+              macAddress: device.macAddress,
+              bindTime: formatCreateDate(device.createDateTimestamp, device.createDate),
+              lastConversation: formatTimestamp(device.lastConnectedAtTimestamp),
+              alias: device.alias,
+              _originalAlias: device.alias,
+              isEdit: false,
+              _submitting: false,
+              otaSwitch: device.autoUpdate === 1,
+              rawBindTime,
+              selected: false,
+              deviceStatus: 'offline'
+            };
+          })
+            .sort((firstDevice, secondDevice) => compareTimestamps(
+              firstDevice.rawBindTime,
+              secondDevice.rawBindTime,
+            ));
+          this.activeSearchKeyword = "";
+          this.searchKeyword = "";
+
+          this.fetchDeviceStatus(agentId);
+        } else {
+          this.$message.error(data.msg || this.$t('device.getListFailed'));
+        }
+      });
+    },
+
+    fetchDeviceStatus(agentId) {
+      this.loading = true;
+      Api.device.getDeviceStatus(agentId, ({ data }) => {
+        this.loading = false;
+        if (data.code === 0) {
+          try {
+            const statusData = JSON.parse(data.data);
+
+            if (statusData && typeof statusData === 'object') {
+              this.mqttServiceAvailable = true;
+              this.updateDeviceStatusFromResponse(statusData);
+            } else {
+              this.mqttServiceAvailable = false;
+            }
+          } catch (error) {
+            this.mqttServiceAvailable = false;
+          }
+        } else {
+          this.mqttServiceAvailable = false;
+        }
+      });
+    },
+
+    updateDeviceStatusFromResponse(deviceStatusMap) {
+      this.deviceList.forEach(device => {
+        const macAddress = device.macAddress ? device.macAddress.replace(/:/g, '_') : 'unknown';
+        const groupId = device.model ? device.model.replace(/:/g, '_') : 'GID_default';
+        const mqttClientId = `${groupId}@@@${macAddress}@@@${macAddress}`;
+
+        if (deviceStatusMap[mqttClientId]) {
+          const statusInfo = deviceStatusMap[mqttClientId];
+
+          let isOnline = false;
+          if (statusInfo.isAlive === true) {
+            isOnline = true;
+          } else if (statusInfo.isAlive === false) {
+            isOnline = false;
+          } else if (statusInfo.isAlive === null && statusInfo.exists === true) {
+            isOnline = true;
+          } else {
+            isOnline = false;
+          }
+
+          device.deviceStatus = isOnline ? 'online' : 'offline';
+        } else {
+          device.deviceStatus = 'offline';
+        }
+      });
+    },
+    getFirmwareTypeName(type) {
+      const firmwareType = this.firmwareTypes.find(item => item.key === type)
+      return firmwareType ? firmwareType.name : type
+    },
+    updateDeviceInfo(device_id, payload, callback) {
+      return Api.device.updateDeviceInfo(device_id, payload, ({ data }) => {
+        callback(data.code === 0, data);
+      })
+    },
+    handleOtaSwitchChange(row) {
+      this.updateDeviceInfo(row.device_id, { autoUpdate: row.otaSwitch ? 1 : 0 }, (result, { msg }) => {
+        if (result) {
+          this.$message.success(row.otaSwitch ? this.$t('device.autoUpdateEnabled') : this.$t('device.autoUpdateDisabled'));
+          return;
+        }
+        row.otaSwitch = !row.otaSwitch
+        this.$message.error(msg || this.$t('message.error'))
+      })
+    },
+    isGenerate(row) {
+      const version = row?.firmwareVersion;
+      if (typeof version !== 'string' || !/^\d+(?:\.\d+)*$/.test(version)) return false;
+      const numericVersion = Number(version.replace(/\./g, ''));
+      return Number.isFinite(numericVersion) && numericVersion >= 200;
+    },
+  }
+};
+</script>
+
+<style lang="scss" scoped>
+.welcome {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  position: relative;
+  flex-direction: column;
+  background: #eff4ff;
+  background-size: cover;
+  -webkit-background-size: cover;
+  -o-background-size: cover;
+  overflow: hidden;
+}
+
+.main-wrapper {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  padding: 20px 22px 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.operation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 16px 0;
+}
+
+.page-title {
+  font-weight: 500;
+  font-size:var(--admin-font-title);
+  margin: 0;
+}
+
+.right-operations {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.search-input {
+  width: 240px;
+}
+
+.content-panel {
+  display: flex;
+  overflow: hidden;
+  height: 100%;
+  border-radius: 15px;
+  background: transparent;
+  border: 1px solid #fff;
+}
+
+.content-area {
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+  background-color: white;
+  display: flex;
+  flex-direction: column;
+}
+
+.device-card {
+  background: white;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  box-shadow: none;
+  overflow: hidden;
+
+  :deep(.el-card__body) {
+    padding: 14px 20px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+  }
+}
+
+.ctrl_btn {
+  display: flex;
+  gap: 8px;
+}
+
+:deep(.el-table .el-button.is-link) {
+  color: #7079aa;
+}
+
+:deep(.el-table .el-button.is-link:hover) {
+  color: #5a64b5;
+}
+
+:deep(.el-icon-edit) {
+  color: #7079aa;
+  cursor: pointer;
+}
+
+:deep(.el-icon-edit:hover) {
+  color: #5a64b5;
+}
+</style>
+
+<style scoped>
+.admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
+.admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
+.admin-page .right-operations { flex-wrap: wrap; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
+.admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
+.admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
+.admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
+@media (max-width: 760px) {
+  .admin-page .right-operations { margin-left: 0; width: 100%; }
+  .admin-page .search-input { max-width: 100%; }
+}
+</style>

@@ -1,0 +1,10 @@
+export function pcm16Bytes(samples){const bytes=new Uint8Array(samples.length*2),view=new DataView(bytes.buffer);for(let i=0;i<samples.length;i++){const value=Math.max(-1,Math.min(1,samples[i]));view.setInt16(i*2,Math.round(value<0?value*32768:value*32767),true);}return bytes;}
+export function pcm16Floats(bytes){if(!bytes.length||bytes.length%2)throw new Error('INVALID_PCM');const data=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),out=new Float32Array(bytes.length/2);for(let i=0;i<out.length;i++)out[i]=data.getInt16(i*2,true)/32768;return out;}
+/** Continuous weighted-area resampling. Preserve fractional bins across worklet blocks. */
+export class Pcm16Framer{
+ constructor(inputRate,outputRate=16000,frameSamples=1600){if(inputRate<outputRate||!Number.isFinite(inputRate))throw new Error('INVALID_SAMPLE_RATE');this.ratio=inputRate/outputRate;this.frameSamples=frameSamples;this.frame=[];this.sum=0;this.weight=0;}
+ push(input){const frames=[];for(const sample of input){let remaining=1;while(remaining>1e-9){const take=Math.min(remaining,this.ratio-this.weight);this.sum+=sample*take;this.weight+=take;remaining-=take;if(this.weight>=this.ratio-1e-9){this.frame.push(this.sum/this.ratio);this.sum=0;this.weight=0;if(this.frame.length===this.frameSamples){frames.push(pcm16Bytes(this.frame));this.frame=[];}}}}return frames;}
+ flush(){const data=this.frame.length?pcm16Bytes(this.frame):null;this.frame=[];this.sum=0;this.weight=0;return data;}
+}
+export function bytesBase64(bytes){let text='';for(let start=0;start<bytes.length;start+=8192)text+=String.fromCharCode(...bytes.subarray(start,start+8192));return btoa(text);}
+export function base64Bytes(text,maxBytes=65536){if(typeof text!=='string'||text.length>Math.ceil(maxBytes/3)*4||!/^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(text))throw new Error('INVALID_AUDIO');const raw=atob(text);if(!raw.length||raw.length>maxBytes)throw new Error('OUTPUT_LIMIT');return Uint8Array.from(raw,c=>c.charCodeAt(0));}

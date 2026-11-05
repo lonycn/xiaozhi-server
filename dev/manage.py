@@ -23,11 +23,11 @@ DEV = Path(__file__).resolve().parent
 ROOT = DEV.parent
 RUNTIME = DEV / ".runtime"
 WEB = ROOT / "main/manager-web"
-CANDIDATE = ROOT / "main/manager-web-next"
+CANDIDATE = WEB
 ANNOTATION_DEFAULT_FONT = ROOT / "assets/fonts/noto_qwen.ttf"
 CANDIDATE_URL = "http://127.0.0.1:18894"
 API = ROOT / "main/manager-api"
-WEB_URL = "http://127.0.0.1:18892"
+WEB_URL = CANDIDATE_URL
 API_URL = "http://127.0.0.1:18893/xiaozhi"
 SPEECH_DEFAULT_PROFILE = ("cosyvoice-v3.5-flash", "longantai_v3")
 SPEECH_PROFILES = (SPEECH_DEFAULT_PROFILE, ("cosyvoice-v2", "longxiaochun_v2"))
@@ -1328,18 +1328,8 @@ def web_process():
 
 
 def start_web():
-    if web_process():
-        return
-    with socket.socket() as check:
-        if check.connect_ex(("127.0.0.1", 18892)) == 0:
-            raise RuntimeError("Port 18892 belongs to another process")
-    env = {**os.environ, "VUE_APP_API_BASE_URL": "/xiaozhi", "VUE_APP_API_PROXY_TARGET": "http://127.0.0.1:18893",
-           "VUE_APP_CONVERSATION_ENABLED": "true", "VUE_APP_ENV_LABEL": "Dev", "NODE_OPTIONS": "--max-old-space-size=1536"}
-    with (RUNTIME / "web.log").open("a") as log:
-        process = subprocess.Popen(["npm", "run", "serve", "--", "--host", "127.0.0.1", "--port", "18892"],
-                                   cwd=WEB, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    identity = process_identity(process.pid)
-    (RUNTIME / "web-process.json").write_text(json.dumps({"pid": process.pid, "identity": identity}))
+    """Compatibility alias for the current Vue 3 frontend."""
+    start_candidate()
 
 
 def candidate_process():
@@ -1359,7 +1349,7 @@ def start_candidate():
         return
     modules = CANDIDATE / "node_modules"
     if modules.is_symlink() or not modules.is_dir():
-        raise RuntimeError("Install candidate dependencies in manager-web-next with npm ci; linked node_modules are not supported")
+        raise RuntimeError("Install frontend dependencies in main/manager-web with npm ci; linked node_modules are not supported")
     with socket.socket() as check:
         if check.connect_ex(("127.0.0.1", 18894)) == 0:
             raise RuntimeError("Port 18894 belongs to another process")
@@ -1401,7 +1391,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status", "summary-enable", "summary-disable", "summary-status", "agent-tools-enable", "agent-tools-disable", "agent-tools-status", "ai-first-enable", "ai-first-disable", "ai-first-status"])
     parser.add_argument("--build", action="store_true")
-    parser.add_argument("--no-frontend", action="store_true", help="Start backend services without the separate frontend checkout")
+    parser.add_argument("--no-frontend", action="store_true", help="Start API and workers without starting the web frontend")
     parser.add_argument("--seed-local-console", action="store_true")
     parser.add_argument("--storage", choices=["filesystem", "s3"])
     parser.add_argument("--storage-env", help="Existing private S3 configuration file; no bucket creation")
@@ -1626,9 +1616,10 @@ def main():
         wait_http(WEB_URL)
         print(WEB_URL + "/#/conversations")
     elif args.action == "legacy-status":
-        print("Vue 2 legacy:", "running" if web_process() else "stopped")
+        print("Vue 3 frontend (legacy alias):", "running" if candidate_process() else "stopped")
         print(WEB_URL + "/#/conversations")
     elif args.action == "legacy-stop":
+        stop_process(candidate_process, "candidate-process.json")
         stop_process(web_process, "web-process.json")
     elif args.action == "up":
         if args.build or not (API / "target/xiaozhi-esp32-api.jar").exists():

@@ -1,10 +1,12 @@
-# 小智后端工作仓库
+# 小智 Server 工作仓库
 
-前端已独立到工作区 `frontend/`，后端继续在本仓库使用 `Dev` 分支及原远程。当前目录、独立 Git 和构建流程见 [文档入口](docs/README.md) 与 [拆分说明](docs/REPOSITORY_SPLIT_20261105.md)。
+本仓库统一管理 Vue 3 网页、Java API、Python 语音与 AI 服务。Vue 3 位于标准 `main/manager-web/`，替代 Vue 2；`main/manager-web-next` 仅为兼容链接。日常分支为 `Dev`，远程是 `https://github.com/lonycn/xiaozhi-server.git`。
 
-Java API 镜像使用 `Dockerfile-api`，Python 镜像使用 `Dockerfile-server`。本机仅启动后端执行 `python3 dev/manage.py up --no-frontend`；安装好独立前端依赖后，省略该选项可联合启动。前端静态镜像在前端仓库构建。
+先执行 `npm ci --prefix main/manager-web` 安装前端依赖，再通过 `python3 dev/manage.py up` 启动 Dev。网页单独开发可用 `npm run dev --prefix main/manager-web`；仅启动后端用 `up --no-frontend`。前端文档、Git、历史和运行范围见 [文档入口](docs/README.md) 与 [整合记录](docs/SERVER_FRONTEND_INTEGRATION_20261105.md)。
 
-以下保留原上游介绍，其中前端路径与旧版整合镜像说明按对应版本理解。
+`Dockerfile-web` 构建 Vue 3 与 Java API 的整合镜像，`main/manager-web/Dockerfile` 构建纯静态镜像；API 与 Python 镜像也可分别构建。旧 Vue 2 保留在本地归档和 Git 历史中。
+
+以下保留原上游介绍，旧 Vue 2 和路径说明按对应历史版本理解。
 
 [![Banners](docs/images/banner1.png)](https://github.com/xinnan-tech/xiaozhi-esp32-server)
 

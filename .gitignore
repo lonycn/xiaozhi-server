@@ -211,6 +211,7 @@ node_modules/
 .env.local
 .env.*.local
 !**/package-lock.json
+!/main/manager-web/**/*.json
 /releases/*
 !/releases/README.md
 !/releases/catalog.toml

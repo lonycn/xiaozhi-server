@@ -24,7 +24,7 @@ ROOT = DEV.parent
 RUNTIME = DEV / ".runtime"
 WEB = ROOT / "main/manager-web"
 CANDIDATE = ROOT / "main/manager-web-next"
-ANNOTATION_DEFAULT_FONT = WEB / "public/generator/static/fonts/noto_qwen.ttf"
+ANNOTATION_DEFAULT_FONT = ROOT / "assets/fonts/noto_qwen.ttf"
 CANDIDATE_URL = "http://127.0.0.1:18894"
 API = ROOT / "main/manager-api"
 WEB_URL = "http://127.0.0.1:18892"
@@ -1287,13 +1287,6 @@ def build():
     print("Building Dev API…", flush=True)
     with (RUNTIME / "build-api.log").open("w") as log:
         subprocess.run(["mvn", "-B", "-DskipTests", "package"], cwd=API, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
-    modules = CANDIDATE / "node_modules"
-    if modules.is_symlink():
-        raise RuntimeError("Linked Vue 3 node_modules are not supported")
-    if not modules.is_dir():
-        print("Installing locked frontend dependencies…", flush=True)
-        with (RUNTIME / "install-web.log").open("w") as log:
-            subprocess.run(["npm", "ci", "--no-audit", "--no-fund"], cwd=CANDIDATE, stdout=log, stderr=subprocess.STDOUT, check=True)
 
 
 def seed_local_console():
@@ -1408,6 +1401,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status", "summary-enable", "summary-disable", "summary-status", "agent-tools-enable", "agent-tools-disable", "agent-tools-status", "ai-first-enable", "ai-first-disable", "ai-first-status"])
     parser.add_argument("--build", action="store_true")
+    parser.add_argument("--no-frontend", action="store_true", help="Start backend services without the separate frontend checkout")
     parser.add_argument("--seed-local-console", action="store_true")
     parser.add_argument("--storage", choices=["filesystem", "s3"])
     parser.add_argument("--storage-env", help="Existing private S3 configuration file; no bucket creation")
@@ -1424,6 +1418,8 @@ def main():
     parser.add_argument("--skills", action="store_true", help="Explicitly enable fixed readonly skills")
     parser.add_argument("--runtime-control", action="store_true", help="Explicitly enable AI runtime admission control")
     args = parser.parse_args()
+    if args.no_frontend and args.action != "up":
+        parser.error("--no-frontend is only valid with up")
     if args.runtime_control and args.action != "ai-first-enable":
         parser.error("--runtime-control is only valid with ai-first-enable")
     if (args.speech or args.skills) and args.action != "ai-first-enable":
@@ -1666,10 +1662,13 @@ def main():
             start_speech_worker()
         if (RUNTIME / "esp32-device-settings.json").exists():
             subprocess.run([str(ROOT.parent / ".venv/bin/python"), str(DEV / "esp32_services.py"), "start"], check=True)
-        start_candidate()
-        print("Waiting for Dev frontend…", flush=True)
-        wait_http(CANDIDATE_URL)
-        print(CANDIDATE_URL + "/#/conversations", flush=True)
+        if not args.no_frontend:
+            start_candidate()
+            print("Waiting for Dev frontend…", flush=True)
+            wait_http(CANDIDATE_URL)
+            print(CANDIDATE_URL + "/#/conversations", flush=True)
+        else:
+            print(API_URL, flush=True)
     elif args.action == "stop":
         if (RUNTIME / "esp32-device-settings.json").exists():
             subprocess.run([str(ROOT.parent / ".venv/bin/python"), str(DEV / "esp32_services.py"), "stop"], check=True)

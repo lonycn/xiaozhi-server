@@ -1,3 +1,11 @@
+# 小智后端工作仓库
+
+前端已独立到工作区 `frontend/`，后端继续在本仓库使用 `Dev` 分支及原远程。当前目录、独立 Git 和构建流程见 [文档入口](docs/README.md) 与 [拆分说明](docs/REPOSITORY_SPLIT_20261105.md)。
+
+Java API 镜像使用 `Dockerfile-api`，Python 镜像使用 `Dockerfile-server`。本机仅启动后端执行 `python3 dev/manage.py up --no-frontend`；安装好独立前端依赖后，省略该选项可联合启动。前端静态镜像在前端仓库构建。
+
+以下保留原上游介绍，其中前端路径与旧版整合镜像说明按对应版本理解。
+
 [![Banners](docs/images/banner1.png)](https://github.com/xinnan-tech/xiaozhi-esp32-server)
 
 <h1 align="center">小智后端服务xiaozhi-esp32-server</h1>

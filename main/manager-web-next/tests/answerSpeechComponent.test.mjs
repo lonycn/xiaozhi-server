@@ -1,7 +1,0 @@
-import {mount} from '@vue/test-utils';
-import {it,expect,vi} from 'vitest';
-import Component from '../src/components/AnswerSpeech.vue';
-const playback=vi.hoisted(()=>({start:vi.fn(),stop:vi.fn(),invalidate:vi.fn()}));
-vi.mock('../src/speech/answerSpeech.mjs',()=>({default:playback}));
-it('immediately stops the matching message when realtime blocks playback and does not resume automatically',async()=>{const message={id:'m',status:'completed',parts:[{type:'text',text:'hello'}]};const wrapper=mount(Component,{props:{conversationId:'c',identity:'opaque',message}});await wrapper.find('button').trigger('click');expect(playback.start).toHaveBeenCalledOnce();await wrapper.setProps({blocked:true});expect(playback.invalidate).toHaveBeenCalledWith(JSON.stringify(['opaque','c','m']));expect(wrapper.find('button').attributes('disabled')).toBeDefined();await wrapper.setProps({blocked:false});expect(playback.start).toHaveBeenCalledOnce();wrapper.unmount();});
-it('invalidates old session and version when the message changes',async()=>{const wrapper=mount(Component,{props:{conversationId:'c',identity:'u',message:{id:'m',status:'completed',parts:[{type:'text',text:'v1'}]}}});await wrapper.setProps({conversationId:'new'});expect(playback.invalidate).toHaveBeenCalledWith(JSON.stringify(['u','c','m']));await wrapper.setProps({message:{id:'m',status:'completed',parts:[{type:'text',text:'v2'}]}});expect(playback.invalidate).toHaveBeenCalledWith(JSON.stringify(['u','new','m']));wrapper.unmount();});

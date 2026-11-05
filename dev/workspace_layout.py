@@ -14,8 +14,12 @@ def category_links(workspace):
     repository = workspace / "backend/xiaozhi-server/repo"
     if repository.resolve() != REPO:
         raise ValueError("Workspace must contain this checkout at backend/xiaozhi-server/repo")
+    frontend = workspace / "frontend"
+    if not (frontend / ".git").is_dir() or (frontend / ".git").resolve() == (repository / ".git").resolve():
+        raise ValueError("frontend/ must be an independent Git repository")
     links = {
-        "frontend": repository / "main/manager-web-next",
+        "backend/xiaozhi-server/repo/main/manager-web-next": frontend,
+        "backend/xiaozhi-server/repo/main/manager-web": frontend / "legacy",
         "backend/manager-api": repository / "main/manager-api",
         "backend/services": repository / "main/xiaozhi-server",
         "backend/dev": repository / "dev",
@@ -23,7 +27,7 @@ def category_links(workspace):
         "releases": workspace / ".local/releases",
         "backups": workspace / ".local/backups",
         "archive/experiments": workspace / "work",
-        "archive/frontend-vue2": repository / "main/manager-web",
+        "archive/frontend-vue2": frontend / "legacy",
         "archive/legacy-console": workspace / "backend/xiaozhi-server/console",
         "archive/legacy-voice-source": workspace / "backend/xiaozhi-server/source",
         ".local/releases/README.md": repository / "releases/README.md",

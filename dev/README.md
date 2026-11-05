@@ -1,5 +1,7 @@
 # Dev 开发预览
 
+前端现位于工作区独立仓库 `frontend/`（Vue 3 根目录、Vue 2 在 `legacy/`）。后端构建只执行 Maven，前端依赖在前端仓库安装。仅启动后端使用 `python3 dev/manage.py up --no-frontend`；完整 Git 和构建方式见 [独立仓库说明](../docs/GIT_WORKFLOW.md)。
+
 日常开发与测试统一使用 Git 分支 **`Dev`**；`main` 保留上游基线，稳定后再从 Dev 提交可审核的合并请求。修改提交、数据库迁移与测试记录均跟随 Dev 保存。
 
 本机页面：<http://127.0.0.1:18894/#/conversations>。后台入口：<http://127.0.0.1:18894/#/home>。
@@ -22,7 +24,7 @@ python3 dev/manage.py status
 python3 dev/manage.py stop
 ```
 
-前端为 Vue3 Vite 开发服务，修改源码自动更新；Java 后端改动后用 `up --build` 重建并重启 Dev API。启动前脚本将构建产物原子复制到 `dev/.runtime/manager-api.jar`，容器挂载该副本，使正在运行的容器不受下次构建覆盖影响。需要 Docker、JDK 21、Maven 和 Node/npm；缺少前端依赖时构建命令会按现有锁文件安装。
+前端为 Vue3 Vite 开发服务，修改源码自动更新；Java 后端改动后用 `up --build` 重建并重启 Dev API。启动前脚本将构建产物原子复制到 `dev/.runtime/manager-api.jar`，容器挂载该副本，使正在运行的容器不受下次构建覆盖影响。需要 Docker、JDK 21、Maven 和 Node/npm；前端依赖在独立 `frontend/` 仓库执行 `npm ci` 安装。
 
 首次开发环境已经通过只读快照复制本机智控台数据，登录账号/密码沿用原智控台。Dev 的登录 Token 单独签发。后续测试写入只落在独立的 Dev 数据库，不同步回原服务。
 
@@ -83,7 +85,7 @@ python3 dev/manage.py candidate-stop
 也可以构建独立的静态候选镜像，并连接已启动的 Dev 网络：
 
 ```sh
-docker build -f Dockerfile-web-next -t xiaozhi-vue3-preview .
+docker build -t xiaozhi-vue3-preview ../../../frontend
 docker run --rm --name xiaozhi-vue3-preview --network xiaozhi-server-dev_default \
   -p 127.0.0.1:18895:8080 -e API_PROXY_TARGET=http://api:8002 xiaozhi-vue3-preview
 ```

@@ -1,0 +1,13 @@
+# Independent Java API image; build from the backend repository root.
+FROM maven:3.9.4-eclipse-temurin-21 AS build
+WORKDIR /app
+COPY main/manager-api/pom.xml ./
+COPY main/manager-api/src ./src
+RUN mvn -B -DskipTests package
+
+FROM eclipse-temurin@sha256:8cef5fc7bebe421363ab543a2f4db5caf7d119d8db67d56b0f56c485d2de4d55
+WORKDIR /app
+COPY assets/fonts/*.ttf /usr/share/fonts/truetype/xiaozhi/
+COPY --from=build /app/target/xiaozhi-esp32-api.jar /app/manager.jar
+EXPOSE 8002
+ENTRYPOINT ["java", "-Djava.awt.headless=true", "-jar", "/app/manager.jar"]

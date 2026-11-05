@@ -34,9 +34,9 @@ class CandidateSafetyTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    def run_action(self, action):
+    def run_action(self, action, extra_args=()):
         with tempfile.TemporaryDirectory() as tmp, patch.object(manage, 'RUNTIME', Path(tmp)), \
-             patch('sys.argv', ['manage.py', action]), patch.object(manage, 'configure'), \
+             patch('sys.argv', ['manage.py', action, *extra_args]), patch.object(manage, 'configure'), \
              patch.object(manage, 'compose') as compose, patch.object(manage, 'start_candidate') as candidate, \
              patch.object(manage, 'start_web') as legacy, patch.object(manage, 'wait_http') as wait, \
              patch.object(manage, 'candidate_process', return_value={'pid': 11}), \
@@ -51,6 +51,12 @@ class CommandTests(unittest.TestCase):
         candidate.assert_called_once()
         legacy.assert_not_called()
         wait.assert_any_call(manage.CANDIDATE_URL)
+
+    def test_up_without_frontend_only_waits_for_api(self):
+        _, candidate, legacy, wait, _ = self.run_action('up', ['--no-frontend'])
+        candidate.assert_not_called()
+        legacy.assert_not_called()
+        wait.assert_called_once_with(manage.API_URL + '/user/pub-config')
 
     def test_stop_stops_both_and_containers(self):
         compose, _, _, _, kill = self.run_action('stop')
@@ -77,16 +83,28 @@ class CommandTests(unittest.TestCase):
                 manage.main()
                 kill.assert_not_called()
 
-    def test_build_refuses_linked_dependencies(self):
+    def test_backend_build_does_not_access_frontend_dependencies(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'target').mkdir()
             (root / 'node_modules').symlink_to(root / 'target')
             with patch.object(manage, 'CANDIDATE', root), patch.object(manage, 'RUNTIME', root), \
                  patch.object(manage.subprocess, 'run') as run:
-                with self.assertRaisesRegex(RuntimeError, 'Linked'):
-                    manage.build()
+                manage.build()
                 self.assertEqual(run.call_count, 1)
+                self.assertEqual(run.call_args.args[0][0], 'mvn')
+
+    def test_frontend_start_still_refuses_linked_dependencies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'target').mkdir()
+            (root / 'node_modules').symlink_to(root / 'target')
+            with patch.object(manage, 'CANDIDATE', root), \
+                 patch.object(manage, 'candidate_process', return_value=None), \
+                 patch.object(manage.subprocess, 'Popen') as popen:
+                with self.assertRaisesRegex(RuntimeError, 'linked'):
+                    manage.start_candidate()
+                popen.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()

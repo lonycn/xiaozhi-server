@@ -50,7 +50,7 @@ services:
       - ./.runtime/attachments:/app/attachments
       - ./.runtime/esp32-firmware:/app/esp32-firmware
       - ./.runtime/logs:/app/logs
-      - ../main/manager-web/public/generator/static/fonts:/usr/share/fonts/truetype/xiaozhi:ro
+      - ../assets/fonts:/usr/share/fonts/truetype/xiaozhi:ro
 volumes:
   mysql-data:
   redis-data:

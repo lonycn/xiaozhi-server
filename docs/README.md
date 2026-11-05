@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | 目录与源码位置 | [工作区目录](WORKSPACE_LAYOUT.md) | 前端、后端、硬件、文档、发布、备份和历史资料 |
 | Git 管理 | [Git 工作流程](GIT_WORKFLOW.md) | 前后端独立仓库、分支、提交范围和忽略规则 |
+| GitHub 远程 | [仓库与远程映射](REPOSITORY_REMOTES.md) | 硬件 fork、server 远程和独立前端对应关系 |
 | 开发与服务运维 | [Dev 说明](../dev/README.md) | 统一启停、端口、功能开关和本地环境 |
 | 固件发布 | [发布说明](../releases/README.md) | 已发布版本、源码快照与本地二进制的位置 |
 | 备份 | [备份说明](BACKUPS.md) | Flash、NVS、数据库、私有配置的保存位置 |

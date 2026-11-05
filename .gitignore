@@ -198,3 +198,19 @@ main/digital-human/wakeword_runtime/models
 main/digital-human/wakeword_runtime/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01
 sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
 /dev/.venv-answer-speech/
+
+# Workspace organization: source and release metadata stay in Git.
+node_modules/
+.local/
+/logs/
+/work/
+/backups/
+*.bin
+*.elf
+*.sql.gz
+.env.local
+.env.*.local
+!**/package-lock.json
+/releases/*
+!/releases/README.md
+!/releases/catalog.toml

@@ -1,0 +1,57 @@
+# Sanitized release index. Binary files and private manifests remain local.
+schema_version = 1
+indexed_on = "2026-11-05"
+
+[[firmware]]
+id = "oled-2.5.23"
+version = "2.5.23"
+board_name = "bread-compact-wifi-128x32-ai-lan"
+channel = "lan-development"
+published_on = "2026-11-04"
+release_directory = ".local/releases/xiaozhi-2.5.23-ai-lan66-20261104"
+latest_pointer = ".local/releases/latest-xiaozhi-path.txt"
+source_snapshot = "work/esp32-face-cues-20261104-1793769839116/source"
+source_alias = "firmware/oled-2.5.23"
+recorded_source_sha = "671e033616ee9a628c0959a00428cd8f55d018b1"
+
+[[firmware.artifacts]]
+file = "assets.bin"
+bytes = 2951901
+sha256 = "4006035a353c7a2d96723724c367d8e09c672fc0ec0e04eac72f88aa6a2e7426"
+
+[[firmware.artifacts]]
+file = "xiaozhi.bin"
+bytes = 2565824
+sha256 = "5b03206da756ed8deb1ca98a317cabeb8cbce873a13848404dd18d3944b23161"
+
+[[firmware]]
+id = "round-2.5.23"
+version = "2.5.23"
+board_name = "sp-esp32-s3-1.28-box-ai-lan"
+channel = "lan-development"
+published_on = "2026-11-05"
+release_directory = ".local/releases/xiaozhi-2.5.23-sp-esp32-s3-1.28-box-ai-lan-20261105"
+latest_pointer = ".local/releases/latest-sp-esp32-s3-1.28-box-ai-lan-path.txt"
+source_snapshot = "work/esp32-round-9070693288e0-20261105/source"
+source_alias = "firmware/round-2.5.23"
+recorded_source_sha = "95e48d66d90de99fc0469aaa06ae1d716a6f5023"
+
+[[firmware.artifacts]]
+file = "assets.bin"
+bytes = 3653557
+sha256 = "b5e06a4f4f2d23cac846115903e9e61128c1ec6a907315126324e4710d890e68"
+
+[[firmware.artifacts]]
+file = "bootloader.bin"
+bytes = 16640
+sha256 = "31c0e2c0e9fbb296cc153196f9174b5897cd5bfa7539af245b263925e08c1a33"
+
+[[firmware.artifacts]]
+file = "partition-table.bin"
+bytes = 3072
+sha256 = "4811619cacae08ef2e0e71b7220c6033a346ca5da7ca179082408c963ef530b5"
+
+[[firmware.artifacts]]
+file = "xiaozhi.bin"
+bytes = 2740400
+sha256 = "36ae089c524a694bc16b2a23d290bedd8a0c622a1186c12bbca1e18b8eda1f35"

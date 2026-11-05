@@ -7,7 +7,7 @@
 - 独立 API：`127.0.0.1:19897`，运行预先准备的 `manager-snapshot-fixed.jar`；测试库 `xiaozhi_media_test_b5_http_r1`。本轮没有修改应用源码。
 - Python native LiveKit SDK `1.1.20`。音频为合成正弦波；视频为 native `VideoSource` 发布的移动色块/编号技术画面，由另一身份的真实 `VideoStream` 接收和解码。没有使用物理麦克风、摄像头或扬声器，也没有操作浏览器。
 - B3/B4 使用真实媒体 worker 处理实际接收的 JPEG；不是手工填写 ready、伪造解码结果或替换成未经过网络接收的图片。
-- 本机证据目录：`/Users/lengwang/code/esp32/work/`。摘要为 `b5-native-r3-summary.json`；音频/转接为 `b5-native-rtc-proof-r3.json`；视频完整链路为 `b5-native-video-proof-r3-47a400e7.json`。
+- 本机证据目录：`/path/to/user/code/esp32/work/`。摘要为 `b5-native-r3-summary.json`；音频/转接为 `b5-native-rtc-proof-r3.json`；视频完整链路为 `b5-native-video-proof-r3-47a400e7.json`。
 
 ## 双向音频、转接与隔离
 
@@ -77,7 +77,7 @@ ACL 实测：发送前客户读取未发送 frame 返回 404；发送后客户�
 
 本节补充原先未完成的持续通话与恢复边界，不改写前述历史记录。以下均为独立 Dev 技术验收：新 API `127.0.0.1:18902`、新库 `xiaozhi_media_test_resilience_8e4702642371`、专属 LiveKit `17980/17981/17982`；真实人工工作台使用独立前端 origin `18907`。Python LiveKit SDK `1.1.20` 只读复用原虚拟环境，未修改 aimeet 依赖或服务。音频为 440/660 Hz 合成信号；视频为 320×180、15 fps 动态技术画面；浏览器麦克风使用 AudioContext 技术源，没有请求物理麦克风或摄像头。
 
-证据基目录为 `/Users/lengwang/code/esp32/work/media-resilience-20261101/`。本轮只向明确的新测试 schema 追加 fixture 和正常 API 记录；没有删除、清空、重初始化任何已有数据库或卷。故障注入只作用于专属 LiveKit 容器网络命名空间 `net:[4026534437]`，由独立 NET_ADMIN 工具容器执行；没有修改原 `17880` 共享服务、本机全局网络或原 Dev 服务的网络规则。
+证据基目录为 `/path/to/user/code/esp32/work/media-resilience-20261101/`。本轮只向明确的新测试 schema 追加 fixture 和正常 API 记录；没有删除、清空、重初始化任何已有数据库或卷。故障注入只作用于专属 LiveKit 容器网络命名空间 `net:[4026534437]`，由独立 NET_ADMIN 工具容器执行；没有修改原 `17880` 共享服务、本机全局网络或原 Dev 服务的网络规则。
 
 ### 持续双向 RTP 与真实损伤
 

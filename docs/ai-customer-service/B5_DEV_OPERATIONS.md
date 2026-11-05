@@ -5,7 +5,7 @@ B5 真人媒体默认关闭，依赖会话及人工支持。实施边界见 [B5 
 首次使用既有私有 LiveKit 配置，并指定客户端实际可访问的地址：
 
 ```sh
-python3 dev/manage.py rtc-enable --rtc-env /Users/lengwang/code/aimeet/.env --rtc-public-url wss://<客户端可访问的地址>
+python3 dev/manage.py rtc-enable --rtc-env /path/to/user/code/aimeet/.env --rtc-public-url wss://<客户端可访问的地址>
 python3 dev/manage.py rtc-status
 ```
 

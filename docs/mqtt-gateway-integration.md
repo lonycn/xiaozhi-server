@@ -119,17 +119,17 @@ pm2 restart xz-mqtt
 
 1. 在智控台顶部，点击`参数管理`，搜索`server.mqtt_gateway`，点击编辑，填入你在`.env`文件中设置的`PUBLIC_IP`+`:`+`MQTT_PORT`。类似这样
 ```
-192.168.0.7:1883
+192.0.2.10:1883
 ```
 2. 在智控台顶部，点击`参数管理`，搜索`server.mqtt_signature_key`，点击编辑，填入你在`.env`文件中设置的`MQTT_SIGNATURE_KEY`。
 
 3. 在智控台顶部，点击`参数管理`，搜索`server.udp_gateway`，点击编辑，填入你在`.env`文件中设置的`PUBLIC_IP`+`:`+`UDP_PORT`。类似这样
 ```
-192.168.0.7:8884
+192.0.2.10:8884
 ```
 4. 在智控台顶部，点击`参数管理`，搜索`server.mqtt_manager_api`，点击编辑，填入你在`.env`文件中设置的`PUBLIC_IP`+`:`+`API_PORT`。类似这样
 ```
-192.168.0.7:8007
+192.0.2.10:8007
 ```
 
 上面的配置完成后，你可以使用curl命令，验证你的ota地址是否会下发mqtt配置，把下面的`http://localhost:8002/xiaozhi/ota/`改成你的ota地址
@@ -137,14 +137,14 @@ pm2 restart xz-mqtt
 curl 'http://localhost:8002/xiaozhi/ota/' \
   -H 'Content-Type: application/json' \
   -H 'Client-Id: 7b94d69a-9808-4c59-9c9b-704333b38aff' \
-  -H 'Device-Id: 11:22:33:44:55:66' \
-  --data-raw $'{\n  "application": {\n    "version": "1.0.1",\n    "elf_sha256": "1"\n  },\n  "board": {\n    "mac": "11:22:33:44:55:66"\n  }\n}'
+  -H 'Device-Id: AA:BB:CC:DD:EE:FF' \
+  --data-raw $'{\n  "application": {\n    "version": "1.0.1",\n    "elf_sha256": "1"\n  },\n  "board": {\n    "mac": "AA:BB:CC:DD:EE:FF"\n  }\n}'
 ```
 
 如果返回的内容包含`mqtt`相关的配置，说明配置成功。类似这样
 
 ```
-{"server_time":{"timestamp":1757567894012,"timeZone":"Asia/Shanghai","timezone_offset":480},"activation":{"code":"460609","message":"http://xiaozhi.server.com\n460609","challenge":"11:22:33:44:55:66"},"firmware":{"version":"1.0.1","url":"http://xiaozhi.server.com:8002/xiaozhi/otaMag/download/NOT_ACTIVATED_FIRMWARE_THIS_IS_A_INVALID_URL"},"websocket":{"url":"ws://192.168.4.23:8000/xiaozhi/v1/"},"mqtt":{"endpoint":"192.168.0.7:1883","client_id":"GID_default@@@11_22_33_44_55_66@@@7b94d69a-9808-4c59-9c9b-704333b38aff","username":"eyJpcCI6IjA6MDowOjA6MDowOjA6MSJ9","password":"Y8XP9xcUhVIN9OmbCHT9ETBiYNE3l3Z07Wk46wV9PE8=","publish_topic":"device-server","subscribe_topic":"devices/p2p/11_22_33_44_55_66"}}
+{"server_time":{"timestamp":1757567894012,"timeZone":"Asia/Shanghai","timezone_offset":480},"activation":{"code":"460609","message":"http://xiaozhi.server.com\n460609","challenge":"AA:BB:CC:DD:EE:FF"},"firmware":{"version":"1.0.1","url":"http://xiaozhi.server.com:8002/xiaozhi/otaMag/download/NOT_ACTIVATED_FIRMWARE_THIS_IS_A_INVALID_URL"},"websocket":{"url":"ws://192.0.2.10:8000/xiaozhi/v1/"},"mqtt":{"endpoint":"192.0.2.10:1883","client_id":"GID_default@@@11_22_33_44_55_66@@@7b94d69a-9808-4c59-9c9b-704333b38aff","username":"eyJpcCI6IjA6MDowOjA6MDowOjA6MSJ9","password":"Y8XP9xcUhVIN9OmbCHT9ETBiYNE3l3Z07Wk46wV9PE8=","publish_topic":"device-server","subscribe_topic":"devices/p2p/11_22_33_44_55_66"}}
 ```
 
 由于MQTT信息是需要靠OTA地址下发的，因此只有你保证能正常连接服务器的OTA地址，重启唤醒即可。
@@ -158,25 +158,25 @@ pm2 logs xz-mqtt
 
 打开你的`data/.config.yaml`文件，在`server`下找到`mqtt_gateway`填入你在`.env`文件中设置的`PUBLIC_IP`+`:`+`MQTT_PORT`。类似这样
 ```
-192.168.0.7:1883
+192.0.2.10:1883
 ```
 在`server`下找到`mqtt_signature_key`填入你在`.env`文件中设置的`MQTT_SIGNATURE_KEY`。
 
 在`server`下找到`udp_gateway`填入你在`.env`文件中设置的`PUBLIC_IP`+`:`+`UDP_PORT`。类似这样
 ```
-192.168.0.7:8884
+192.0.2.10:8884
 ```
 
 上面的配置完成后，你可以使用curl命令，验证你的ota地址是否会下发mqtt配置，把下面的`http://localhost:8002/xiaozhi/ota/`改成你的ota地址
 ```
 curl 'http://localhost:8002/xiaozhi/ota/' \
-  -H 'Device-Id: 11:22:33:44:55:66' \
-  --data-raw $'{\n  "application": {\n    "version": "1.0.1",\n    "elf_sha256": "1"\n  },\n  "board": {\n    "mac": "11:22:33:44:55:66"\n  }\n}'
+  -H 'Device-Id: AA:BB:CC:DD:EE:FF' \
+  --data-raw $'{\n  "application": {\n    "version": "1.0.1",\n    "elf_sha256": "1"\n  },\n  "board": {\n    "mac": "AA:BB:CC:DD:EE:FF"\n  }\n}'
 ```
 
 如果返回的内容包含`mqtt`相关的配置，说明配置成功。类似这样
 ```
-{"server_time":{"timestamp":1758781561083,"timeZone":"GMT+08:00","timezone_offset":480},"activation":{"code":"527111","message":"http://xiaozhi.server.com\n527111","challenge":"11:22:33:44:55:66"},"firmware":{"version":"1.0.1","url":"http://xiaozhi.server.com:8002/xiaozhi/otaMag/download/NOT_ACTIVATED_FIRMWARE_THIS_IS_A_INVALID_URL"},"websocket":{"url":"ws://192.168.1.15:8000/xiaozhi/v1/"},"mqtt":{"endpoint":"192.168.1.15:1883","client_id":"GID_default@@@11_22_33_44_55_66@@@11_22_33_44_55_66","username":"eyJpcCI6IjE5Mi4xNjguMS4xNSJ9","password":"fjAYs49zTJecWqJ3jBt+kqxVn/x7vkXRAc85ak/va7Y=","publish_topic":"device-server","subscribe_topic":"devices/p2p/11_22_33_44_55_66"}}
+{"server_time":{"timestamp":1758781561083,"timeZone":"GMT+08:00","timezone_offset":480},"activation":{"code":"527111","message":"http://xiaozhi.server.com\n527111","challenge":"AA:BB:CC:DD:EE:FF"},"firmware":{"version":"1.0.1","url":"http://xiaozhi.server.com:8002/xiaozhi/otaMag/download/NOT_ACTIVATED_FIRMWARE_THIS_IS_A_INVALID_URL"},"websocket":{"url":"ws://192.0.2.10:8000/xiaozhi/v1/"},"mqtt":{"endpoint":"192.0.2.10:1883","client_id":"GID_default@@@11_22_33_44_55_66@@@11_22_33_44_55_66","username":"eyJpcCI6IjE5Mi4xNjguMS4xNSJ9","password":"fjAYs49zTJecWqJ3jBt+kqxVn/x7vkXRAc85ak/va7Y=","publish_topic":"device-server","subscribe_topic":"devices/p2p/11_22_33_44_55_66"}}
 ```
 
 由于MQTT信息是需要靠OTA地址下发的，因此只有你保证能正常连接服务器的OTA地址，重启唤醒即可。

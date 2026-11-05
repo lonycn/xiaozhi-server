@@ -41,7 +41,7 @@ Java 前一轮全量 507 通过；新增旧版本迁移重试测试后，使用�
 6. 长回答中真实语音打断，收到 `response.done status=cancelled`，客户端清播放，接续新轮完成。provider done 比 speech_started 早约 8 毫秒的顺序也通过。
 7. 未提交语音片段后暂停，实际 clear ACK 且账本不变。
 
-证据摘要：`/Users/lengwang/code/esp32/work/external-vad-20261031/p3-acceptance-summary.json`；两个 run 的原始证据、音频、事件与私有 task 均保留。私有 task 含 lease，不应分享或提交。
+证据摘要：`/path/to/user/code/esp32/work/external-vad-20261031/p3-acceptance-summary.json`；两个 run 的原始证据、音频、事件与私有 task 均保留。私有 task 含 lease，不应分享或提交。
 
 ## 真实 LiveKit
 
@@ -63,6 +63,6 @@ Java 前一轮全量 507 通过；新增旧版本迁移重试测试后，使用�
 
 ## 数据保留与待验收
 
-原 Dev 迁移前一致性 SQL：`/Users/lengwang/code/esp32/work/external-vad-20261031/dev-before-20261031T021924Z.sql`，506315 字节，SHA256 `8966e513c3009457fbd075f793e44d6e1a76bf1f237d7dc7e12abe1b33d63c8a`。原库 4 用户、25 旧设备历史、29 消息、117 changeset；只追加 600/601/602 三个新 changeset，迁移至 120。原 changeset 未修改，未删库、删卷、清表或重新初始化。浏览器另追加一个技术会话、两轮用户/AI 消息；测试成功/失败 schema 均保留。 最终原Dev核对为4用户、25旧历史、33消息、120迁移，P3/B5 active均为0，原MySQL卷挂载一致。迁移后备份 `dev-after-20261031T023433Z.sql` 为521467字节，SHA256 `1ded97f2ffce352860fa687f2fc85c600e74ab30f87de6d7b76479ffbd3c1960`，目录同迁移前。独立API/worker/Redis已正常停止且保留全部数据，原Dev继续运行。
+原 Dev 迁移前一致性 SQL：`/path/to/user/code/esp32/work/external-vad-20261031/dev-before-20261031T021924Z.sql`，506315 字节，SHA256 `8966e513c3009457fbd075f793e44d6e1a76bf1f237d7dc7e12abe1b33d63c8a`。原库 4 用户、25 旧设备历史、29 消息、117 changeset；只追加 600/601/602 三个新 changeset，迁移至 120。原 changeset 未修改，未删库、删卷、清表或重新初始化。浏览器另追加一个技术会话、两轮用户/AI 消息；测试成功/失败 schema 均保留。 最终原Dev核对为4用户、25旧历史、33消息、120迁移，P3/B5 active均为0，原MySQL卷挂载一致。迁移后备份 `dev-after-20261031T023433Z.sql` 为521467字节，SHA256 `1ded97f2ffce352860fa687f2fc85c600e74ab30f87de6d7b76479ffbd3c1960`，目录同迁移前。独立API/worker/Redis已正常停止且保留全部数据，原Dev继续运行。
 
 真实来源服务尚无业务委托查询 API。真实 App 来源签名/撤销投递、物理终端麦克风/喇叭/摄像头、噪声/回声、HTTPS/WSS、TURN、防火墙、弱网和长通话仍需独立验收。断流秒数是健康技术环境的单次观察，不承诺故障或积压下的 SLA；LiveKit 清理失败时不能声称旧媒体已瞬时停止。原规划未完成范围继续见 [剩余工作](REMAINING_WORK.md)。

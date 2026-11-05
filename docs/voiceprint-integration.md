@@ -144,7 +144,7 @@ docker logs -f voiceprint-api
 
 由于你是docker部署，切不可直接使用上面的地址！
 
-你先把地址复制出来，放在一个草稿里，你要知道你的电脑的局域网ip是什么，例如我的电脑局域网ip是`192.168.1.25`，那么
+你先把地址复制出来，放在一个草稿里，你要知道你的电脑的局域网ip是什么，例如我的电脑局域网ip是`192.0.2.10`，那么
 原来我的接口地址
 ```
 http://127.0.0.1:8005/voiceprint/health?key=abcd
@@ -152,7 +152,7 @@ http://127.0.0.1:8005/voiceprint/health?key=abcd
 ```
 就要改成
 ```
-http://192.168.1.25:8005/voiceprint/health?key=abcd
+http://192.0.2.10:8005/voiceprint/health?key=abcd
 ```
 
 改好后，请使用浏览器直接访问`声纹接口地址`。当浏览器出现类似这样的代码，说明是成功了。

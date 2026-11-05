@@ -215,3 +215,8 @@ node_modules/
 /releases/*
 !/releases/README.md
 !/releases/catalog.toml
+
+# Real callback credentials and local overrides are never source examples.
+.env.*
+!.env.example
+!.env.*.example

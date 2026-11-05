@@ -4,7 +4,7 @@
 
 ## 已确认的来源源码和未确认的运行入口
 
-只读检查的实际 Laravel 仓库为 `/Users/lengwang/code/ui_aichat/aichat_laravel`；Kuikly 的 `Config.kt` 仍区分 iOS 开发默认 `http://aichat_plus.test` 与 Android 模拟器默认 `http://10.0.2.2:8000`。这些客户端默认值不是本批确认可用的业务来源地址。
+只读检查的实际 Laravel 仓库为 `/path/to/user/code/ui_aichat/aichat_laravel`；Kuikly 的 `Config.kt` 仍区分 iOS 开发默认 `http://aichat_plus.test` 与 Android 模拟器默认 `http://192.0.2.10:8000`。这些客户端默认值不是本批确认可用的业务来源地址。
 
 | 资源 | 已有源码与授权方式 | 来源生产者必须保留的检查 |
 | --- | --- | --- |
@@ -14,7 +14,7 @@
 | 项目设备范围 | `ColdChainEquipment::scopeForProject`、`Services/ColdChain/ColdChainEquipmentScopeResolver` 核 customer/project、资产、系统和 selected 设备范围 | 已签 project/device scope 是上限；来源仍须实时按这些真实关系重验具体设备。缺省 scope、空 project 参数或单独查设备 ID 都不能替代授权。 |
 | 知识 | `Services/Knowledge/KnowledgePrincipalFactory::authenticated` 从真实 User、有效角色与成员关系解析 tenant；`KnowledgeSearchService` 包含 authorized knowledge-base 命中复核 | 用真实用户 principal 调来源知识授权/检索链并验证每个引用，不能使用 Workbench 服务权限冒充该用户。`routes/internal_knowledge_authority.php` 的 `retrieval-experiments` 不是本协议来源端点。 |
 
-本轮未发现 Laravel 的小智独立签名 issue/revoke 或本协议只读 delegate 路由。运行只读检查中，本机无 8000 监听；8005 PHP 的实际 cwd 是 `/Users/lengwang/code/compass/compass_backend`，不是该 Laravel；本机 nginx 用 `Host: aichat_plus.test` 请求工单路径返回 404。这些仅定位当前入口，不证明正确业务服务故障，也没有据此修改服务或猜测端点。没有取得新的可信来源 URL、业务签名密钥或真实身份测试授权，故没有真实业务网络验收。
+本轮未发现 Laravel 的小智独立签名 issue/revoke 或本协议只读 delegate 路由。运行只读检查中，本机无 8000 监听；8005 PHP 的实际 cwd 是 `/path/to/user/code/compass/compass_backend`，不是该 Laravel；本机 nginx 用 `Host: aichat_plus.test` 请求工单路径返回 404。这些仅定位当前入口，不证明正确业务服务故障，也没有据此修改服务或猜测端点。没有取得新的可信来源 URL、业务签名密钥或真实身份测试授权，故没有真实业务网络验收。
 
 ## 配置与默认关闭
 

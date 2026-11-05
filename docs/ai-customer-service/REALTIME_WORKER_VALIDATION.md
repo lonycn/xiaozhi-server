@@ -10,10 +10,10 @@
 
 证据绝对路径：
 
-- `/Users/lengwang/code/esp32/work/realtime-bridge-proof-r6.json`
-- `/Users/lengwang/code/esp32/work/realtime-bridge-e2e-r6.log`
-- `/Users/lengwang/code/esp32/work/realtime-worker-allocated-ack-r2.log`
-- `/Users/lengwang/code/esp32/work/realtime-allocated-ack-java-r1.log`
+- `/path/to/user/code/esp32/work/realtime-bridge-proof-r6.json`
+- `/path/to/user/code/esp32/work/realtime-bridge-e2e-r6.log`
+- `/path/to/user/code/esp32/work/realtime-worker-allocated-ack-r2.log`
+- `/path/to/user/code/esp32/work/realtime-allocated-ack-java-r1.log`
 
 R2/R4保留了原ID相等规则导致的真实注入超时证据；R3遇磁盘满而迁移失败，失败schema保留。没有把这些失败记录改为成功。只回收过本任务已停止runtime里的两份重复JAR，源构建及日志/proof保留；后续使用硬链接避免重复占盘。
 

@@ -33,6 +33,6 @@ USB 崩溃栈实际解析到 `vApplicationStackOverflowHook`。2.5.3 的自动�
 - 主板已启动 2.5.6，加载三条唤醒词及六条控制口令，协议/MCP 链路重新在线。启动自检阶段下行丢包、解码错误均为 0；该指标只覆盖启动提示音，不能代表长语音播放效果。
 - 现场长语音听感、播放中“别说了”、退出后停止收音及再次唤醒仍待用户现场反馈。构建、模拟及回执不替代这些声学测试。
 
-私有运行目录由 `/Users/lengwang/code/esp32/.local/usb-bootstrap-path.txt` 指向，声音诊断目录由该目录的 `audio-stutter-path.txt` 指向。完整 Flash/NVS、访问凭据和诊断录音/文本只保存在本机私有目录。
+私有运行目录由 `/path/to/user/code/esp32/.local/usb-bootstrap-path.txt` 指向，声音诊断目录由该目录的 `audio-stutter-path.txt` 指向。完整 Flash/NVS、访问凭据和诊断录音/文本只保存在本机私有目录。
 
 实机证据位于该运行目录的 `audio-normalize-rollback/proof.json`、`audio-256-usb-install/usb-readback-proof.json`、`audio-256-usb-install/activate-boot.log` 和 `audio-256-usb-install/activate-health.json`。使用 USB 激活监控时，必须使用配置中的 ESP-IDF Python，确保能够导入 esptool。

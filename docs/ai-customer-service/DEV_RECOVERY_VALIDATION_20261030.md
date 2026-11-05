@@ -12,7 +12,7 @@
 
 Docker与存储恢复证据位于本机 `work/docker-recovery-current.json`、`work/storage-recovery-recovered.json`、`work/storage-recovery-after-proof.json`。其中旧目录指针属于当时运行记录，不能仅凭该指针推定当前备份位置或所有其他项目服务的持续可用性。
 
-恢复后通过只读consistent快照新建并验证现存的SQL备份：`dev/.runtime/backups/verified-post-recovery-20261030T153851Z.sql`，470657字节，SHA-256 `b2d7d6cdf08dc748e3869e1414ccd01da5c4a0a5cab093abb1cabc861875a1ab`。证据 `/Users/lengwang/code/esp32/work/dev-post-recovery-backup-proof.json`。现存20:39备份和该恢复后备份均保留；新备份不能解释恢复前APFS克隆/快照为何缺失，也不把该缺失项标为解决。
+恢复后通过只读consistent快照新建并验证现存的SQL备份：`dev/.runtime/backups/verified-post-recovery-20261030T153851Z.sql`，470657字节，SHA-256 `b2d7d6cdf08dc748e3869e1414ccd01da5c4a0a5cab093abb1cabc861875a1ab`。证据 `/path/to/user/code/esp32/work/dev-post-recovery-backup-proof.json`。现存20:39备份和该恢复后备份均保留；新备份不能解释恢复前APFS克隆/快照为何缺失，也不把该缺失项标为解决。
 
 ## 原 S3 与非实时 Omni
 
@@ -23,7 +23,7 @@ Docker与存储恢复证据位于本机 `work/docker-recovery-current.json`、`w
 | 录音 | 183 | 81 | 264 | 44 |
 | 有声视频（采样帧和原音轨） | 830 | 79 | 909 | 16 |
 
-两例 run 均为 `completed`，证据 `/Users/lengwang/code/esp32/work/omni-dev-e2e-proof-r3.json`。样本是明确的技术素材，未使用客户业务数据或现场机械声。
+两例 run 均为 `completed`，证据 `/path/to/user/code/esp32/work/omni-dev-e2e-proof-r3.json`。样本是明确的技术素材，未使用客户业务数据或现场机械声。
 
 失败尝试没有改写为成功：故障前/恢复早期旧视频 run 已耗尽重试；新 r2 在 MySQL/应用时钟回退约68ms时失败。`work/omni-dev-e2e-proof.json`、`work/omni-dev-e2e-proof-r2.json`、`work/omni-dev-e2e-proof-r2-clock-failure.json` 和相关日志均保留；r3是本次恢复后 Dev S3 录音与有声视频的成功依据。独立文件系统的早期成功记录仍保留，但不再作为“S3当前不可用”的理由。
 
@@ -31,7 +31,7 @@ Docker与存储恢复证据位于本机 `work/docker-recovery-current.json`、`w
 
 已用独立浏览器身份完成首轮实际双端 WebRTC 音视频接收，视频实收192帧；输入是明确的本地合成语音和 canvas 技术画面，通过实际 MediaStream/浏览器 RTP 传输。没有物理麦克风、摄像头、扬声器或两名真人参与。实际截图上传原 S3 并生成 B5 frame 已通过。
 
-首轮抓帧后的编辑器被客服工作台后台poll关闭，失败现象保留；对应poll/invite修复已完成定向验证。第二通实际active，抓帧 `2116191817604976642` 后，p2正常挂断complete且人工服务仍active；编辑器跨多轮poll和挂断保持。箭头/circle共2个元素保存为annotation `2116191926321336322`，服务端ready且可视预览已核对，加入回复草稿成功，客服文字草稿仍保留。实际发送已完成：客服消息 `e0cb32f2e6ca491084e1f518f51bf2ae` 在客户UI可见文字及image附件；只读核对source/frame/render三引用均关联同条staff消息，scene含2元素，三个实际S3 GET的SHA均匹配。证明 `/Users/lengwang/code/esp32/work/browser-backend-proof.json`。浏览器换房转接已完成下述技术链路，45秒旧邀请过期的尝试记录保留。首轮证据为 `work/browser-dual-media-proof.json`；较早native SDK R3的转接/三证据结果见 [B5记录](./B5_RUNTIME_VALIDATION.md)。
+首轮抓帧后的编辑器被客服工作台后台poll关闭，失败现象保留；对应poll/invite修复已完成定向验证。第二通实际active，抓帧 `2116191817604976642` 后，p2正常挂断complete且人工服务仍active；编辑器跨多轮poll和挂断保持。箭头/circle共2个元素保存为annotation `2116191926321336322`，服务端ready且可视预览已核对，加入回复草稿成功，客服文字草稿仍保留。实际发送已完成：客服消息 `e0cb32f2e6ca491084e1f518f51bf2ae` 在客户UI可见文字及image附件；只读核对source/frame/render三引用均关联同条staff消息，scene含2元素，三个实际S3 GET的SHA均匹配。证明 `/path/to/user/code/esp32/work/browser-backend-proof.json`。浏览器换房转接已完成下述技术链路，45秒旧邀请过期的尝试记录保留。首轮证据为 `work/browser-dual-media-proof.json`；较早native SDK R3的转接/三证据结果见 [B5记录](./B5_RUNTIME_VALIDATION.md)。
 
 ### 浏览器独立新房转接
 

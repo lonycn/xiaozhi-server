@@ -41,7 +41,7 @@
 
 Java 执行 `server_capabilities` 成功，第 2 轮消息角色为 `user, assistant, tool`；每轮账本和聚合相符。还验证了同 token 续期、来源撤销、logout、同 owner 换 token、旧 lease 重放、非法终态、重复 JSON 键、伪造 actor 参数、超大请求体和精确游标。独立 API/Redis 已停止，新测试库全部保留。早期验收发现的 Shiro 入口、control_epoch 数值类型、Qwen 空 ID 增量兼容问题均已修复并加入回归。
 
-本机证据：`/Users/lengwang/code/esp32/work/server-agent-tools-20261101/acceptance/http-20261101_100000_d78375/proof.json`。未发送客户业务数据，也未配置业务 adapter。
+本机证据：`/path/to/user/code/esp32/work/server-agent-tools-20261101/acceptance/http-20261101_100000_d78375/proof.json`。未发送客户业务数据，也未配置业务 adapter。
 
 ### 自动测试
 

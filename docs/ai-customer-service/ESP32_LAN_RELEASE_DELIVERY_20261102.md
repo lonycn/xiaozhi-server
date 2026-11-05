@@ -55,14 +55,14 @@
 ## 实际候选产物
 
 - 版本：**2.5.3**；变体：`bread-compact-wifi-128x32-ai-lan`。
-- ESP32-S3、16 MiB Flash、Quad PSRAM、128×32 OLED；大冷总管、你好总管、总管总管。
-- 固定 OTA：`http://192.168.3.152:19183/xiaozhi/ota/`；标记 `development_only=true`。
+- ESP32-S3、16 MiB Flash、Quad PSRAM、128×32 OLED；业务助手、你好总管、总管总管。
+- 固定 OTA：`http://192.0.2.10:19183/xiaozhi/ota/`；标记 `development_only=true`。
 - ESP-IDF：v6.0.1；干净私有源码提交：`e14ec7e635fc53226dad1935ce5f0cd20042bb64`。
-- [Manifest](/Users/lengwang/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/release/manifest.json)
-- [app.bin](/Users/lengwang/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/release/app.bin)：2,553,984 字节，SHA256 `a7c860a0942926ff337d6c0d1e474a8f298a10eca0df789b491d6548339985c0`。
-- [assets.bin](/Users/lengwang/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/release/assets.bin)：2,951,901 字节，SHA256 `4006035a353c7a2d96723724c367d8e09c672fc0ec0e04eac72f88aa6a2e7426`。
-- [构建日志](/Users/lengwang/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/build-attempt2.log)
-- [升级说明](/Users/lengwang/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/UPGRADE_GUIDE.md)
+- [Manifest](/path/to/user/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/release/manifest.json)
+- [app.bin](/path/to/user/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/release/app.bin)：2,553,984 字节，SHA256 `a7c860a0942926ff337d6c0d1e474a8f298a10eca0df789b491d6548339985c0`。
+- [assets.bin](/path/to/user/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/release/assets.bin)：2,951,901 字节，SHA256 `4006035a353c7a2d96723724c367d8e09c672fc0ec0e04eac72f88aa6a2e7426`。
+- [构建日志](/path/to/user/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/build-attempt2.log)
+- [升级说明](/path/to/user/code/esp32/work/esp32-lan-candidate-20261102_150156_0dd2f4/UPGRADE_GUIDE.md)
 
 候选还包含 16 MiB `first-flash.bin`，其 NVS 区域为空白，**只用于新空板；禁止直接刷到需要保留配置的现有板**。现有板当前实际固件变体、分区、资源哈希和引导状态尚未核验。旧开发变体的自动升级被禁用，跨变体受控升级也会被拒绝，必须先设计并验证保留 NVS/回退能力的首板引导步骤。
 
@@ -73,7 +73,7 @@
 - [独立网关启动器](../../dev/esp32_gateway.py)：`preflight / start / stop`，配置必须包含独立端口、密钥和 `server.esp32.allowed_devices`。
 - [受限 LAN OTA 入口](../../dev/esp32_ota_proxy.py)：只转发设备 OTA、下载和回执，管理和配置路由不外露；关闭访问日志以保护票据。
 - [固件管理 CLI](../../dev/esp32_firmware.py)：`settings / import-package / list / publish / assign / history / pause / pause-assignment`。导入前实际校验候选包及本机部署 OTA origin；创建 draft，发布和指派为独立明确操作。
-- [固件打包工具](/Users/lengwang/code/esp32/firmware/xiaozhi/scripts/package_bread_ai.py) 在另一个 Git 仓库中；本项目同级固件位置为 `/Users/lengwang/code/esp32/firmware/xiaozhi`。
+- [固件打包工具](/path/to/user/code/esp32/firmware/xiaozhi/scripts/package_bread_ai.py) 在另一个 Git 仓库中；本项目同级固件位置为 `/path/to/user/code/esp32/firmware/xiaozhi`。
 
 启用 Java OTA 服务需 `features.esp32-ota-enabled=true`、私有 artifact 目录、独立下载密钥和可信 public base URL。开发 HTTP 还需显式 `esp32.ota.allow-lan-http=true` 与 development 模式。网关、设备 HMAC、AI Worker、固件下载四类凭据分开；不为启用网关而轮换既有设备密钥。
 
@@ -85,29 +85,29 @@
 
 ### 固件
 
-- 当前冻结源码的 host suite **127 项通过**，日志：[最终主机测试](/Users/lengwang/code/esp32/work/esp32-lan-host-final-20261102.log)。
+- 当前冻结源码的 host suite **127 项通过**，日志：[最终主机测试](/path/to/user/code/esp32/work/esp32-lan-host-final-20261102.log)。
 - ESP-IDF 6.0.1 私有 S3 LAN 全链接构建、正式候选重新构建与离线包校验均通过。
 - 另对未受控 MQTT/WS、旧开发身份和 USB 路径进行 7 个对象条件编译，不能据此宣称真实 MQTT 网络验收通过。
-- [固件开发证据](/Users/lengwang/code/esp32/work/firmware-release-safety-20261102-proof.json)。原工作区生成的 sdkconfig/build 未用于冒充新候选，也未被手工替换。
+- [固件开发证据](/path/to/user/code/esp32/work/firmware-release-safety-20261102-proof.json)。原工作区生成的 sdkconfig/build 未用于冒充新候选，也未被手工替换。
 
 ### Server 与 HTTP
 
 - Java 最终全量 **711 项、105 个套件、0 失败/错误/跳过**。原测试已通过，打包阶段受磁盘不足影响；释放可重建缓存后仅在同一冻结快照重试 package，保留原日志和报告。
-- 最终 JAR：`/Users/lengwang/code/esp32/work/esp32-full-matrix-20261102_151133_615655/repo/main/manager-api/target/xiaozhi-esp32-api.jar`，SHA256 `27e570b90b945ca7543c148593a59aacb4ef226d3493ef013716e780c64cb884`。
-- [打包恢复与 CRC 证明](/Users/lengwang/code/esp32/work/esp32-full-matrix-20261102_151133_615655/repo/main/manager-api/packaging-retry-proof.json)。定向重跑和中间矩阵不累加测试数。
+- 最终 JAR：`/path/to/user/code/esp32/work/esp32-full-matrix-20261102_151133_615655/repo/main/manager-api/target/xiaozhi-esp32-api.jar`，SHA256 `27e570b90b945ca7543c148593a59aacb4ef226d3493ef013716e780c64cb884`。
+- [打包恢复与 CRC 证明](/path/to/user/code/esp32/work/esp32-full-matrix-20261102_151133_615655/repo/main/manager-api/packaging-retry-proof.json)。定向重跑和中间矩阵不累加测试数。
 - 新 OTA 的独立真实 MySQL 用例覆盖版本不可变、板型/Flash/同版健康 manifest、开发/正式隔离、撤权与回执顺序。
 - 真实候选 HTTP/CLI 验收覆盖两次导入幂等、19183 同源设备入口、真实 app/assets 下载哈希、票据撤销、严格回执及旧通用 OTA 禁止回退。第二版本仅为明确标记的合成描述头测试；没有伪称两版都是实际编译固件。
 
 ### 模型与稳定性
 
 - 实际 CosyVoice 输入音频经 Opus → WebSocketServer/ConnectionHandler → workspace ASR → Java/AI Worker → MCP → 实际 TTS Opus 返回，状态、音量 30、丢 ACK 未知及同连接双轮均完成技术验证。
-- 最终 JAR 的双轮实际 usage=4，72 个 Opus 包，轮次/控制版本隔离；真实 HTTP 旧 abort 返回 409，新 run 保持 queued、新 turn 保持 accepted。[最终完整语音与条件打断证据](/Users/lengwang/code/esp32/work/esp32-full-voice-final/http-20261102_072148_6781b1/full-voice-proof.json)。
-- [30 分钟模拟](/Users/lengwang/code/esp32/work/esp32-gateway-soak-30min-20261102.json)：1800.2 秒、1784 轮、118 次 MCP、14 次未知 ACK、6 次断网重连；最大 TTS 队列 3、异步任务 5，tracemalloc 增长约 1.49 MiB。
+- 最终 JAR 的双轮实际 usage=4，72 个 Opus 包，轮次/控制版本隔离；真实 HTTP 旧 abort 返回 409，新 run 保持 queued、新 turn 保持 accepted。[最终完整语音与条件打断证据](/path/to/user/code/esp32/work/esp32-full-voice-final/http-20261102_072148_6781b1/full-voice-proof.json)。
+- [30 分钟模拟](/path/to/user/code/esp32/work/esp32-gateway-soak-30min-20261102.json)：1800.2 秒、1784 轮、118 次 MCP、14 次未知 ACK、6 次断网重连；最大 TTS 队列 3、异步任务 5，tracemalloc 增长约 1.49 MiB。
 - 该长测是 Runtime+真实 HTTP 模拟器，provider=0，不是 30 分钟真实 ASR/TTS 或物理喇叭连续播放。完整语音输入是明确标记的合成语音，MCP 端为模拟板，不替代真人或物理执行确认。
 
-最终 JAR 与真实候选的 [HTTP/CLI 10 项验收](/Users/lengwang/code/esp32/work/esp32-firmware-http-20261102/http-20261102_072748_dab362/proof.json) 全部通过，含临时 19183 同源代理、真实下载与重复导入。
+最终 JAR 与真实候选的 [HTTP/CLI 10 项验收](/path/to/user/code/esp32/work/esp32-firmware-http-20261102/http-20261102_072748_dab362/proof.json) 全部通过，含临时 19183 同源代理、真实下载与重复导入。
 
-最终 [独立启动器实际全链验收](/Users/lengwang/code/esp32/work/esp32-full-voice-final/http-20261102_072445_5ceb69/full-voice-proof.json) 已通过：实际启动独立子进程、WS hello/MCP、Java 会话、真实 ASR/模型/TTS、条件打断，再停止自有网关；确认 Manager 仍活跃、原生 PID 52583 保留。随后隔离 Manager/Redis 也已停止，测试库保留。
+最终 [独立启动器实际全链验收](/path/to/user/code/esp32/work/esp32-full-voice-final/http-20261102_072445_5ceb69/full-voice-proof.json) 已通过：实际启动独立子进程、WS hello/MCP、Java 会话、真实 ASR/模型/TTS、条件打断，再停止自有网关；确认 Manager 仍活跃、原生 PID 52583 保留。随后隔离 Manager/Redis 也已停止，测试库保留。
 
 ## 数据与运行边界
 

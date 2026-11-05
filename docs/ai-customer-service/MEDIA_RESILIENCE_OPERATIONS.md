@@ -27,10 +27,10 @@
 保存为仅供实验使用的 JSON 文件，放在仓库外，然后运行：
 
 ```sh
-mkdir -p /Users/lengwang/code/esp32/work/media-resilience-20261101
-python3 /Users/lengwang/code/esp32/backend/xiaozhi-server/repo/dev/tests/media_fault_proxy.py \
-  --config /Users/lengwang/code/esp32/work/media-resilience-20261101/scenario.json \
-  --metrics /Users/lengwang/code/esp32/work/media-resilience-20261101/proxy-metrics.jsonl
+mkdir -p /path/to/user/code/esp32/work/media-resilience-20261101
+python3 /path/to/user/code/esp32/backend/xiaozhi-server/repo/dev/tests/media_fault_proxy.py \
+  --config /path/to/user/code/esp32/work/media-resilience-20261101/scenario.json \
+  --metrics /path/to/user/code/esp32/work/media-resilience-20261101/proxy-metrics.jsonl
 ```
 
 用 `Ctrl-C` 或 `SIGTERM` 停止，程序关闭监听、现有连接与任务，输出 `stopped` 汇总。配置文件上限 64 KiB，JSON 不接受 NaN/Infinity；metrics 文件达到 5 MiB 后停止追加而不影响转发，使用新的证据文件可继续记录。代理进程退出不代表被测客户端已经停止采集或恢复；需分别检查客户端和服务端状态。`rate_bps` 单位为**字节/秒**，0 表示不限速；每块先等待配置延迟、抖动和对应速率延迟，再转发，调整对应策略可唤醒正在等待的块。`delay_ms` 和 `jitter_ms` 分别为每个读取块的基准与均匀随机抖动，负的总延迟截为零；网络实际形态还依赖 TCP 分块。`blackhole` 暂停读取/转发并由有界缓冲施加背压，关闭后继续；这模拟不可达期间的停滞，不随机删除字节。`close_existing` 只在该事件执行时关闭当前连接；`reject_new` 保持到显式恢复为 `false`。阻断、断开和恢复前后用 metrics 时间戳与被测系统状态交叉核对。
@@ -43,13 +43,13 @@ python3 /Users/lengwang/code/esp32/backend/xiaozhi-server/repo/dev/tests/media_f
 
 浏览器收到 `offline`，或已协商心跳超时、连接断开时，会关闭本机采集与播放并标记连接失败；`online` 仅更新网络可用提示，不自动重连、重放 PCM 或重新打开麦克风。用户恢复时必须先得到旧会话结束的权威结果，再重新同意并创建新会话，最后由用户主动开始录音或听音。授权失败、epoch／租约变化和终态应按服务端实际结果处理，不能仅凭页面或旧连接判断恢复。
 
-REST 状态和注入轮询不可重叠。活跃 transport 上，暂时性失败可进入降级状态；连续三次失败停止本机媒体，成功完整轮询后重置计数；401、403、404、409、410 等权威拒绝立即失败关闭。轮询成功只能证明 REST 查询成功，不能把已关闭的 WebSocket 标成已连接，也不能把离线后的手动恢复替换成自动采集。已完成短样本可参照 [P3 上游故障证据](/Users/lengwang/code/esp32/work/media-resilience-20261101/p3-upstream-run-20261101T125113/proof.json) 和 [P3 传输断开证据](/Users/lengwang/code/esp32/work/media-resilience-20261101/p3-fault-run-20261101T125600/proof.json)；后者明确为 Python 端测试客户端，不是浏览器或物理设备验收。
+REST 状态和注入轮询不可重叠。活跃 transport 上，暂时性失败可进入降级状态；连续三次失败停止本机媒体，成功完整轮询后重置计数；401、403、404、409、410 等权威拒绝立即失败关闭。轮询成功只能证明 REST 查询成功，不能把已关闭的 WebSocket 标成已连接，也不能把离线后的手动恢复替换成自动采集。已完成短样本可参照 [P3 上游故障证据](/path/to/user/code/esp32/work/media-resilience-20261101/p3-upstream-run-20261101T125113/proof.json) 和 [P3 传输断开证据](/path/to/user/code/esp32/work/media-resilience-20261101/p3-fault-run-20261101T125600/proof.json)；后者明确为 Python 端测试客户端，不是浏览器或物理设备验收。
 
 ## B5 人工媒体的恢复与清理
 
 LiveKit SDK 在同一房间连接仍可恢复时负责原生重连；界面应反映本机连接状态，不以服务端会话仍为 `active` 断言双向 RTP 可用。最终断开时本机 track 被停止。需要重新加入时，客户端先重新读取当前会话、成员授权与房间代次，并由用户按界面选择重新连接；不能用旧权限或其他 Bearer 接管会话。服务端对 `connecting`／`reconnecting`／`active` 的成员最后出现时间执行超时检查，`support-media.reconnect-seconds` 默认 60 秒（允许 15–300 秒），超时由维护任务推进结束；这是状态检查阈值，不保证恰好 60 秒清理完毕。
 
-用户挂断时先停止本地媒体，再请求服务端持久结束；即便 HTTP 不通，本机也应立即停采集。若结束请求未被权威确认，界面不能宣称服务端会话或 LiveKit 房间已经清理。已完成短样本中，[SDK 恢复证据](/Users/lengwang/code/esp32/work/media-resilience-20261101/b5-sdk-recovery-e7c3c67dfc/proof.json) 使用合成媒体；[浏览器离线挂断证据](/Users/lengwang/code/esp32/work/media-resilience-20261101/b5-browser-offline-hangup-proof.json) 记录了本机停止先于 HTTP 的检查，不能替代真人设备通话。
+用户挂断时先停止本地媒体，再请求服务端持久结束；即便 HTTP 不通，本机也应立即停采集。若结束请求未被权威确认，界面不能宣称服务端会话或 LiveKit 房间已经清理。已完成短样本中，[SDK 恢复证据](/path/to/user/code/esp32/work/media-resilience-20261101/b5-sdk-recovery-e7c3c67dfc/proof.json) 使用合成媒体；[浏览器离线挂断证据](/path/to/user/code/esp32/work/media-resilience-20261101/b5-browser-offline-hangup-proof.json) 记录了本机停止先于 HTTP 的检查，不能替代真人设备通话。
 
 ## UDP 网损与重启补偿证据
 

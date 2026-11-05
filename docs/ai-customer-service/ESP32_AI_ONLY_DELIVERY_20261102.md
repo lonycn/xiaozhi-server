@@ -97,13 +97,13 @@ flowchart LR
 - Python 独立最小依赖环境：AI Worker 73 项、realtime Worker 64 项、ESP32 18 项通过。其运行输出由 Terra 子代理回报，未保存成独立日志文件。
 - Dev CI 数据库准备 4 项通过，覆盖真实 16 位和允许最大 24 位标签的 MySQL 名称长度与唯一性；含新触发器预检的 runtime 测试亦通过。
 
-[最终矩阵结果](/Users/lengwang/code/esp32/work/esp32-full-matrix-20261102_111515_0a3f41/repo/main/manager-api/result.json) 含产物与源码 SHA256、22 个实际保留的独立测试库（含升级回归及同期新增实时输入模块）。独立快照通过 `-DskipTests=false package`，完成时与当前生产源码无差异。定向重跑不叠加计数。
+[最终矩阵结果](/path/to/user/code/esp32/work/esp32-full-matrix-20261102_111515_0a3f41/repo/main/manager-api/result.json) 含产物与源码 SHA256、22 个实际保留的独立测试库（含升级回归及同期新增实时输入模块）。独立快照通过 `-DskipTests=false package`，完成时与当前生产源码无差异。定向重跑不叠加计数。
 
 最终 JAR SHA256：`00cd8842dd2e09fd0b8a0a9a0fde36e02e6edc0873a487605806747fbe093f25`。
 
 ### 实际 HTTP 与模型
 
-[最终 HTTP 证据](/Users/lengwang/code/esp32/work/esp32-ai-20261102/http-20261102_031710_df4686/proof.json)：11 项通过，使用 622 项对应的最终 JAR、独立 MySQL/Redis、当前 Python Gateway 客户端与授权百炼模型；状态工具 1 次、真实 provider usage 2 次、回复 53 字已落库。
+[最终 HTTP 证据](/path/to/user/code/esp32/work/esp32-ai-20261102/http-20261102_031710_df4686/proof.json)：11 项通过，使用 622 项对应的最终 JAR、独立 MySQL/Redis、当前 Python Gateway 客户端与授权百炼模型；状态工具 1 次、真实 provider usage 2 次、回复 53 字已落库。
 
 覆盖超大请求、伪造 owner、两种内部密钥互用拒绝、AI-only 限制、重复输入唯一 run、重连代次失效、真正更换 agent 后回调与通用历史拒绝，以及 Python 同轮 TTS/命令各执行一次。新增真实 alias/lastSeen 和设备、agent、用户元数据更新后绑定、会话与历史保持不变的正向断言。
 
@@ -111,7 +111,7 @@ flowchart LR
 
 ### 模拟故障验收
 
-[最终稳定性证据](/Users/lengwang/code/esp32/work/esp32-ai-20261102/http-20261102_031710_8547de/stability-proof.json)：8 项通过，耗时 75.58 秒，provider 调用 0 次。
+[最终稳定性证据](/path/to/user/code/esp32/work/esp32-ai-20261102/http-20261102_031710_8547de/stability-proof.json)：8 项通过，耗时 75.58 秒，provider 调用 0 次。
 
 - 双网关连接代次竞争和短断连重连。
 - 真实等待 31.25 秒后 lease 自然失效。
@@ -123,10 +123,10 @@ flowchart LR
 
 ### 浏览器
 
-[UI 证据](/Users/lengwang/code/esp32/work/esp32-ui-20261102/ui-proof.json)：ego-browser 中通过真实隔离 API 展示模拟设备的在线状态、MCP 能力及 `ai_worker` 会话，修复后没有 JS 异常。此只读 UI 使用较早 613 项构建的 API 合约；不据此证明后续 token/迁移补丁已部署。
+[UI 证据](/path/to/user/code/esp32/work/esp32-ui-20261102/ui-proof.json)：ego-browser 中通过真实隔离 API 展示模拟设备的在线状态、MCP 能力及 `ai_worker` 会话，修复后没有 JS 异常。此只读 UI 使用较早 613 项构建的 API 合约；不据此证明后续 token/迁移补丁已部署。
 
-- [桌面截图](/Users/lengwang/code/esp32/work/esp32-ui-20261102/desktop-status.png)
-- [390px 截图](/Users/lengwang/code/esp32/work/esp32-ui-20261102/mobile-status.png)：页面宽度 390px、弹窗 366.59px，未超出视口。
+- [桌面截图](/path/to/user/code/esp32/work/esp32-ui-20261102/desktop-status.png)
+- [390px 截图](/path/to/user/code/esp32/work/esp32-ui-20261102/mobile-status.png)：页面宽度 390px、弹窗 366.59px，未超出视口。
 
 所有自建验收 API、Redis、Vite 和浏览器测试页结束后关闭；独立测试库保留。原有 Dev 与设备服务继续运行。
 
@@ -136,7 +136,7 @@ flowchart LR
 
 修复方式为冻结与原记录 `8:d3e073f499bdd28deb94425a3b9eeb98` 一致的初版，新增两个有条件的列迁移和一个严格撤权迁移。新严格触发器先创建，再移除本模块的六个旧触发器；保留所有表和数据，不存在授权保护空窗。已有授权记录按保守策略推进 cutoff，新注册的初始记录仍保持兼容。
 
-**原 Dev 增量升级已完成：128 → 131 个 changeset。** [迁移证据](/Users/lengwang/code/esp32/work/esp32-dev-cutoff-migration-20261102/migration-proof.json) 记录备份摘要、三个精确待迁移 ID、原 checksum 保留及逐列哈希比较结果；[执行结果](/Users/lengwang/code/esp32/work/esp32-dev-cutoff-migration-20261102/result.txt) 可直接核对。
+**原 Dev 增量升级已完成：128 → 131 个 changeset。** [迁移证据](/path/to/user/code/esp32/work/esp32-dev-cutoff-migration-20261102/migration-proof.json) 记录备份摘要、三个精确待迁移 ID、原 checksum 保留及逐列哈希比较结果；[执行结果](/path/to/user/code/esp32/work/esp32-dev-cutoff-migration-20261102/result.txt) 可直接核对。
 
 迁移前后均保留：4 个用户、1 个 agent、1 个设备、25 条旧语音历史、13 个统一会话、39 条消息。其他既有 ESP32 账本为空，仍为空。早期只读快照为 37 条消息，同期并行任务正常新增的消息也包含在迁移前 39 条逐行保留检查中。
 

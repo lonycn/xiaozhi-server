@@ -1,6 +1,6 @@
 # B6 验证记录
 
-2026-10-30，独立worktree /Users/lengwang/code/esp32/work/b6-identity，codex/b6-identity，基线0efcb91。本记录区分本仓接收面与外部来源/业务连通；没有启动HTTP服务、调用真实业务网络、读取.env、提交或推送。
+2026-10-30，独立worktree /path/to/user/code/esp32/work/b6-identity，codex/b6-identity，基线0efcb91。本记录区分本仓接收面与外部来源/业务连通；没有启动HTTP服务、调用真实业务网络、读取.env、提交或推送。
 
 ## 已通过
 

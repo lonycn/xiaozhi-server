@@ -10,7 +10,7 @@
 - 新建 LiveKit 17980/RTC TCP 17981/UDP 17982 与独立网络命名空间。NET_ADMIN 只授予该命名空间的测试工具容器；不改变宿主机路由、全局代理、共享 17880 服务或其他项目网络。
 - 唯一浏览器 TaskSpace 36，客户 `18906`、客服 `18907` 使用不同 origin 正常登录，未注入浏览器 Bearer。P3 最终使用生产构建预览，排除开发 HMR 重载对草稿和选中会话的影响。
 
-私有配置、认证、原始统计和脚本均在 `/Users/lengwang/code/esp32/work/media-resilience-20261101`，不提交凭据、lease 或完整信令内容。
+私有配置、认证、原始统计和脚本均在 `/path/to/user/code/esp32/work/media-resilience-20261101`，不提交凭据、lease 或完整信令内容。
 
 ## 已修复的问题
 

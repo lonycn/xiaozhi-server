@@ -1,6 +1,6 @@
 # 小智 Server 管理前端（Vue 3）
 
-Vue 3 已整合进 `xiaozhi-server` 的标准目录 `main/manager-web/`，替代原 Vue 2 前端。前端、Java API、Python 服务、测试与运维共用 Server 的 Git 仓库和 `Dev` 分支。
+Vue 3 是本项目唯一的网页前端，源码位于 `main/manager-web/`。前端、Java API、Python 服务、测试与运维共用 Server 的 Git 仓库和 `Dev` 分支。
 
 工作区 `frontend/` 是本目录的分类链接；`main/manager-web-next` 也是指向本目录的兼容链接。当前前端没有独立的 `.git` 或远程。
 
@@ -53,6 +53,6 @@ docker build -t xiaozhi-web-static main/manager-web
 
 ## 版本与历史
 
-提交位置是 Server 仓库，远程为 `https://github.com/lonycn/xiaozhi-server.git`。前端历史已导入 Server，并通过整合提交保留。旧 Vue 2 源码保存在工作区 `archive/server-web-vue2-20261105/`，同时可从已有 Git 历史恢复，不参与当前构建。
+提交位置是 Server 仓库，远程为 `https://github.com/lonycn/xiaozhi-server.git`。前端历史已导入 Server，并通过整合提交保留。旧 Vue 2 源码已移出 Server 代码树，仅在本地归档与 Git 历史中保留。
 
-[历史提交映射](docs/MONOREPO_COMMIT_MAP.tsv) 和 [早期说明](docs/PRE_SPLIT_README.md) 保留作为迁移来源，当前目录和启动方式以本说明为准。
+[历史提交映射](docs/MONOREPO_COMMIT_MAP.tsv) 保留为来源记录。旧版前端说明随本地归档保存，当前目录和启动方式以本说明为准。

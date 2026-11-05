@@ -87,7 +87,7 @@ server:
 局域网部署（默认）：
 ```yaml
 server:
-  vision_explain: http://192.168.1.100:8003/mcp/vision/explain
+  vision_explain: http://192.0.2.10:8003/mcp/vision/explain
 ```
 
 公网域名部署：

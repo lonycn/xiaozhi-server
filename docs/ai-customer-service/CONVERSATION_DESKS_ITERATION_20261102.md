@@ -86,7 +86,7 @@
 | 视频截图标注 | 在视频区域截取测试视频500ms画面并圈画，服务端生成私有快照；加入草稿并明确发送，sender_type 为 expert；客户下载得到21900字节JPEG，HTTP200 |
 | 页面与窄屏 | 桌面1440×1000，窄屏390×844；设备历史无发送框，窄屏导航开关/关闭和回复框可用，无横向溢出、框架错误层或最终脚本异常 |
 
-验收只使用明确标记的技术会话和生成的测试媒体，不接触真实客户咨询，不代表安卓原生界面或物理通话已验收。浏览器分阶段沿用同一会话完成，最终截图和接口证据存于 `/Users/lengwang/code/esp32/work/conversation-desks-20261102/`：`live-ui-proof.json`、`support-desktop.png`、`expert-annotation-desktop.png`、`expert-desktop-final.png`、`expert-mobile-fixed.png`、`device-desktop.png`。
+验收只使用明确标记的技术会话和生成的测试媒体，不接触真实客户咨询，不代表安卓原生界面或物理通话已验收。浏览器分阶段沿用同一会话完成，最终截图和接口证据存于 `/path/to/user/code/esp32/work/conversation-desks-20261102/`：`live-ui-proof.json`、`support-desktop.png`、`expert-annotation-desktop.png`、`expert-desktop-final.png`、`expert-mobile-fixed.png`、`device-desktop.png`。
 
 ### Dev 运行及数据保留
 

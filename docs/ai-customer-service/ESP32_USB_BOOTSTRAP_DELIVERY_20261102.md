@@ -9,9 +9,9 @@
 - 实物：ESP32-S3，16 MiB Flash、8 MiB Quad PSRAM、128×32 OLED。
 - 固件：`bread-compact-wifi-128x32-ai-lan`，2.5.3，源码 `e14ec7e635fc53226dad1935ce5f0cd20042bb64`。
 - 应用 SHA256：`a7c860a0942926ff337d6c0d1e474a8f298a10eca0df789b491d6548339985c0`。
-- 保留软件 MAC `02:21:64:63:44:5a`、原 UUID、Wi-Fi 与三条“大冷总管 / 你好总管 / 总管总管”唤醒资源；eFuse 不修改。
-- 独立网关：`ws://192.168.3.152:19180/xiaozhi/v1/`。
-- 设备 OTA：`http://192.168.3.152:19183/xiaozhi/ota/`。
+- 保留软件 MAC `AA:BB:CC:DD:EE:FF`、原 UUID、Wi-Fi 与三条“业务助手 / 你好总管 / 总管总管”唤醒资源；eFuse 不修改。
+- 独立网关：`ws://192.0.2.10:19180/xiaozhi/v1/`。
+- 设备 OTA：`http://192.0.2.10:19183/xiaozhi/ota/`。
 - 独立 Manager：`http://127.0.0.1:19193/xiaozhi`，Redis 19192。
 
 这是明确的局域网开发部署，使用原 Dev 的只读 SQL 快照建立独立 schema `xiaozhi_usb_live_20261102_171956`。原 Dev API/Vue、原数据库及原 18880/18883 设备服务保留；没有清库、删卷或重新初始化原库。新设备会话写入该独立 schema，不自动合并回 Dev。
@@ -44,14 +44,14 @@
 
 ## 证据与维护
 
-本次私有工作目录由 `/Users/lengwang/code/esp32/.local/usb-bootstrap-path.txt` 指向：
+本次私有工作目录由 `/path/to/user/code/esp32/.local/usb-bootstrap-path.txt` 指向：
 
-- [最终目录](/Users/lengwang/code/esp32/work/esp32-usb-bootstrap-20261102-171736)
-- [真实 USB 读回证据](/Users/lengwang/code/esp32/work/esp32-usb-bootstrap-20261102-171736/usb-install-r2/usb-readback-proof.json)
-- [实际启动日志](/Users/lengwang/code/esp32/work/esp32-usb-bootstrap-20261102-171736/usb-install-r2/retry-boot-boot.log)
-- [设备 MCP 状态证据](/Users/lengwang/code/esp32/work/esp32-usb-bootstrap-20261102-171736/physical-mcp-status.json)
-- [最终设备及回执证据](/Users/lengwang/code/esp32/work/esp32-usb-bootstrap-20261102-171736/final-live-proof.json)
-- [最终 Java 测试](/Users/lengwang/code/esp32/work/esp32-usb-bootstrap-20261102-171736/java-tests-build-r3.log)
+- [最终目录](/path/to/user/code/esp32/work/esp32-usb-bootstrap-20261102-171736)
+- [真实 USB 读回证据](/path/to/user/code/esp32/work/esp32-usb-bootstrap-20261102-171736/usb-install-r2/usb-readback-proof.json)
+- [实际启动日志](/path/to/user/code/esp32/work/esp32-usb-bootstrap-20261102-171736/usb-install-r2/retry-boot-boot.log)
+- [设备 MCP 状态证据](/path/to/user/code/esp32/work/esp32-usb-bootstrap-20261102-171736/physical-mcp-status.json)
+- [最终设备及回执证据](/path/to/user/code/esp32/work/esp32-usb-bootstrap-20261102-171736/final-live-proof.json)
+- [最终 Java 测试](/path/to/user/code/esp32/work/esp32-usb-bootstrap-20261102-171736/java-tests-build-r3.log)
 
 目录包含 Wi-Fi、设备凭据、SQL 与 Flash 备份，仅留在本机私有目录，不上传或打包公开分发。
 

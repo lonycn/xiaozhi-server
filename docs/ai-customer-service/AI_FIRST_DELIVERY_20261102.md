@@ -58,7 +58,7 @@ flowchart LR
 
 ## 首批真实技术证据
 
-证据目录：`/Users/lengwang/code/esp32/work/ai-first-20261102/`。其中私有 runtime/SQL 仅保留本地，不复制到 App、源码或公开日志。
+证据目录：`/path/to/user/code/esp32/work/ai-first-20261102/`。其中私有 runtime/SQL 仅保留本地，不复制到 App、源码或公开日志。
 
 - A2 JPEG：真实 `qwen3.8-flash`，实际 Java `server_capabilities` 执行一次，模型两轮输入/输出/总 token `1029/139/1168`，两条真实 provider usage。
 - A2 原声：生成 WAV 真正作为 `input_audio` 送 `qwen3.8-omni-flash`，Java 技术工具执行后续答，`976/293/1269`，其中 input audio token 18；不是 ASR 文本冒充原声理解。
@@ -140,7 +140,7 @@ A0 与 A5 的独立 OpenAPI 已通过 YAML、本地引用、路径数和安全�
 
 本轮按用户指定安排：6.1 Sol 分别负责 Java 故障/历史费用审计、Python 媒体/网络/长测，以及 A7 统一运行控制；6.1 Terra 负责朗读/技能客户端有界修复、Dev 开关与契约。根任务负责浏览器、共享安全边界、全量构建、原 Dev 部署及数据核对。没有新增转人工功能，没有调用真实业务 API，没有把测试媒体当作物理终端验收。
 
-证据目录：`/Users/lengwang/code/esp32/work/ai-a5-a8-20261102/`。私有配置、SQL 和浏览器 profile 均留在本机受限目录，不写入源码或公开日志。
+证据目录：`/path/to/user/code/esp32/work/ai-a5-a8-20261102/`。私有配置、SQL 和浏览器 profile 均留在本机受限目录，不写入源码或公开日志。
 
 ### 已修复的实际缺陷
 

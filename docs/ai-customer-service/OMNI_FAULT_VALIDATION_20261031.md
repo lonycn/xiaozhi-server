@@ -9,10 +9,10 @@
 可重复命令（本机已准备的虚拟环境及 ffmpeg）：
 
 ```sh
-PYTHONPATH=main/xiaozhi-server /Users/lengwang/code/esp32/backend/xiaozhi-server/.venv/bin/python /Users/lengwang/code/esp32/work/omni-fault-20261031/validate.py
-PYTHONPATH=main/xiaozhi-server:main/xiaozhi-server/tests /Users/lengwang/code/esp32/backend/xiaozhi-server/.venv/bin/python -m unittest test_ai_worker test_ai_worker_media test_ai_worker_omni -q
+PYTHONPATH=main/xiaozhi-server /path/to/user/code/esp32/backend/xiaozhi-server/.venv/bin/python /path/to/user/code/esp32/work/omni-fault-20261031/validate.py
+PYTHONPATH=main/xiaozhi-server:main/xiaozhi-server/tests /path/to/user/code/esp32/backend/xiaozhi-server/.venv/bin/python -m unittest test_ai_worker test_ai_worker_media test_ai_worker_omni -q
 ```
 
-第二条 39 项通过。脚本、技术媒体及不含真实凭据或音频内容的结果保存在 `/Users/lengwang/code/esp32/work/omni-fault-20261031/`，其中 `proof.json` 记录回调、模型请求及媒体摘要。该脚本每次重建自己的同名技术样本，不访问业务媒体。
+第二条 39 项通过。脚本、技术媒体及不含真实凭据或音频内容的结果保存在 `/path/to/user/code/esp32/work/omni-fault-20261031/`，其中 `proof.json` 记录回调、模型请求及媒体摘要。该脚本每次重建自己的同名技术样本，不访问业务媒体。
 
 仍需在获授权的真实业务链路验证错误呈现、用户重试及不同故障恢复；实际百炼故障与受控本地注入分别判断。真实机械声音、现场数据和专家对照尚未验收。

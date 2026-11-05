@@ -1,19 +1,18 @@
-# ESP32 项目文档入口
+# 开发文档索引
 
-目录整理日期：2026-11-05。
+当前代码统一使用 Vue 3 网页、Java API 和 Python 服务，前后端共用 Server Git 仓库。Vue 2 源码及过时的前端说明已移至本地归档。
 
-| 分类 | 入口 | 内容 |
-| --- | --- | --- |
-| 目录与源码位置 | [工作区目录](WORKSPACE_LAYOUT.md) | 前端、后端、硬件、文档、发布、备份和历史资料 |
-| Git 管理 | [Git 工作流程](GIT_WORKFLOW.md) | Server 前后端同仓库、硬件独立、提交范围和忽略规则 |
-| GitHub 远程 | [仓库与远程映射](REPOSITORY_REMOTES.md) | 硬件 fork 与包含 Vue 3 网页的 Server 远程对应关系 |
-| 开发与服务运维 | [Dev 说明](../dev/README.md) | 统一启停、端口、功能开关和本地环境 |
-| 固件发布 | [发布说明](../releases/README.md) | 已发布版本、源码快照与本地二进制的位置 |
-| 备份 | [备份说明](BACKUPS.md) | Flash、NVS、数据库、私有配置的保存位置 |
-| 接口与功能文档 | [AI 与客服文档](ai-customer-service/) | 协议、规划、运维和验收记录 |
+| 内容 | 文档 |
+| --- | --- |
+| 项目与快速开始 | [项目 README](../README.md) |
+| 模块目录 | [模块说明](../main/README.md) |
+| Vue 3 开发 | [前端 README](../main/manager-web/README.md) |
+| Dev 启停、依赖与功能开关 | [Dev 说明](../dev/README.md) |
+| 工作区目录 | [目录约定](WORKSPACE_LAYOUT.md) |
+| Git 提交与远程 | [Git 管理](GIT_WORKFLOW.md)、[远程映射](REPOSITORY_REMOTES.md) |
+| 发布与备份 | [发布索引](../releases/README.md)、[备份说明](BACKUPS.md) |
+| 接口与功能 | [AI 与客服文档](ai-customer-service/) |
 
-工作区根目录的 README 保留设备与环境沿革。这里是日常开发的分类入口；历史记录中的旧版本和端口以其记录日期理解，当前统一服务说明见 Dev 文档。
+当前功能与配置以对应模块文档为准，带日期的规划、迁移和验收文件作为历史记录查阅。
 
-当前网页入口见 [前端 README](../main/manager-web/README.md)，当前目录与历史整合见 [整合记录](SERVER_FRONTEND_INTEGRATION_20261105.md)。
-
-当前整合结果见 [Server Vue 3 整合](SERVER_FRONTEND_INTEGRATION_20261105.md)。
+公开文档中的客户名称、设备身份、局域网地址和本机路径均为匿名示例；客户专用回调及原验收记录保存在本地私有目录。

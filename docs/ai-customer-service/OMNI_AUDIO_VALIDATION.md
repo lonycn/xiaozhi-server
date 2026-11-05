@@ -34,6 +34,6 @@ mvn -f main/manager-api/pom.xml -DskipTests=false -Dtest='xiaozhi.modules.ai.*Te
 
 ## 原 Dev/S3 恢复后 r3
 
-用户授权Docker恢复后，原Dev18894/API18893、原MySQL/Redis与18333原S3 bucket恢复，2个旧对象HEAD/GET200且字节/SHA匹配。原Dev重新完成真实上传、派生、实际Omni、SSE及持久回复：录音usage183/81/264（input_audio_tokens44），有声视频usage830/79/909（input_audio_tokens16），两例run均completed。证据 `/Users/lengwang/code/esp32/work/omni-dev-e2e-proof-r3.json`。
+用户授权Docker恢复后，原Dev18894/API18893、原MySQL/Redis与18333原S3 bucket恢复，2个旧对象HEAD/GET200且字节/SHA匹配。原Dev重新完成真实上传、派生、实际Omni、SSE及持久回复：录音usage183/81/264（input_audio_tokens44），有声视频usage830/79/909（input_audio_tokens16），两例run均completed。证据 `/path/to/user/code/esp32/work/omni-dev-e2e-proof-r3.json`。
 
 恢复早期旧视频run重试耗尽；新r2曾因时钟回退约68ms失败，其proof及 `work/omni-dev-e2e-proof-r2-clock-failure.json` 保留，未改写为成功。r3才是恢复后Dev S3全链通过依据，见 [恢复记录](./DEV_RECOVERY_VALIDATION_20261030.md)。技术录音/视频、长音轨inline上限与真实机械声对照的边界保持。

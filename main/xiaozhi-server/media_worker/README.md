@@ -49,7 +49,7 @@ The adapter protocol is covered with mocked responses; live provider acceptance 
 
 ## Provenance
 
-`/Users/lengwang/code/aimeet/services/api/app/uploads.py` was read as a local reference for validation-before-storage, metadata removal and extension/MIME checks. No source code was copied. No root license was found for that local service, so this implementation is independently written; no right to redistribute that service is asserted. The existing repository's `ai_worker` supplied the internal HTTP Result/lease design pattern. Pillow, pypdf, httpx and FFmpeg retain their own licenses; install them separately rather than vendoring their source or binaries.
+`/path/to/user/code/aimeet/services/api/app/uploads.py` was read as a local reference for validation-before-storage, metadata removal and extension/MIME checks. No source code was copied. No root license was found for that local service, so this implementation is independently written; no right to redistribute that service is asserted. The existing repository's `ai_worker` supplied the internal HTTP Result/lease design pattern. Pillow, pypdf, httpx and FFmpeg retain their own licenses; install them separately rather than vendoring their source or binaries.
 
 ## B4 precise frames and annotation previews
 

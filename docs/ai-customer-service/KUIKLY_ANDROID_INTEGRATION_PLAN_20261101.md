@@ -259,16 +259,16 @@ Laravel 只在 AI 接入阶段提供身份，不表示业务接口只检查“�
 
 ## 8. 源码核对位置
 
-Android 仓库：`/Users/lengwang/code/ui_aichat/aichat_plus_kuikly`。
+Android 仓库：`/path/to/user/code/ui_aichat/aichat_plus_kuikly`。
 
-- `shared/src/commonMain/kotlin/com/dalengzongguan/app/network/api/ChatApi.kt`：现有 Laravel AI/私聊协议和 Int 会话模型。
-- `shared/src/commonMain/kotlin/com/dalengzongguan/app/network/api/NativeRemoteApi.kt`：旧 Aimeet consultation、connection 和 native 代理协议。
-- `shared/src/commonMain/kotlin/com/dalengzongguan/app/pages/ChatWorkspaceFrontend.kt`、`RealtimeCallInvitations.kt`：公共工作区、原会话约束和来电 transport 入口。
-- `shared/src/commonMain/kotlin/com/dalengzongguan/app/ui/components/DlRealtimeCallOverlay.kt`、`androidApp/src/main/kotlin/com/dalengzongguan/app/AppAiDiagnosisCameraView.kt`：当前本机 AI 画面和未接通的音频视觉控制。
-- `androidApp/src/main/kotlin/com/dalengzongguan/app/AppRemoteRtcView.kt`：LiveKit 连接、双权限检查、peer 与音频统计回执。
+- `shared/src/commonMain/kotlin/com/examplebusiness/app/network/api/ChatApi.kt`：现有 Laravel AI/私聊协议和 Int 会话模型。
+- `shared/src/commonMain/kotlin/com/examplebusiness/app/network/api/NativeRemoteApi.kt`：旧 Aimeet consultation、connection 和 native 代理协议。
+- `shared/src/commonMain/kotlin/com/examplebusiness/app/pages/ChatWorkspaceFrontend.kt`、`RealtimeCallInvitations.kt`：公共工作区、原会话约束和来电 transport 入口。
+- `shared/src/commonMain/kotlin/com/examplebusiness/app/ui/components/DlRealtimeCallOverlay.kt`、`androidApp/src/main/kotlin/com/examplebusiness/app/AppAiDiagnosisCameraView.kt`：当前本机 AI 画面和未接通的音频视觉控制。
+- `androidApp/src/main/kotlin/com/examplebusiness/app/AppRemoteRtcView.kt`：LiveKit 连接、双权限检查、peer 与音频统计回执。
 - `docs/contracts/realtime-call-incoming-v1.md`：旧前端建议 call-session 协议；`/api/realtime/...` 是建议路径，不是当前 Server 已实现接口。
 
-Laravel 仓库：`/Users/lengwang/code/ui_aichat/aichat_laravel`；核对 `routes/api.php`、`app/Services/AimeetNativeService.php` 与 `app/Http/Controllers/Api/AimeetNativeController.php`。本次在 app/routes/config 未找到小智 issue/revoke 或 `/api/realtime` 实现，旧 Aimeet native 代理仍存在。
+Laravel 仓库：`/path/to/user/code/ui_aichat/aichat_laravel`；核对 `routes/api.php`、`app/Services/AimeetNativeService.php` 与 `app/Http/Controllers/Api/AimeetNativeController.php`。本次在 app/routes/config 未找到小智 issue/revoke 或 `/api/realtime` 实现，旧 Aimeet native 代理仍存在。
 
 Server 仓库：本需求所在仓库；核对 `ConversationController/Models`、`RealtimeController/Service`、`supportmedia/MediaController/Service/Models`、`support/SupportService`、`externalidentity/ExternalPathPolicy` 与 `realtime_worker/session.py`。Vue 3 已有 `realtime/session.mjs`、`realtime/browserMedia.mjs`、`apis/module/realtimeClient.mjs`、`mediaClient.mjs` 可作为协议与状态行为参考，原生 PCM/RTC 生命周期仍需 Android 自己实现和实测。
 

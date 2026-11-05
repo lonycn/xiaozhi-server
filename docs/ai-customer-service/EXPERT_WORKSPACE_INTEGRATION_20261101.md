@@ -25,7 +25,7 @@
 
 ## aimeet 参考截图清单
 
-以下本机截图位于 `/Users/lengwang/code/aimeet/.local/evidence/`，属于被 Git 忽略的参考材料；截图本身不能证明本轮小智实现或真实媒体验收通过。
+以下本机截图位于 `/path/to/user/code/aimeet/.local/evidence/`，属于被 Git 忽略的参考材料；截图本身不能证明本轮小智实现或真实媒体验收通过。
 
 | 参考视图 | 文件（相对于上述目录） | 对照重点 |
 | --- | --- | --- |
@@ -40,7 +40,7 @@
 
 ## 本轮技术验证证据
 
-证据目录：`/Users/lengwang/code/esp32/work/expert-workspace-20261101`。以下浏览器验证使用合成媒体和测试会话，不代表物理设备或真实业务验收。
+证据目录：`/path/to/user/code/esp32/work/expert-workspace-20261101`。以下浏览器验证使用合成媒体和测试会话，不代表物理设备或真实业务验收。
 
 - 变更前 `dev-before.json` 记录 SQL 备份 521136 字节，SHA-256 `6ad63e4bfb85b352bd0a18c6bed45f94404bbaeca7489517bce59b67a498d783`；基线计数为 4 个用户、25 条旧记录、33 条消息、120 条 changeset。
 - 使用现有 `PUT support/agents` 接口为管理员 `2115948032647184386` 设置启用的专家档案、容量 3；密码未变更，未执行 SQL 迁移。

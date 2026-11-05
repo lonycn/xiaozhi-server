@@ -11,7 +11,7 @@
 - 真实 MySQL REPEATABLE READ：验证旧快照下转接释放和同序号修改后的旧客服 cutoff、过期版本 409、新客服当前授权、最新消息与附件证据。摘要自身授权、版本和来源查询使用当前锁定读，避免使用先前一致性快照。
 - 真实 Spring 装配验证：默认关闭及任一开关未开启时不发布摘要服务；两个开关开启时装配真实摘要服务及人工交接 hook。
 - Java 21 定向检查 28 项，包括 10 项真实 MySQL 摘要测试、3 项 Spring 装配、3 项控制器/外部边界、4 项原有客服控制器和 8 项会话访问测试。Vue 既有检查为 10 项 contract 和 368 项 unit，并有 build 和 i18n 检查；它们针对对应前端源码，不与其他平台计数相加形成最终总数。
-- 原始测试记录、数据库隔离级别与修复说明：`/Users/lengwang/code/esp32/work/handoff-summary-proof-20261030/REPORT-RR-FIX.md`。该报告是技术证明，不代表浏览器、生产环境或现场验收。
+- 原始测试记录、数据库隔离级别与修复说明：`/path/to/user/code/esp32/work/handoff-summary-proof-20261030/REPORT-RR-FIX.md`。该报告是技术证明，不代表浏览器、生产环境或现场验收。
 
 ## 后续验收
 

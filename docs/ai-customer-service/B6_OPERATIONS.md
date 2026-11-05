@@ -13,7 +13,7 @@
 密钥配置示意（仅占位符，不可直接启用）：
 
 ```json
-{"xiaozhi-daleng-v1":{"issuer":"xiaozhi-daleng-dev","secret_b64":"<new private standard Base64 random key>"}}
+{"xiaozhi-example-v1":{"issuer":"xiaozhi-example-dev","secret_b64":"<new private standard Base64 random key>"}}
 ```
 
 不要把Laravel PAT、aimeet Cookie、LiveKit/worker密钥作为B6密钥，或把票据、Bearer、能力URL、原始body写入日志/终端/错误响应。

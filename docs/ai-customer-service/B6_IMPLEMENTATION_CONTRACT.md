@@ -12,7 +12,7 @@
 
 ## 原始体签名、票据与精确撤销
 
-新端点（与原Daleng v1分离）：
+新端点（与原example v1分离）：
 - POST /api/v1/external/identity/issue：来源服务调用，body严格为external_subject/source_session_id/source_expires_at/display_name/tenant/scope。source_expires_at为UTC Unix秒（整数或规范十进制字符串），须在当前未来24小时内；有效来源更长期时，来源应签发有界授权窗口。
 - POST /api/v1/external/identity/exchange：原生客户端HTTPS提交{ticket}，不需要也不接收Laravel PAT/aimeet Cookie；返回本仓来源绑定Bearer和到期/本人上下文。
 - POST /api/v1/external/identity/revoke：来源服务调用{external_subject,source_session_id}；幂等204，无匹配时只保留撤销墓碑，不创建用户。

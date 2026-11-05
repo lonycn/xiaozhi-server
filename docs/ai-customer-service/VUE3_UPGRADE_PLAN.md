@@ -7,7 +7,7 @@
 - 执行分支：`Dev`
 - 代码基线：`ed10d462d39644364d86db30c692a7236983db16`
 - 仓库：<https://github.com/lonycn/xiaozhi-server>
-- 本机仓库：`/Users/lengwang/code/esp32/backend/xiaozhi-server/repo`
+- 本机仓库：`/path/to/user/code/esp32/backend/xiaozhi-server/repo`
 
 本次升级将现有管理前端迁移到 Vue 3、Vite 和 Element Plus，保留登录、智能体、设备、模型配置和统一对话的业务行为。采用临时候选前端逐模块迁移，现有 Dev 页面在迁移过程中继续使用，全部验收后再切换默认入口。
 
@@ -408,7 +408,7 @@ PID 管理继续校验进程身份和启动时间，避免停止别的服务。�
 将以下内容作为新对话的第一条消息即可：
 
 ```text
-请在 /Users/lengwang/code/esp32/backend/xiaozhi-server/repo 中，基于 Dev 分支实施 Vue 3 升级。
+请在 /path/to/user/code/esp32/backend/xiaozhi-server/repo 中，基于 Dev 分支实施 Vue 3 升级。
 
 先阅读：
 1. docs/ai-customer-service/VUE3_UPGRADE_PLAN.md

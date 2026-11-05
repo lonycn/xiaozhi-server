@@ -13,7 +13,7 @@
 | 项目 | 核对基线 | 当前边界 |
 | --- | --- | --- |
 | 小智 fork | `lonycn/xiaozhi-server`，本轮起点 `97067a2`，`Dev` | Spring Boot、MySQL、Shiro；已有持久对话、用户文字与位置消息、幂等与 JSON 事件补拉 |
-| 远程专家 | `/Users/lengwang/code/aimeet`，`1a30b93` | FastAPI、SQLAlchemy、PostgreSQL、Redis、LiveKit、SeaweedFS S3、Next.js/React |
+| 远程专家 | `/path/to/user/code/aimeet`，`1a30b93` | FastAPI、SQLAlchemy、PostgreSQL、Redis、LiveKit、SeaweedFS S3、Next.js/React |
 | 前端迁移 | `main/manager-web-next`，另一聊天正在开发 | Vue 3 候选应用；现有 Vue 2 预览继续保留 |
 
 制定本计划时的 `ConversationService` 只保存用户消息，没有实际 AI 执行、客服成员权限、附件服务或人工状态变更入口。当时数据库已有 `ai_conversation`、`ai_message`、`ai_conversation_event`；B1/B2 在其上增量实现了人工文字与 AI 执行。附件服务仍待 B3。
@@ -29,7 +29,7 @@
 | 专家转接、服务代次、旧身份撤销与清理重试 | `phase45.py`、`api/phase45.py`、`business.py` | 拆分文字转派与媒体转接，迁入 support 状态机 |
 | 房间 Token、参与者、签名 webhook、房间清理 | `integrations/livekit.py`、`api/business.py`、`api/phase45.py` | 定义 Java RTC 适配接口，复用实际 LiveKit 基础设施 |
 | 持久通知与重试 | `DurableEvent`、`phase45.maintain_phase45` | 合并为统一事件与通知 outbox，增加有限重试、退避和可补偿状态 |
-| 单次票据、外部身份映射、来源会话撤销 | `app_sso.py`、`api/app_auth.py`、`0009_daleng_app_sso.py` | 复用签名和身份隔离设计；已有大冷总管 v1 接口保持兼容 |
+| 单次票据、外部身份映射、来源会话撤销 | `app_sso.py`、`api/app_auth.py`、`0009_example_app_sso.py` | 复用签名和身份隔离设计；已有业务助手 v1 接口保持兼容 |
 | 媒体桥接、打断、采样、知识检索与 Worker lease | `services/agent/app/provider.py`、`session.py`、`media.py`、`clients.py` | 后置技术验证；通过适配层接入 Python 执行面 |
 | 有效媒体计时和模拟账单 | `phase45.py`、`BillingSegment`、`Bill` | 保留设计与测试供后续运营使用，首期不接收费或支付 |
 
@@ -132,7 +132,7 @@ Spring Boot 负责最终授权、当前服务者、会话状态、消息落库�
 - 统一 `ConversationAccessService`，供消息、事件、附件、标注和媒体使用。它区分本人、当前分配、历史服务者和有明确资源范围的主管；具有菜单权限仍要校验资源范围。
 - 离任专家失去写入、Token、挂断及转派权限。新平台默认将历史只读范围固定在交接时的 `read_through_seq`；更广售后档案授权另行记录。该范围比原项目的参与者历史读取更明确。
 - 当前身份没有可信租户和项目域，继续拒绝客户端自报这些字段；完成可信来源映射后再开放项目、设备和客户范围。
-- 来源 App 的 `(issuer, external_subject)` 建立显式映射；手机号不能用作自动合并或历史读取凭据。现有大冷总管 SSO v1 保持原协议，新增小智接入使用独立 issuer 与签名密钥。
+- 来源 App 的 `(issuer, external_subject)` 建立显式映射；手机号不能用作自动合并或历史读取凭据。现有业务助手 SSO v1 保持原协议，新增小智接入使用独立 issuer 与签名密钥。
 - `aimeet` Cookie 会话、manager-api Bearer Token 和 LiveKit Token 职责不同；不共用密钥，也不把一种 Token 直接当成另一种凭据。
 
 ## 5 数据模型与迁移边界
@@ -223,7 +223,7 @@ SSE 由认证请求客户端读取，继续发送 Authorization；不把长效 B
 
 ### B6 外部 App 与业务接入
 
-完成现有 Laravel/Kuikly 身份与新平台的可信映射，再接设备、工单、知识库和远程指导记录。可复用既有大冷总管 SSO 签名测试向量与撤销测试，但保持原接口与会话独立。业务先只读，正式工单提交和设备控制按原规划的授权边界执行。
+完成现有 Laravel/Kuikly 身份与新平台的可信映射，再接设备、工单、知识库和远程指导记录。可复用既有业务助手 SSO 签名测试向量与撤销测试，但保持原接口与会话独立。业务先只读，正式工单提交和设备控制按原规划的授权边界执行。
 
 验收：票据短期单次、重放拒绝、来源会话撤销有效、不按手机号合并；项目/设备范围可信；转接摘要区分已确认事实与 AI 推测。模拟计费、支付、邀请获客和专家注册审批作为后续运营任务，不阻塞远程指导主流程。
 

@@ -3,7 +3,7 @@ import {createRoomTransport} from '../src/media/livekitTransport.mjs';
 function harness(options={}){
   const listeners=new Map(),local={trackPublications:new Map(),publishTrack:vi.fn(async()=>{}),unpublishTrack:vi.fn(async()=>{})};
   const room={state:'connected',localParticipant:{...local,sid:'self'},remoteParticipants:new Map(),on:vi.fn((name,callback)=>listeners.set(name,callback)),connect:vi.fn(async()=>{}),disconnect:vi.fn(async()=>{}),removeAllListeners:vi.fn(),startAudio:vi.fn(async()=>{})};
-  const sdk={Room:class{constructor(){return room;}},RoomEvent:{TrackSubscribed:'track',TrackUnsubscribed:'untrack',ConnectionStateChanged:'state',Disconnected:'disconnected'},createLocalTracks:vi.fn(async()=>[{kind:'audio',stop:vi.fn()}])};
+  const sdk={Room:class{constructor(){return room;}},RoomEvent:{TrackSubscribed:'track',TrackUnsubscribed:'untrack',TrackMuted:'muted',TrackUnmuted:'unmuted',ConnectionStateChanged:'state',Disconnected:'disconnected'},createLocalTracks:vi.fn(async()=>[{kind:'audio',stop:vi.fn()}])};
   const onTrack=vi.fn(),onLocalTrack=vi.fn(),onChange=vi.fn(),transport=createRoomTransport(sdk,{onChange,onTrack,onLocalTrack,...options});
   const track=(kind='audio')=>{const element=document.createElement(kind==='audio'?'audio':'video');element.play=vi.fn(async()=>{});return {kind,sid:`TR_${kind}`,isMuted:false,mediaStreamTrack:{readyState:'live'},attach:vi.fn(()=>element),detach:vi.fn(()=>[element]),getRTCStatsReport:vi.fn()};};
   return {room,sdk,listeners,transport,onTrack,onLocalTrack,onChange,track};
@@ -27,6 +27,13 @@ describe('LiveKit transport device and receive evidence boundary',()=>{
 
   it('only requests sources explicitly chosen by the user and never logs or persists a token',async()=>{
     const h=harness();await h.transport.connect('wss://test','private',{microphone:true,camera:false});expect(h.sdk.createLocalTracks).toHaveBeenCalledTimes(1);expect(h.sdk.createLocalTracks).toHaveBeenCalledWith({audio:true,video:false});await h.transport.close();
+  });
+  it('reports remote video mute and unmute without reattaching the track',async()=>{
+    const h=harness(),video=h.track('video');h.transport.setForeground(true);h.listeners.get('track')(video);
+    expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({hasVideo:true}));
+    video.isMuted=true;h.listeners.get('muted')();expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({hasVideo:false}));
+    video.isMuted=false;h.listeners.get('unmuted')();expect(h.onChange).toHaveBeenLastCalledWith(expect.objectContaining({hasVideo:true}));
+    expect(video.attach).toHaveBeenCalledOnce();expect(video.detach).not.toHaveBeenCalled();await h.transport.close();
   });
   it('does not attach prepared-room media until foreground is committed',async()=>{
     const h=harness(),track=h.track();await h.transport.connect('wss://test','private',{microphone:false,camera:false});h.transport.setForeground(false);h.listeners.get('track')(track);expect(track.attach).not.toHaveBeenCalled();h.transport.setForeground(true);expect(track.attach).toHaveBeenCalledTimes(1);h.transport.setForeground(false);expect(track.detach).toHaveBeenCalledTimes(1);await h.transport.close();

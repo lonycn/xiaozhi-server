@@ -1,3 +1,5 @@
+@use '../../public/admin-typography.css';
+
 // 覆盖 autofill 样式
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
@@ -18,13 +20,13 @@ select:-webkit-autofill:focus {
 }
 
 .el-icon-video-play, .el-icon-video-pause { 
-  font-size: 18px !important;
+  font-size: var(--admin-font-lg) !important;
 }
 
 .is-light {
   border: 1px solid #e4e7ed !important;
   color: #595959;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   background: #fafcfe !important;
   .el-popper__arrow {
     border-top-color: #e4e7ed !important;

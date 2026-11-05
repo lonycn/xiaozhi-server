@@ -29,6 +29,9 @@ export function createRoomTransport(sdk, { onChange = () => {}, onTrack = () => 
   }
   room.on(sdk.RoomEvent.TrackSubscribed, track => { if (!closed) { tracks.add(track); render(track); update(); } });
   room.on(sdk.RoomEvent.TrackUnsubscribed, track => { tracks.delete(track); detach(track); update(); });
+  // Mute does not unsubscribe the track, so propagate availability separately.
+  if (sdk.RoomEvent.TrackMuted) room.on(sdk.RoomEvent.TrackMuted, update);
+  if (sdk.RoomEvent.TrackUnmuted) room.on(sdk.RoomEvent.TrackUnmuted, update);
   room.on(sdk.RoomEvent.ConnectionStateChanged, () => { if (room.state !== 'connected') { mediaStalled = false; flow.clear(); samples.clear(); } update(); });
   room.on(sdk.RoomEvent.Disconnected, () => { ++captureEpoch; connected = false; mediaStalled = false; flow.clear(); samples.clear(); for (const track of local.values()) { detach(track); stopTrack(track); } local.clear(); for (const track of tracks) detach(track); update(); });
   if (sdk.RoomEvent.LocalTrackUnpublished) room.on(sdk.RoomEvent.LocalTrackUnpublished, publication => {

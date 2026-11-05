@@ -16,3 +16,16 @@ export async function allPages(fetchPage, start = '0') {
   }
 }
 export function senderKey(type) { return ({ user: 'user', support_agent: 'agent', expert: 'expert', assistant: 'ai', ai: 'ai', system: 'system' })[String(type).toLowerCase()] || 'unknown'; }
+
+export const staffRoles = ['support_agent', 'expert'];
+export function supportRoles(profile) {
+  return [...new Set((Array.isArray(profile?.roles) ? profile.roles : [profile?.role]).filter(role => staffRoles.includes(role)))];
+}
+export function hasSupportRole(profile, role) { return profile?.enabled === true && supportRoles(profile).includes(role); }
+export function supportAccepting(profile, role) {
+  if (!hasSupportRole(profile, role)) return false;
+  if (profile.service_presence) return profile.service_presence[role]?.accepting === true;
+  // Legacy responses only describe the primary role, never every role on the account.
+  return profile.role === role && profile.accepting === true;
+}
+export function supportDeskPath(role) { return role === 'expert' ? '/expert-conversations' : '/support'; }

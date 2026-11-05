@@ -33,6 +33,42 @@ describe('annotation editor snapshots and private canvas', () => {
     await wrapper.setProps({embedded:false});expect(wrapper.find('.frame-evidence').text()).toContain('10');expect(wrapper.find('.annotation-preview').exists()).toBe(true);expect(wrapper.text()).toContain('annotations.saveNote');expect(wrapper.text()).toContain('annotations.copyNote');expect(wrapper.find('.annotation-saved-state').text()).toContain('12');
   });
 
+  it('fits a portrait frame in the dock, bounds zoom, pans, and maps drawing after pan', async () => {
+    const portrait={...frame,width:500,height:1000,actual_time_ms:1250};
+    api.frame.mockResolvedValue(portrait);images.decode.mockResolvedValue({image:{src:'blob:private',naturalWidth:500,naturalHeight:1000},release:images.release});
+    const vm=desk({embedded:true,docked:true});await vm.openFrame('10');
+    const viewport=wrapper.find('.annotation-viewport').element,canvas=wrapper.find('canvas').element;
+    Object.defineProperties(viewport,{clientWidth:{value:300},clientHeight:{value:220}});vm.measureViewport();await vm.$nextTick();
+    expect(vm.canvasLayout.width).toBe('110px');expect(wrapper.find('.annotation-backdrop--docked').exists()).toBe(true);expect(wrapper.text()).toContain('annotations.frozenFrame');expect(wrapper.text()).toContain('1250 ms');
+    for(let i=0;i<20;i++) vm.changeZoom(.25);expect(vm.zoom).toBe(4);expect(vm.canvasLayout.width).toBe('440px');
+    vm.panMode=true;viewport.scrollLeft=80;viewport.scrollTop=100;
+    const event=(x,y) => ({pointerId:1,button:0,isPrimary:true,clientX:x,clientY:y,currentTarget:canvas,preventDefault:vi.fn()});
+    vm.pointerDown(event(100,100));vm.pointerUp(event(60,50));expect(viewport.scrollLeft).toBe(120);expect(viewport.scrollTop).toBe(150);expect(vm.scene.elements).toHaveLength(0);
+    vm.panMode=false;vi.spyOn(canvas,'getBoundingClientRect').mockReturnValue({left:-120,top:-150,width:440,height:880});
+    vm.tool='rect';vm.pointerDown(event(-76,-62));vm.pointerUp(event(100,290));expect(vm.scene.elements[0]).toMatchObject({type:'rect',x:.1,y:.1,width:.4,height:.4});
+    vm.close();await vm.openFrame('10');expect(vm.scene.elements).toHaveLength(1);vm.undo();expect(vm.scene.elements).toHaveLength(0);
+    vm.fitCanvas();expect(vm.zoom).toBe(1);expect(wrapper.find('.annotation-viewport').element.scrollLeft).toBe(0);
+  });
+
+  it('refits to the measured dock viewport as its available height changes and keeps save controls outside it', async () => {
+    const vm=desk({embedded:true,docked:true});await vm.openFrame('10');
+    const viewport=wrapper.find('.annotation-viewport').element;let height=120;
+    Object.defineProperties(viewport,{clientWidth:{get:()=>300},clientHeight:{get:()=>height}});
+    vm.measureViewport();expect(vm.canvasLayout.width).toBe('240px');
+    height=80;vm.measureViewport();expect(vm.canvasLayout.width).toBe('160px');
+    expect(viewport.contains(wrapper.find('footer').element)).toBe(false);
+    expect(wrapper.find('footer').text()).toContain('annotations.save');expect(wrapper.find('footer').text()).toContain('annotations.addReply');
+  });
+
+  it('blocks staging during reply work without closing the dock or losing history, including a fetch race', async () => {
+    const vm=desk({embedded:true,docked:true});await vm.openFrame('10');vm.commit({...vm.scene,elements:[arrow]});await vm.saveSnapshot();
+    await wrapper.setProps({replyDisabled:true});expect(vm.visible).toBe(true);expect(vm.scene.elements).toEqual([arrow]);expect(vm.history.canUndo).toBe(true);
+    expect(wrapper.find('footer button:last-child').attributes('disabled')).toBeDefined();await vm.addToReply();expect(wrapper.emitted('ready')).toBeUndefined();
+    await wrapper.setProps({replyDisabled:false});const pending=deferred();attachment.get.mockReturnValueOnce(pending.promise);const adding=vm.addToReply();await flushPromises();
+    await wrapper.setProps({replyDisabled:true});pending.resolve(generated);await adding;expect(wrapper.emitted('ready')).toBeUndefined();expect(vm.visible).toBe(true);expect(vm.scene.elements).toEqual([arrow]);
+    await wrapper.setProps({replyDisabled:false});await vm.addToReply();expect(wrapper.emitted('ready')).toHaveLength(1);expect(vm.visible).toBe(false);
+  });
+
   it('uses scoped drawing tool keys while protecting text input and IME', async () => {
     const vm=desk({embedded:true});await vm.openFrame('10');const canvas=wrapper.find('canvas').element,preventDefault=vi.fn();
     vm.dialogKeydown({key:'2',target:canvas,preventDefault});expect(vm.tool).toBe('rect');vm.dialogKeydown({key:'8',target:canvas,isComposing:true,preventDefault});expect(vm.tool).toBe('rect');

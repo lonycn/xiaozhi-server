@@ -21,9 +21,10 @@ export function createMediaClient({ baseUrl, getToken, fetchImpl = globalThis.fe
   }
   const action = (id, name, body, signal) => request(`/media-sessions/${key(id)}/${name}`, body, signal);
   return {
+    callAvailability: (requestId, signal) => request(`/requests/${key(requestId)}/call-availability`, undefined, signal),
     current: (conversationId, signal) => request(`/media-sessions/current?conversation_id=${key(conversationId)}`, undefined, signal),
     invitations: (after = '0', signal) => request(`/media-invitations?after=${key(after)}&limit=50`, undefined, signal),
-    experts: (after = '0', signal) => request(`/media-experts?after=${key(after)}&limit=50`, undefined, signal),
+    experts: (after = '0', signal, serviceType) => request(`/media-experts?after=${key(after)}&limit=50${serviceType ? `&service_type=${key(serviceType)}` : ''}`, undefined, signal),
     get: (id, signal) => request(`/media-sessions/${key(id)}`, undefined, signal),
     create: (body, signal) => request('/media-sessions', body, signal),
     accept: (id, body, signal) => action(id, 'accept', body, signal),

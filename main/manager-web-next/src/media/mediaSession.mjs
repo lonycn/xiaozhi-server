@@ -6,6 +6,10 @@ export function mediaErrorKey(error) {
   if (error.name === 'NotFoundError') return 'media.deviceMissing';
   if (error.status === 401 || error.status === 403) return 'media.denied';
   if (error.status === 404) return 'media.unavailable';
+  if (error.code === 'MEDIA_CUSTOMER_OFFLINE') return 'media.customerOffline';
+  if (error.code === 'MEDIA_CUSTOMER_BUSY') return 'media.customerBusy';
+  if (error.code === 'MEDIA_AGENT_BUSY') return 'media.agentBusy';
+  if (error.code === 'MEDIA_CUSTOMER_VIDEO_UNAVAILABLE') return 'media.customerVideoUnavailable';
   if (['ROOM_PREPARING','MEDIA_ROOM_PREPARING'].includes(error.code)) return 'media.roomPreparing';
   if (error.status === 409) return 'media.changed';
   if (error.code === 'TIMEOUT') return 'media.timeout';

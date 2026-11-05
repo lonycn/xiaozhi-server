@@ -1,6 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createConversationClient } from '../src/apis/module/conversationClient.mjs';
 
+describe('late authorization responses', () => {
+  it('cannot log out a new identity when an old unauthorized JSON body arrives late', async () => {
+    let token='old',finish;const onUnauthorized=vi.fn();
+    const client=createConversationClient({baseUrl:'/xiaozhi',getToken:()=>token,onUnauthorized,fetchImpl:async()=>({status:401,ok:false,json:()=>new Promise(resolve=>{finish=resolve;})})});
+    const pending=client.list();await Promise.resolve();token='new';finish({code:401});
+    await expect(pending).rejects.toMatchObject({name:'AbortError'});expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+  it('drops successful data when selection aborts while its body is still arriving', async () => {
+    let finish;const controller=new AbortController();const client=createConversationClient({baseUrl:'/xiaozhi',getToken:()=>'',onUnauthorized:vi.fn(),fetchImpl:async()=>({status:200,ok:true,json:()=>new Promise(resolve=>{finish=resolve;})})});
+    const pending=client.messages('c','0',controller.signal);await Promise.resolve();controller.abort();finish({code:0,data:{private:'old'}});
+    await expect(pending).rejects.toMatchObject({name:'AbortError'});
+  });
+  it('does not dispatch an already canceled selection', async () => {
+    const controller=new AbortController();controller.abort();const fetchImpl=vi.fn();const client=createConversationClient({baseUrl:'/xiaozhi',getToken:()=>'',onUnauthorized:vi.fn(),fetchImpl});
+    await expect(client.list(0,controller.signal)).rejects.toMatchObject({name:'AbortError'});expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
 function response(status, body) { return { status, ok: status >= 200 && status < 300, json: async () => body }; }
 
 describe('conversation transport', () => {
@@ -70,4 +88,21 @@ describe('AI transport precision and cancellation', () => {
     abort.abort(); await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     expect(fetchImpl.mock.calls[0][1].signal.aborted).toBe(true);
   });
+});
+it('marks a web-created conversation explicitly without changing its existing JSON contract', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue(response(200, { code: 0, data: { id: 'new' } }));
+  const client = createConversationClient({ baseUrl: '/xiaozhi', getToken: () => 'xext_test', onUnauthorized: vi.fn(), fetchImpl });
+  await client.create('Web');
+  expect(fetchImpl.mock.calls[0][1].headers['X-Conversation-Source']).toBe('web');
+  expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ title: 'Web' });
+  expect(fetchImpl.mock.calls[0][1]).not.toHaveProperty('webSource');
+});
+
+it('requests ten hardware rows with the exact sequence without changing the default polling limit', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue(response(200, { code: 0, data: { items: [] } }));
+  const client = createConversationClient({ baseUrl: '/xiaozhi', getToken: () => '', onUnauthorized: vi.fn(), fetchImpl });
+  await client.messages('hardware', '9007199254740995', undefined, 10);
+  expect(fetchImpl.mock.calls[0][0]).toBe('/xiaozhi/api/v1/ai/conversations/hardware/messages?after=9007199254740995&limit=10');
+  await client.messages('hardware', '9007199254740995');
+  expect(fetchImpl.mock.calls[1][0]).toContain('limit=100');
 });

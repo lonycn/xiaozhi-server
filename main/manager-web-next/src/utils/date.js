@@ -2,6 +2,14 @@ export const toDate = (date) => {
   return isDate(date) ? new Date(date) : null
 }
 
+export function formatBeijingTime(value, locale, options) {
+  if (value == null || value === '') return ''
+  // Legacy device history serializes Beijing wall-clock time without an offset.
+  const legacy = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
+  const date = new Date(legacy ? value.replace(' ', 'T') + '+08:00' : value)
+  return Number.isFinite(date.getTime()) ? date.toLocaleString(locale, { ...options, timeZone: 'Asia/Shanghai' }) : ''
+}
+
 export const isDate = (date) => {
   if (date === null || date === undefined) return false
   if (isNaN(new Date(date).getTime())) return false

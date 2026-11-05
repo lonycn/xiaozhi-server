@@ -29,6 +29,8 @@ def category_links(workspace):
         ".local/releases/README.md": repository / "releases/README.md",
         ".local/releases/catalog.toml": repository / "releases/catalog.toml",
         ".local/backups/README.md": repository / "docs/BACKUPS.md",
+        ".local/backups/dev-database": repository / "dev/.runtime/backups",
+        ".local/backups/legacy-console-database": workspace / "backend/xiaozhi-server/console/.runtime/backups",
     }
     catalog = tomllib.loads((repository / "releases/catalog.toml").read_text())
     for release in catalog["firmware"]:

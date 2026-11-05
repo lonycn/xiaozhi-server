@@ -18,7 +18,7 @@ esp32/
 │   └── screen-mirror/                  # 独立演示固件
 ├── docs -> backend/xiaozhi-server/repo/docs
 ├── releases -> .local/releases          # 本地固件包、发布指针、版本目录
-├── backups -> .local/backups            # 本地 Flash / NVS 备份
+├── backups -> .local/backups            # Flash / NVS 与数据库备份入口
 ├── archive/
 │   ├── experiments -> ../work
 │   ├── frontend-vue2 -> ../backend/xiaozhi-server/repo/main/manager-web
@@ -45,7 +45,7 @@ esp32/
 | 接口、设计与运维文档 | `docs/` | 前后端共享仓库 |
 | 发布版本目录 | `releases/catalog.toml` | 实际文件在仓库 `releases/catalog.toml` |
 | 固件二进制与本地验收证据 | `releases/<版本目录>/` | 本地保留 |
-| Flash / NVS 备份 | `backups/` | 本地保留 |
+| Flash / NVS、Dev 与旧控制台数据库备份 | `backups/`、`backups/dev-database/`、`backups/legacy-console-database/` | 本地保留 |
 | 数据库 / 私有运行配置 | 原 `dev/.runtime/` 与旧部署私有目录 | 本地保留 |
 | 临时实验、构建和日志 | `work/`、`.local/`、原日志目录 | 本地保留 |
 

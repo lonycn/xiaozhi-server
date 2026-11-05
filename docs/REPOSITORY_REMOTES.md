@@ -13,7 +13,7 @@
 
 `firmware/xiaozhi` 是 `references/xiaozhi-esp32` 仓库的 worktree，共用 Git 配置和对象。`origin` 为用户 fork，`upstream` 为官方 `https://github.com/78/xiaozhi-esp32.git`，保留原固定标签获取规则。默认推送到 `origin` 的 `Dev`。
 
-当前硬件开发树声明为 2.5.14，实机 2.5.23 源码仍在 OLED 和圆屏发布快照中，尚未归并到该 Git 工作树。
+硬件 `Dev` 已归并实机 2.5.23 基线并更新说明，提交为 `c3169fd`。OLED 与圆屏原始快照、固件包和备份继续保留，供对应实机发布追溯。
 
 ## Server
 

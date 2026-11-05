@@ -1,6 +1,6 @@
 # 小智 Server 管理前端（Vue 3）
 
-Vue 3 是本项目唯一的网页前端，源码位于 `main/manager-web/`。前端、Java API、Python 服务、测试与运维共用 Server 的 Git 仓库和 `Dev` 分支。
+Vue 3 是本项目唯一的网页前端，源码位于 `main/manager-web/`。前端、Java API、Python 服务、测试与运维共用 Server 的 Git 仓库和 `master` 分支。
 
 工作区 `frontend/` 是本目录的分类链接；`main/manager-web-next` 也是指向本目录的兼容链接。当前前端没有独立的 `.git` 或远程。
 

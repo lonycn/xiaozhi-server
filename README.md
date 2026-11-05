@@ -1,6 +1,6 @@
 # Xiaozhi Server
 
-本仓库统一管理 Vue 3 管理网页、Java API，以及 Python 语音和 AI 服务。日常开发使用 `Dev` 分支，远程为 [lonycn/xiaozhi-server](https://github.com/lonycn/xiaozhi-server)。
+本仓库统一管理 Vue 3 管理网页、Java API，以及 Python 语音和 AI 服务。日常开发使用 `master` 分支，远程为 [lonycn/xiaozhi-server](https://github.com/lonycn/xiaozhi-server)。
 
 当前前端是 Vue 3 + Vite + Pinia + Element Plus，标准目录为 `main/manager-web/`。Vue 2 已移出当前代码树，仅保留在本地归档与 Git 历史中，不参与安装、构建或部署。
 

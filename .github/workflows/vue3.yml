@@ -1,7 +1,7 @@
 name: Server Vue 3 frontend
 on:
   push:
-    branches: [Dev, main]
+    branches: [master]
     paths:
       - 'main/manager-web/**'
       - 'Dockerfile-web'

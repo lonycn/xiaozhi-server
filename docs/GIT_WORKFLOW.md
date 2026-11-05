@@ -7,7 +7,7 @@
 | Server | `backend/xiaozhi-server/repo/` | `main/manager-web/` Vue 3、Java API、Python 服务、运维和文档 | `https://github.com/lonycn/xiaozhi-server.git` |
 | 硬件固件 | `firmware/xiaozhi/` | ESP-IDF C/C++、屏幕、音频与板型 | `https://github.com/lonycn/xiaozhi-esp32.git` |
 
-日常分支均为 `Dev`，默认推送远程均为 `origin`。Server 的工作区分类入口 `frontend/`、`backend/manager-api/` 和 `backend/services/` 识别到同一个 Git 根目录。
+Server 的日常主分支为 `master`，GitHub 默认分支同步为 `master`；硬件仓库仍使用其 `Dev` 分支。默认推送远程为 `origin`。Server 的工作区分类入口 `frontend/`、`backend/manager-api/` 和 `backend/services/` 识别到同一个 Git 根目录。
 
 ## 查看和提交
 
@@ -27,7 +27,7 @@ git diff --cached
 git commit -m "说明本次变更"
 ```
 
-既有未提交工作保留，不混入发布提交。日常推送目标为 `origin/Dev`；`main` 保留上游基线，正式合入通过评审后的合并请求完成。
+既有未提交工作保留，不混入发布提交。Server 的日常推送目标为 `origin/master`。原 `main` 的有效更新已合入主线；旧分支保留历史用途，后续功能通过合并请求进入 `master`。
 
 ## 历史和兼容路径
 

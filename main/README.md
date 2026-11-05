@@ -1,6 +1,6 @@
 # Server 模块
 
-本目录的网页前端与后端统一由 `xiaozhi-server` Git 仓库管理，当前开发分支为 `Dev`。
+本目录的网页前端与后端统一由 `xiaozhi-server` Git 仓库管理，当前开发分支为 `master`。
 
 | 目录 | 职责 | 入口 |
 | --- | --- | --- |

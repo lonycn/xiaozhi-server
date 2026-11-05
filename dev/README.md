@@ -2,7 +2,7 @@
 
 Vue 3 已整合到本仓库 `main/manager-web/`，替代 Vue 2；网页与后端共用 Server Git。工作区 `frontend/` 和旧 `main/manager-web-next` 是兼容链接。仅启动后端可用 `python3 dev/manage.py up --no-frontend`；Git 与构建见 [统一仓库说明](../docs/GIT_WORKFLOW.md)。
 
-日常开发与测试统一使用 Git 分支 **`Dev`**；`main` 保留上游基线，稳定后再从 Dev 提交可审核的合并请求。修改提交、数据库迁移与测试记录均跟随 Dev 保存。
+日常开发与测试统一使用 Git 主分支 **`master`**，GitHub 默认分支也为 `master`。前后端、数据库迁移与测试记录统一提交到本仓库；后续功能通过合并请求进入主线。本文中的 Dev 指本地开发运行环境。
 
 本机页面：<http://127.0.0.1:18894/#/conversations>。后台入口：<http://127.0.0.1:18894/#/home>。
 

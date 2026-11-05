@@ -1,6 +1,6 @@
 # Server Components
 
-The web frontend and backend share the `xiaozhi-server` Git repository and the `Dev` development branch.
+The web frontend and backend share the `xiaozhi-server` Git repository and the `master` development branch.
 
 | Directory | Responsibility |
 | --- | --- |

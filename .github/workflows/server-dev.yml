@@ -1,8 +1,8 @@
-name: Dev backend
+name: Server backend
 
 on:
   push:
-    branches: [Dev]
+    branches: [master]
     paths:
       - 'main/manager-api/**'
       - 'main/xiaozhi-server/ai_worker/**'
@@ -76,6 +76,9 @@ jobs:
       - name: Package and run tests
         working-directory: main/manager-api
         run: mvn -B -DskipTests=false -DargLine=-Xmx512m package
+      - name: Verify base integration tests ran
+        working-directory: main/manager-api
+        run: bash scripts/check-integration-tests.sh
 
   python:
     name: Python workers and Dev tests
@@ -91,10 +94,11 @@ jobs:
             main/xiaozhi-server/ai_worker/requirements.txt
             main/xiaozhi-server/realtime_worker/requirements.txt
             main/xiaozhi-server/esp32_gateway/requirements.txt
+            main/xiaozhi-server/media_worker/requirements.txt
       - name: Install Opus runtime
         run: sudo apt-get update && sudo apt-get install -y libopus0
       - name: Install pinned worker dependencies
-        run: python -m pip install -r main/xiaozhi-server/ai_worker/requirements.txt -r main/xiaozhi-server/realtime_worker/requirements.txt -r main/xiaozhi-server/esp32_gateway/requirements.txt
+        run: python -m pip install -r main/xiaozhi-server/ai_worker/requirements.txt -r main/xiaozhi-server/realtime_worker/requirements.txt -r main/xiaozhi-server/esp32_gateway/requirements.txt -r main/xiaozhi-server/media_worker/requirements.txt
       - name: Run AI worker tests
         working-directory: main/xiaozhi-server
         run: python -m unittest discover -s tests -p 'test_ai_worker*.py'
@@ -104,6 +108,9 @@ jobs:
       - name: Run ESP32 protocol and gateway tests
         working-directory: main/xiaozhi-server
         run: python -m unittest discover -s tests -t . -p 'test_esp32*.py'
+      - name: Run media worker tests
+        working-directory: main/xiaozhi-server
+        run: python -m unittest discover -s tests -p 'test_media_worker*.py'
       - name: Run Dev tests
         env:
           XIAOZHI_AI_WORKER_PYTHON: python

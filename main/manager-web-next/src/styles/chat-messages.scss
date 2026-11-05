@@ -1,0 +1,58 @@
+@mixin thread {
+  .chat-message {
+    --message-background: #f5f6f8;
+    --message-border: #e5e9ef;
+  }
+  .chat-message.sender-user { --message-background: #eef5ff; --message-border: #dce8f8; }
+  .chat-message.sender-assistant { --message-background: #f1f8f5; --message-border: #dfede6; }
+  .chat-message.sender-support_agent { --message-background: #fff8ed; --message-border: #f1e4ce; }
+  .chat-message.sender-expert { --message-background: #f7f3fc; --message-border: #e9dff5; }
+  .chat-message.own-message { --message-background: #e7f1ff; --message-border: #b6d5fa; }
+  .chat-message .thread-body .thread-bubble {
+    background: var(--message-background);
+    border: 1px solid var(--message-border);
+  }
+  .chat-message .message-self-label {
+    color: #2563a8;
+    background: #e4efff;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: var(--admin-font-xs);
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  @media (min-width: 761px) {
+    .chat-message,
+    .chat-message.message-row,
+    .chat-message.history-message,
+    .chat-message.incoming,
+    .chat-message.from-user,
+    .chat-message.staff-message {
+      display: flex;
+      flex-direction: row;
+      justify-content: flex-start;
+      align-items: flex-start;
+      width: 100%;
+      max-width: none;
+      margin-inline: 0;
+      gap: 12px;
+      text-align: left;
+    }
+    .chat-message .thread-avatar { order: -1; margin-top: 0; }
+    .chat-message .thread-body { flex: 1; min-width: 0; max-width: none; text-align: left; }
+    .chat-message .thread-body .thread-meta {
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 7px;
+      text-align: left;
+      font-size: var(--admin-font-xs);
+      color: var(--el-text-color-secondary, #909399);
+    }
+    .chat-message .thread-meta > span { margin-left: 0; }
+    .chat-message .thread-body .thread-bubble { display: block; width: 100%; max-width: none; border-radius: 0 9px 9px 9px; }
+    .chat-message .thread-body .thread-status { text-align: left; }
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createMediaSession } from '../src/media/mediaSession.mjs';
+import { createMediaSession, mediaErrorKey } from '../src/media/mediaSession.mjs';
 const member = (user_id,role,generation=1,consent={microphone:true,camera:false}) => ({user_id,role,room_generation:generation,status:'accepted',consent});
 const session = (extras={}) => ({id:'7',conversation_id:'c',request_id:'r',status:'connecting',control_epoch:2,current_generation:1,preparing_generation:null,agent_user_id:'agent',participants:[member('customer','customer'),member('agent','agent')],...extras});
 function harness(initial=session(), user='customer') {
@@ -10,6 +10,10 @@ function harness(initial=session(), user='customer') {
   return {owner,client,transports,factory,setNext(value){next=value;}};
 }
 describe('B5 media lifecycle and transfer fencing',()=>{
+  it('distinguishes staff and customer busy errors',()=>{
+    expect(mediaErrorKey({status:409,code:'MEDIA_AGENT_BUSY'})).toBe('media.agentBusy');
+    expect(mediaErrorKey({status:409,code:'MEDIA_CUSTOMER_BUSY'})).toBe('media.customerBusy');
+  });
   it('keeps a reload disconnected until explicit user reconnection and only requests agreed sources',async()=>{
     const h=harness();await h.owner.load(session());await h.owner.refresh();expect(h.client.token).not.toHaveBeenCalled();expect(h.factory).not.toHaveBeenCalled();
     await h.owner.reconnect({microphone:true,camera:true});expect(h.transports[0].connect).toHaveBeenCalledWith('wss://media.test','secret-in-memory',{microphone:true,camera:false});expect(h.owner.snapshot().session.status).toBe('connecting');h.owner.dispose();

@@ -46,3 +46,20 @@ describe('expert collaboration layout', () => {
     await wrapper.setProps({draftRows:[],writable:false}); expect(wrapper.findAll('li button')[1].attributes('disabled')).toBeDefined(); wrapper.unmount();
   });
 });
+
+it('shows unread message counts and new request markers without changing claim or selection behavior',async()=>{
+ const active={request_id:'a',conversation_id:'c',status:'active'},queued={request_id:'q',conversation_id:'q-c',status:'queued'};
+ const wrapper=mount(ExpertContactList,{props:{assigned:[active],queue:[queued],unreadCounts:{a:104},newRequests:{q:{kind:'queue'}},accepting:true},global});
+ expect(wrapper.find('.contact-unread').text()).toBe('99+');expect(wrapper.find('.contact-new').text()).toBe('supportNotifications.new');
+ await wrapper.findAll('.contact-main')[0].trigger('click');expect(wrapper.emitted('select')[0][0]).toEqual(active);
+ await wrapper.find('.claim').trigger('click');expect(wrapper.emitted('claim')[0][0]).toEqual(queued);
+ await wrapper.setProps({unreadCounts:{},newRequests:{}});expect(wrapper.find('.contact-unread').exists()).toBe(false);expect(wrapper.find('.contact-new').exists()).toBe(false);wrapper.unmount();
+});
+it('pins the most recent message above older requests and shows its preview while retaining the selection',async()=>{
+ const assigned=[{request_id:'old',conversation_id:'a',status:'active',requested_at:'2026-11-04T00:00:00Z'},{request_id:'new',conversation_id:'b',status:'active',requested_at:'2026-11-04T01:00:00Z'}];
+ const wrapper=mount(ExpertContactList,{props:{assigned,selectedId:'new',activity:{old:{at:Date.parse('2026-11-04T02:00:00Z'),preview:{type:'image',text:''}}},unreadCounts:{old:1}},global});
+ expect(wrapper.find('.contact').classes()).toContain('unread');expect(wrapper.find('.contact-preview').text()).toBe('supportNotifications.preview_image');
+ expect(wrapper.find('.contact.selected strong').exists()).toBe(true);expect(wrapper.findAll('.contact-main')[0].attributes('aria-pressed')).toBe('false');
+ await wrapper.setProps({activity:{new:{at:Date.parse('2026-11-04T03:00:00Z'),preview:{type:'text',text:'压力恢复正常'}}}});
+ expect(wrapper.find('.contact-preview').text()).toBe('压力恢复正常');expect(wrapper.find('.contact').classes()).toContain('selected');wrapper.unmount();
+});

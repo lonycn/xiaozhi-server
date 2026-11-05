@@ -36,3 +36,28 @@ describe('support API and precision', () => {
   });
 
 });
+
+it('keeps original list calls compatible and sends explicit role filters and precise transfer IDs', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue({ ok:true, status:200, json:async()=>({code:0,data:{}}) });
+  const client = createSupportClient({baseUrl:'',getToken:()=>'',onUnauthorized:vi.fn(),fetchImpl});
+  await client.queue('9223372036854775806');
+  await client.queue('0','support_agent'); await client.assigned('0','expert');
+  const payload={client_request_id:'stable',service_type:'expert',target_agent_user_id:'9223372036854775806',reason:'诊断'};
+  await client.transfer('r/1',payload);
+  expect(fetchImpl.mock.calls[0][0]).toBe('/api/v1/support/queue?before=9223372036854775806&limit=50');
+  expect(fetchImpl.mock.calls[1][0]).toContain('service_type=support_agent');
+  expect(fetchImpl.mock.calls[2][0]).toContain('service_type=expert');
+  expect(fetchImpl.mock.calls[3][0]).toBe('/api/v1/support/requests/r%2F1/transfer');
+  expect(JSON.parse(fetchImpl.mock.calls[3][1].body)).toEqual(payload);
+});
+it('treats application permission errors as forbidden even over HTTP 200', async () => {
+  const client=createSupportClient({baseUrl:'',getToken:()=>'',onUnauthorized:vi.fn(),errorMessage:supportErrorKey,fetchImpl:vi.fn().mockResolvedValue({ok:true,status:200,json:async()=>({code:403,msg:'SUPPORT_ROLE_REQUIRED'})})});
+  await expect(client.queue('0','expert')).rejects.toMatchObject({status:403,message:'support.errorPermission'});
+});
+
+it('sends an explicit business for each reception preference and heartbeat',async()=>{
+ const fetchImpl=vi.fn().mockResolvedValue({ok:true,status:200,json:async()=>({code:0,data:{}})});
+ const client=createSupportClient({baseUrl:'',getToken:()=>'',onUnauthorized:vi.fn(),fetchImpl});const signal=new AbortController().signal;
+ await client.presence(true,'expert',signal);await client.presence(false,'support_agent',signal);
+ expect(fetchImpl.mock.calls.map(call=>JSON.parse(call[1].body))).toEqual([{accepting:true,service_type:'expert'},{accepting:false,service_type:'support_agent'}]);
+});

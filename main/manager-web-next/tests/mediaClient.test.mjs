@@ -13,3 +13,9 @@ describe('B5 public HTTP contracts',()=>{
  });
  it('clears bearer authentication on a 401 without exposing raw server content',async()=>{const clear=vi.fn(),client=createMediaClient({baseUrl:'/x',getToken:()=>'',fetchImpl:async()=>response(null,401),onUnauthorized:clear});await expect(client.invitations()).rejects.toMatchObject({status:401,message:'MEDIA_REQUEST_FAILED'});expect(clear).toHaveBeenCalledTimes(1);});
 });
+
+it('filters transfer availability by the current reception business',async()=>{
+ const fetchImpl=vi.fn(async()=>response({items:[]}));const client=createMediaClient({baseUrl:'',getToken:()=>'',fetchImpl});
+ await client.experts('0',undefined,'expert');await client.experts('0',undefined,'support_agent');
+ expect(fetchImpl.mock.calls.map(call=>call[0])).toEqual(['/api/v1/support/media-experts?after=0&limit=50&service_type=expert','/api/v1/support/media-experts?after=0&limit=50&service_type=support_agent']);
+});

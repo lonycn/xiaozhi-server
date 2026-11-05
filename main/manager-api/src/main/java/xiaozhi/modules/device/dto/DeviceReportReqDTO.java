@@ -130,6 +130,9 @@ public class DeviceReportReqDTO implements Serializable {
         @Schema(description = "板子类型")
         private String type;
 
+        @Schema(description = "精确构建变体，受控固件发布要求匹配")
+        private String name;
+
         @Schema(description = "连接的 Wi-Fi SSID")
         private String ssid;
 

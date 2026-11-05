@@ -104,17 +104,17 @@
             </div>
             <div style="
                 font-weight: 400;
-                font-size: 14px;
+                font-size: var(--admin-font-base);
                 text-align: left;
                 color: #5778ff;
                 display: flex;
                 justify-content: space-between;
                 margin-top: 20px;
               ">
-              <div v-if="allowUserRegister" style="cursor: pointer" @click="goToRegister">
+              <div v-if="allowUserRegister && !deviceHistoryOnly" style="cursor: pointer" @click="goToRegister">
                 {{ $t("login.register") }}
               </div>
-              <div style="cursor: pointer" @click="goToForgetPassword" v-if="enableMobileRegister">
+              <div style="cursor: pointer" @click="goToForgetPassword" v-if="enableMobileRegister && !deviceHistoryOnly">
                 {{ $t("login.forgetPassword") }}
               </div>
             </div>
@@ -134,7 +134,7 @@
               </el-tooltip>
             </div>
           </div>
-          <div style="font-size: 14px; color: #979db1">
+          <div style="font-size: var(--admin-font-base); color: #979db1">
             {{ $t("login.agreeTo") }}
             <div style="display: inline-block; color: #5778ff; cursor: pointer" @click="openPage('/user-agreement.html')">
               {{ $t("login.userAgreement") }}
@@ -169,6 +169,7 @@ export default {
     VersionFooter,
   },
   computed: {
+    deviceHistoryOnly() { return import.meta.env.VITE_DEVICE_HISTORY_ONLY === 'true'; },
     ...mapState({
       allowUserRegister: (state) => state.pubConfig.allowUserRegister,
       enableMobileRegister: (state) => state.pubConfig.enableMobileRegister,
@@ -314,7 +315,8 @@ export default {
       Api.user.getUserInfo(({ data }) => {
         if (data.code === 0) {
           this.$store.commit("setUserInfo", data.data);
-          goToPage("/home");
+          if (this.deviceHistoryOnly) this.$router.replace({ name: 'DeviceConversations', query: this.$route.query });
+          else goToPage("/home");
         } else {
           showDanger("用户信息获取失败");
         }
@@ -418,7 +420,7 @@ button.login-btn:disabled { opacity: .65; cursor: wait; }
 .current-language-text {
   margin-left: 4px;
   margin-right: 4px;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #3d4566;
 }
 

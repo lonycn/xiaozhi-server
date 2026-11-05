@@ -1,0 +1,54 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611021400-esp32-controlled-firmware
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE esp32_firmware_release (
+                id VARCHAR(32) PRIMARY KEY,
+                idempotency_key VARCHAR(100) NOT NULL UNIQUE,
+                request_hash VARCHAR(64) NOT NULL,
+                version VARCHAR(32) NOT NULL,
+                board_type VARCHAR(80) NOT NULL,
+                board_name VARCHAR(120) NOT NULL,
+                chip VARCHAR(20) NOT NULL,
+                min_flash_size INT NOT NULL,
+                app_sha256 VARCHAR(64) NOT NULL,
+                app_size INT NOT NULL,
+                assets_sha256 VARCHAR(64) NOT NULL,
+                assets_size INT NOT NULL,
+                assets_version VARCHAR(64) NOT NULL,
+                source_sha VARCHAR(40) NOT NULL,
+                idf_version VARCHAR(40) NOT NULL,
+                environment VARCHAR(16) NOT NULL,
+                state VARCHAR(16) NOT NULL,
+                created_by BIGINT NOT NULL,
+                created_at BIGINT NOT NULL,
+                UNIQUE KEY uq_esp32_firmware_variant_version(board_name, version)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE esp32_firmware_assignment (
+                id VARCHAR(32) PRIMARY KEY,
+                release_id VARCHAR(32) NOT NULL,
+                device_id VARCHAR(32) NOT NULL,
+                owner_id BIGINT NOT NULL,
+                binding_stamp VARCHAR(64) NOT NULL,
+                update_policy VARCHAR(16) NOT NULL,
+                allow_downgrade BOOLEAN NOT NULL DEFAULT FALSE,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                last_state VARCHAR(24) NOT NULL DEFAULT 'assigned',
+                expires_at BIGINT NOT NULL,
+                created_by BIGINT NOT NULL,
+                created_at BIGINT NOT NULL,
+                KEY ix_esp32_firmware_device(device_id,enabled,created_at)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE esp32_firmware_event (
+                id VARCHAR(32) PRIMARY KEY,
+                assignment_id VARCHAR(32) NOT NULL,
+                event_key VARCHAR(100) NOT NULL,
+                state VARCHAR(24) NOT NULL,
+                version VARCHAR(32) NOT NULL,
+                created_at BIGINT NOT NULL,
+                UNIQUE KEY uq_esp32_firmware_receipt(assignment_id,event_key),
+                KEY ix_esp32_firmware_events(assignment_id,created_at)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

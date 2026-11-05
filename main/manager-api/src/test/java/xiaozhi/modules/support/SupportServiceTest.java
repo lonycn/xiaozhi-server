@@ -15,6 +15,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import xiaozhi.modules.conversation.*;
+import xiaozhi.modules.conversation.ConversationModels.*;
 import xiaozhi.modules.support.SupportModels.*;
 
 class SupportServiceTest {
@@ -201,6 +202,32 @@ class SupportServiceTest {
         verifyNoInteractions(conversations);
     }
 
+    @Test void profileRolesRejectUnknownEmptyDuplicateAndMissingPrimaryGrantsBeforeStorage() {
+        for(var roles:List.of(List.of("admin"),List.<String>of(),List.of("expert","expert"),List.of("support_agent")))
+            assertEquals(400,status(()->service.upsertAgent(1L,2L,new AgentUpdate("expert",true,1,roles))));
+        assertEquals(0,jdbc.reads);
+    }
+
+    @Test void sendUsesRequestServiceTypeEvenWhenLegacyPrimaryRoleDiffers() {
+        jdbc.requestStatus="active";jdbc.assignee=2L;
+        service.send(2L,ID,new SendMessage("test",List.of(new MessagePart("text","reply",null,null,null,null,null,null))));
+        verify(conversations).sendSupport(eq(2L),eq(ID),any(),eq("support_agent"));
+    }
+
+    @Test void externalIdentityCannotBecomeStaffEvenIfUnderlyingUserHasProfile() {
+        var request=new org.springframework.mock.web.MockHttpServletRequest();
+        request.setAttribute(xiaozhi.modules.externalidentity.ExternalIdentityService.ATTRIBUTE,
+                new xiaozhi.modules.externalidentity.ExternalModels.Principal(1,"hash",1,2,"issuer","subject",null,null,Instant.now().plusSeconds(60)));
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(new org.springframework.web.context.request.ServletRequestAttributes(request));
+        try {
+            assertEquals(403,status(()->service.queue(2L,0,50)));
+            assertEquals(403,status(()->service.assigned(2L,0,50)));
+            assertEquals(403,status(()->service.claim(2L,ID)));
+            assertEquals(403,status(()->service.transfer(2L,ID,new Transfer("key","expert",null,null))));
+            assertEquals(403,status(()->service.get(2L,ID)));
+        } finally { org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes(); }
+    }
+
     /** In-memory JDBC boundary only for authorization branches; real MySQL tests cover locking/SQL. */
     private static final class Store extends JdbcTemplate {
         int reads,occupied;
@@ -215,8 +242,8 @@ class SupportServiceTest {
             Map<String,Object> values=new HashMap<>();
             values.put("id",ID); values.put("conversation_id",ID); values.put("owner_user_id",1L);
             values.put("state",conversationState); values.put("last_seq",0L); values.put("last_event_seq",3L);
-            values.put("user_id",2L); values.put("role","expert"); values.put("enabled",profileEnabled);
-            values.put("capacity_text",3); values.put("accepting",true);
+            values.put("user_id",2L); values.put("role","expert"); values.put("roles_json","[\"support_agent\",\"expert\"]"); values.put("enabled",profileEnabled);
+            values.put("capacity_text",3); values.put("accepting",true); values.put("expert_accepting",true);
             values.put("list_sequence",1L); values.put("client_request_id","key");
             values.put("status",requestStatus); values.put("requested_mode","text");
             values.put("target_agent_user_id",target); values.put("assigned_agent_user_id",assignee);

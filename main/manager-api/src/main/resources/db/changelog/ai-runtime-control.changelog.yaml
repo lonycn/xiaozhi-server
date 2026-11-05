@@ -1,0 +1,31 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611020900-ai-runtime-control
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE IF NOT EXISTS ai_runtime_gate (
+                id TINYINT PRIMARY KEY,
+                CHECK(id=1)
+              ) ENGINE=InnoDB;
+              INSERT IGNORE INTO ai_runtime_gate(id) VALUES(1);
+              CREATE TABLE IF NOT EXISTS ai_runtime_admission (
+                sequence BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                flow VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                resource_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                owner_user_id BIGINT NOT NULL,
+                request_kind VARCHAR(8) NOT NULL,
+                active TINYINT NOT NULL DEFAULT 1,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                expires_at DATETIME(3) NOT NULL,
+                released_at DATETIME(3) NULL,
+                active_slot TINYINT GENERATED ALWAYS AS(CASE WHEN active=1 THEN 1 ELSE NULL END) STORED,
+                UNIQUE KEY uk_runtime_active(flow,resource_id,active_slot),
+                KEY ix_runtime_window(created_at,owner_user_id),
+                KEY ix_runtime_active(active,owner_user_id),
+                KEY ix_runtime_resource(flow,resource_id,request_kind),
+                CHECK(flow IN ('AI','REALTIME','MATERIAL','SPEECH')),
+                CHECK(request_kind IN ('create','retry')),
+                CHECK(active IN (0,1))
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

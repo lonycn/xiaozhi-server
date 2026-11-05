@@ -1,16 +1,15 @@
-"""Current boundary: documented provider capability, no worker execution authority.
+"""Default-off boundary; only an authorized Java task may select the tool loop.
 
-Keep tools disabled until Java has a realtime-session ledger and cancel fencing.
-This module recognizes proposals only to reject them; it never parses arguments,
-executes callbacks, or returns fabricated function results.
+This legacy guard never executes a callback or fabricates function results.
 """
 from .config import MODEL
 from .control import Fault
 
 
-def capability():
+def capability(authorized=False):
     return {'model': MODEL, 'provider_function_calling': 'documented',
-            'worker_function_calling': 'disabled', 'error_code': 'UNSUPPORTED_TOOL'}
+            'worker_function_calling': 'enabled_for_authorized_task' if authorized else 'disabled',
+            'error_code': None if authorized else 'UNSUPPORTED_TOOL'}
 
 
 def require_disabled(tools):

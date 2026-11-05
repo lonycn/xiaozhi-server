@@ -264,7 +264,7 @@ export default {
   font-weight: 600;
   color: #606266;
   text-align: right;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   white-space: nowrap;
   line-height: 32px;
 }
@@ -325,7 +325,7 @@ export default {
   justify-content: center;
   padding: 10px;
   color: #909399;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
 }
 
 .no-header-text {

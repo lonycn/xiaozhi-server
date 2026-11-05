@@ -1,5 +1,6 @@
 import os
 import asyncio
+import copy
 import yaml
 from collections.abc import Mapping
 from config.manage_api_client import (
@@ -33,17 +34,20 @@ async def load_config():
         return cached_config
 
     default_config_path = get_project_dir() + "config.yaml"
-    custom_config_path = get_project_dir() + "data/.config.yaml"
+    custom_config_path = os.environ.get("XIAOZHI_CONFIG_FILE") or get_project_dir() + "data/.config.yaml"
 
     # 加载默认配置
     default_config = read_config(default_config_path)
     custom_config = read_config(custom_config_path)
 
-    if custom_config.get("manager-api", {}).get("url"):
+    gateway = custom_config.get("server", {}).get("esp32", {})
+    local_providers = gateway.get("enabled") is True and gateway.get("local_providers") is True
+    if custom_config.get("manager-api", {}).get("url") and not local_providers:
         config = await get_config_from_api_async(custom_config)
     else:
         # 合并配置
         config = merge_configs(default_config, custom_config)
+        config["read_config_from_api"] = False
     # 初始化目录
     ensure_directories(config)
 
@@ -67,17 +71,17 @@ async def get_config_from_api_async(config):
         "url": config["manager-api"].get("url", ""),
         "secret": config["manager-api"].get("secret", ""),
     }
-    auth_enabled = config_data.get("server", {}).get("auth", {}).get("enabled", False)
-    # server的配置以本地为准
-    if config.get("server"):
-        config_data["server"] = {
-            "ip": config["server"].get("ip", ""),
-            "port": config["server"].get("port", ""),
-            "http_port": config["server"].get("http_port", ""),
-            "vision_explain": config["server"].get("vision_explain", ""),
-            "auth_key": config["server"].get("auth_key", ""),
-        }
-    config_data["server"]["auth"] = {"enabled": auth_enabled}
+    remote_server = copy.deepcopy(config_data.get("server", {}))
+    local_server = copy.deepcopy(config.get("server", {}))
+    # Network routes, gateway credentials and rollout policy are operator-owned.
+    # Never accept an ESP32 internal endpoint or credential from remote/device data.
+    remote_server.pop("esp32", None)
+    remote_auth = remote_server.get("auth", {})
+    local_auth = local_server.get("auth", {})
+    remote_server.update(local_server)
+    remote_server["auth"] = {**remote_auth, **local_auth}
+    remote_server["auth"]["enabled"] = bool(remote_auth.get("enabled") or local_auth.get("enabled"))
+    config_data["server"] = remote_server
     # 如果服务器没有prompt_template，则从本地配置读取
     if not config_data.get("prompt_template"):
         config_data["prompt_template"] = config.get("prompt_template")

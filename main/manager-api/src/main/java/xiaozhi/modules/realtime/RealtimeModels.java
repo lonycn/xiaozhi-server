@@ -48,10 +48,17 @@ public final class RealtimeModels {
     public record Usage(@JsonSerialize(using=NumberSerializer.class) @JsonDeserialize(using=IntegerReader.class) Long inputTokens,@JsonSerialize(using=NumberSerializer.class) @JsonDeserialize(using=IntegerReader.class) Long outputTokens,@JsonSerialize(using=NumberSerializer.class) @JsonDeserialize(using=IntegerReader.class) Long totalTokens) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record ProviderEvent(String leaseToken,@JsonDeserialize(using=IntegerReader.class) Long sequence,String providerEventId,String type,String providerSessionId,
-            String providerItemId,String responseId,String injectionId,String commandId,String text,String finishReason,Usage usage,String errorCode,String requestItemId) {
+            String providerItemId,String responseId,String injectionId,String commandId,String text,String finishReason,Usage usage,String errorCode,String requestItemId,
+            @JsonDeserialize(using=IntegerReader.class) @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Long turnGeneration,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String providerCallId,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String continuationId) {
         public ProviderEvent(String leaseToken,Long sequence,String providerEventId,String type,String providerSessionId,
                 String providerItemId,String responseId,String injectionId,String commandId,String text,String finishReason,Usage usage,String errorCode) {
-            this(leaseToken,sequence,providerEventId,type,providerSessionId,providerItemId,responseId,injectionId,commandId,text,finishReason,usage,errorCode,null);
+            this(leaseToken,sequence,providerEventId,type,providerSessionId,providerItemId,responseId,injectionId,commandId,text,finishReason,usage,errorCode,null,null,null,null);
+        }
+        public ProviderEvent(String leaseToken,Long sequence,String providerEventId,String type,String providerSessionId,
+                String providerItemId,String responseId,String injectionId,String commandId,String text,String finishReason,Usage usage,String errorCode,String requestItemId) {
+            this(leaseToken,sequence,providerEventId,type,providerSessionId,providerItemId,responseId,injectionId,commandId,text,finishReason,usage,errorCode,requestItemId,null,null,null);
         }
         @Override public String toString(){return "ProviderEvent[type="+type+", lease=REDACTED]";}
     }
@@ -59,7 +66,12 @@ public final class RealtimeModels {
     public record Session(String id,String conversationId,String status,@JsonSerialize(using=NumberSerializer.class) long controlEpoch,
             String model,Consent consent,String providerSessionId,@JsonSerialize(using=NumberSerializer.class) long lastEventSequence,
             String activeResponseId,String activeMessageId,String errorCode,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant createdAt,
-            @JsonFormat(shape=JsonFormat.Shape.STRING) Instant connectedAt,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant endedAt,String turnDetectionMode) { }
+            @JsonFormat(shape=JsonFormat.Shape.STRING) Instant connectedAt,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant endedAt,String turnDetectionMode,
+            @JsonSerialize(using=NumberSerializer.class) @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Long turnGeneration) {
+        public Session(String id,String conversationId,String status,long controlEpoch,String model,Consent consent,String providerSessionId,long lastEventSequence,String activeResponseId,String activeMessageId,String errorCode,Instant createdAt,Instant connectedAt,Instant endedAt,String turnDetectionMode) {
+            this(id,conversationId,status,controlEpoch,model,consent,providerSessionId,lastEventSequence,activeResponseId,activeMessageId,errorCode,createdAt,connectedAt,endedAt,turnDetectionMode,null);
+        }
+    }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Ticket(String sessionId,@JsonSerialize(using=NumberSerializer.class) long controlEpoch,String websocketUrl,String ticket,
             @JsonFormat(shape=JsonFormat.Shape.STRING) Instant expiresAt) {
@@ -74,7 +86,17 @@ public final class RealtimeModels {
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Task(String sessionId,String conversationId,@JsonSerialize(using=NumberSerializer.class) long controlEpoch,String leaseToken,String serverId,
             int leaseSeconds,String model,Consent consent,List<Context> context,@JsonSerialize(using=NumberSerializer.class) long contextSeq,
-            Limits limits,AudioFormat inputAudio,AudioFormat outputAudio,String turnDetectionMode) {
+            Limits limits,AudioFormat inputAudio,AudioFormat outputAudio,String turnDetectionMode,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY) List<JsonNode> tools,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) xiaozhi.modules.realtimetool.RealtimeToolModels.Policy toolPolicy,
+            @JsonSerialize(using=NumberSerializer.class) @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Long turnGeneration,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) xiaozhi.modules.realtimeinput.RealtimeInputModels.Policy materialPolicy) {
+        public Task(String sessionId,String conversationId,long controlEpoch,String leaseToken,String serverId,int leaseSeconds,String model,Consent consent,List<Context> context,long contextSeq,Limits limits,AudioFormat inputAudio,AudioFormat outputAudio,String turnDetectionMode,List<JsonNode> tools,xiaozhi.modules.realtimetool.RealtimeToolModels.Policy toolPolicy,Long turnGeneration){
+            this(sessionId,conversationId,controlEpoch,leaseToken,serverId,leaseSeconds,model,consent,context,contextSeq,limits,inputAudio,outputAudio,turnDetectionMode,tools,toolPolicy,turnGeneration,null);
+        }
+        public Task(String sessionId,String conversationId,long controlEpoch,String leaseToken,String serverId,int leaseSeconds,String model,Consent consent,List<Context> context,long contextSeq,Limits limits,AudioFormat inputAudio,AudioFormat outputAudio,String turnDetectionMode) {
+            this(sessionId,conversationId,controlEpoch,leaseToken,serverId,leaseSeconds,model,consent,context,contextSeq,limits,inputAudio,outputAudio,turnDetectionMode,null,null,null,null);
+        }
         @Override public String toString(){return "Task[sessionId="+sessionId+", lease=REDACTED]";}
     }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -87,9 +109,19 @@ public final class RealtimeModels {
     public record Command(String id,String sessionId,String responseId,String type,String status,String errorCode) { }
     public record Sent(Message message,Injection injection) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Pulse(boolean active,int leaseSeconds,List<Dispatch> injections,List<Command> commands) { }
+    public record Pulse(boolean active,int leaseSeconds,List<Dispatch> injections,List<Command> commands,
+            @JsonSerialize(using=NumberSerializer.class) @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Long turnGeneration,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) xiaozhi.modules.realtimeinput.RealtimeInputModels.Control inputControl,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) xiaozhi.modules.realtimeinput.RealtimeInputModels.Dispatch material) {
+        public Pulse(boolean active,int leaseSeconds,List<Dispatch> injections,List<Command> commands,Long turnGeneration){this(active,leaseSeconds,injections,commands,turnGeneration,null,null);}
+        public Pulse(boolean active,int leaseSeconds,List<Dispatch> injections,List<Command> commands){this(active,leaseSeconds,injections,commands,null);}
+    }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Receipt(@JsonSerialize(using=NumberSerializer.class) long sequence,Session session,String messageId,String messageStatus) { }
+    public record Receipt(@JsonSerialize(using=NumberSerializer.class) long sequence,Session session,String messageId,String messageStatus,
+            @JsonSerialize(using=NumberSerializer.class) @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Long turnGeneration,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String continuationId) {
+        public Receipt(long sequence,Session session,String messageId,String messageStatus){this(sequence,session,messageId,messageStatus,null,null);}
+    }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Page<T>(List<T> items,@JsonSerialize(using=NumberSerializer.class) long nextCursor,boolean hasMore) { }
 }

@@ -83,7 +83,7 @@ export default {
 }
 
 .add-agent-label {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   color: #475569;
   text-align: left;
   margin-bottom: 12px;
@@ -98,6 +98,6 @@ export default {
   height: 40px;
   border-radius: 8px;
   border-color: #e2e8f0;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 </style>

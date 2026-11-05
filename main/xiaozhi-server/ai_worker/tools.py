@@ -23,6 +23,49 @@ def supported(model):
         r'3\.8-omni-flash|3-vl-(?:plus|flash))(?:-[a-z0-9-]+)?', model))
 
 
+def input_modalities(task):
+    """Inspect actual verified inputs, never substitute a transcript for original audio."""
+    required = {'text'}
+    messages = task.get('messages', [])
+    if not isinstance(messages, list): raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+    for message in messages:
+        if not isinstance(message, dict): raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+        refs = message.get('attachments') or []
+        if not isinstance(refs, list): raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+        for ref in refs:
+            if not isinstance(ref, dict): raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+            variant = ref.get('variant')
+            if variant == 'display' or isinstance(variant, str) and variant.startswith('frame_'):
+                required.add('image')
+            elif variant == 'audio':
+                required.add('audio')
+        content = message.get('content')
+        if isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict): raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+                if part.get('type') == 'image_url':
+                    required.add('image')
+                elif part.get('type') == 'input_audio':
+                    required.add('audio')
+    return required
+
+
+def validate_modalities(task, supplied):
+    declared = supplied.get('input_modalities', ['text'])
+    if (not isinstance(declared, list) or not declared or len(declared) != len(set(declared))
+            or any(value not in ('text', 'image', 'audio') for value in declared)):
+        raise ProviderFailure('TOOL_PROTOCOL_ERROR')
+    required = input_modalities(task)
+    model = task.get('model', '')
+    native = {'text'}
+    if model == 'qwen3.8-flash' or re.fullmatch(r'qwen3-vl-(?:plus|flash)(?:-[a-z0-9-]+)?', model):
+        native.add('image')
+    elif model == 'qwen3.8-omni-flash':
+        native.update(('image', 'audio'))
+    if not required <= set(declared) or not required <= native:
+        raise ProviderFailure('MODEL_CAPABILITY_UNAVAILABLE')
+
+
 def policy(task):
     tools = task.get('tools')
     if not tools:
@@ -47,6 +90,7 @@ def policy(task):
         supplied = task.get('tool_policy') or {}
         if not isinstance(supplied, dict):
             raise ValueError()
+        validate_modalities(task, supplied)
         for key, cap in LIMITS.items():
             value = supplied.get(key, cap)
             if type(value) is not int or value < 1:
@@ -159,7 +203,7 @@ def result_messages(response, calls, maximum):
         messages = []
         for call in calls:
             result = mapped[call['provider_call_id']]
-            if (result['name'] != call['name'] or result['status'] not in ('succeeded', 'failed')
+            if (result['name'] != call['name'] or result['status'] not in ('succeeded', 'failed', 'unknown')
                     or not isinstance(result.get('output'), dict)
                     or (result.get('error_code') is not None and not isinstance(result['error_code'], str))):
                 raise ValueError()

@@ -277,7 +277,7 @@ export default {
 
     .format-tip {
       text-align: left;
-      font-size: 12px;
+      font-size: var(--admin-font-xs);
       color: #5778ff;
     }
 
@@ -296,7 +296,7 @@ export default {
       background: #3b82f6;
       border-color: #3b82f6;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: var(--admin-font-base);
       padding: 8px 16px;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       .upload-file-content {
@@ -319,7 +319,7 @@ export default {
     }
 
     .word-count {
-      font-size: 13px;
+      font-size: var(--admin-font-base);
       color: #64748b;
       font-weight: 500;
       transition: color 0.3s ease;

@@ -75,6 +75,14 @@ async def startToChat(conn: "ConnectionHandler", text):
     else:
         conn.current_speaker = None
 
+    gateway = getattr(conn, "esp32_gateway", None)
+    if gateway is not None:
+        from esp32_gateway.voice_controls import classify
+        if classify(actual_text):
+            await send_stt_message(conn, actual_text)
+            gateway.submit(actual_text)
+            return
+
     if conn.need_bind:
         await check_bind_device(conn)
         return
@@ -90,6 +98,14 @@ async def startToChat(conn: "ConnectionHandler", text):
     # manual 模式下不打断正在播放的内容
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
         await handleAbortMessage(conn)
+
+    # In gateway mode the fixed session executor owns the entire turn.
+    gateway = getattr(conn, "esp32_gateway", None)
+    if gateway is not None:
+        if gateway.mode == "ai_worker":
+            await send_stt_message(conn, actual_text)
+        gateway.submit(actual_text)
+        return
 
     # 首先进行意图分析，使用实际文本内容
     intent_handled = await handle_user_intent(conn, actual_text)

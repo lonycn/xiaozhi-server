@@ -67,7 +67,7 @@ class MediaPersistenceTest {
         db.execute("CREATE TABLE sys_user(id BIGINT PRIMARY KEY,status TINYINT NOT NULL,super_admin TINYINT NOT NULL DEFAULT 0,username VARCHAR(80))");db.execute("CREATE TABLE ai_agent(id VARCHAR(32) PRIMARY KEY,user_id BIGINT)");db.execute("CREATE TABLE ai_agent_chat_history(id BIGINT PRIMARY KEY,content VARCHAR(100))");db.update("INSERT INTO ai_agent_chat_history VALUES(1,'B5-legacy-unchanged')");
         for(long user:new long[]{7,8,71,72,73,74,75,76,77,78})db.update("INSERT INTO sys_user(id,status,username) VALUES(?,1,?)",user,"media-fixture-"+user);
         for(String name:List.of("conversation","support","attachments","annotations","support-media","support-media-source-binding"))try(var connection=source.getConnection();var migration=new Liquibase("db/changelog/"+name+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){migration.update(new Contexts());migration.update(new Contexts());}
-        assertEquals(6,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));for(long user:new long[]{71,72,73,74,75,76,77,78})db.update("INSERT INTO support_agent_profile(user_id,role,capacity_text,accepting,presence_expires_at) VALUES(?,'expert',?,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))",user,user==75?1:20);
+        assertEquals(8,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));for(long user:new long[]{71,72,73,74,75,76,77,78})db.update("INSERT INTO support_agent_profile(user_id,role,capacity_text,expert_accepting,expert_presence_expires_at) VALUES(?,'expert',?,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))",user,user==75?1:20);
         var manager=new DataSourceTransactionManager(source);var dao=new ConversationDao(db);store=new MediaStore(db,manager);policy=new MediaPolicy(store,dao);network=new FakeNetwork();livekit=new LiveKitAdapter(new Config("http://fixture.invalid","ws://fixture.invalid",API_KEY,API_SECRET,"b5-test-"),JSON,policy,Clock.systemUTC(),network);
         environment=new MockEnvironment().withProperty("support-media.livekit.room-prefix","b5-test-").withProperty("features.support-media-enabled","true");media=new MediaService(store,policy,livekit,dao,JSON,environment);maintenance=new MediaMaintenance(media,store,policy,livekit);
         conversations=new ConversationService(dao,JSON,manager);support=new SupportService(db,JSON,manager,conversations);support.setMediaHooksForTests(media);webhooks=new MediaWebhookController(livekit,store,policy,media);
@@ -77,15 +77,38 @@ class MediaPersistenceTest {
         network.rooms.put("aimeet-existing-preserve",new ConcurrentHashMap<>(Map.of("sid","foreign","participants",new ArrayList<>())));
     }
     static String key(){return UUID.randomUUID().toString();}
-    static String request(long agent,boolean active){String c=conversations.create(7L,new CreateConversation("B5 fixture",null)).id(),request=key().replace("-","");db.update("INSERT INTO support_request(id,conversation_id,client_request_id,request_hash,status,assigned_agent_user_id) VALUES(?,?,?,'fixture',?,?)",request,c,key(),active?"active":"queued",active?agent:null);if(active)db.update("INSERT INTO support_assignment(id,request_id,conversation_id,agent_user_id) VALUES(?,?,?,?)",key().replace("-",""),request,c,agent);return request;}
+    static String request(long agent,boolean active){return request(7L,agent,active);}
+    static String request(long owner,long agent,boolean active){String c=conversations.create(owner,new CreateConversation("B5 fixture",null)).id(),request=key().replace("-","");db.update("INSERT INTO support_request(id,conversation_id,client_request_id,request_hash,status,assigned_agent_user_id,service_type) VALUES(?,?,?,'fixture',?,?,'expert')",request,c,key(),active?"active":"queued",active?agent:null);if(active)db.update("INSERT INTO support_assignment(id,request_id,conversation_id,agent_user_id,service_type) VALUES(?,?,?,?,'expert')",key().replace("-",""),request,c,agent);return request;}
     static Session create(long agent,Consent consent){return media.create(7L,new Create(request(agent,true),key(),consent.camera()?"video":"audio",consent));}
     static Session accepted(Session s,long agent,Consent c){s=media.accept(agent,s.id(),new Accept(s.controlEpoch(),c));maintenance.processOutbox();return media.get(7L,s.id());}
     static void join(Session s,int generation){var r=store.generation(Long.parseLong(s.id()),generation);List<Map<String,Object>> peers=new ArrayList<>();for(var m:store.members(number(r,"id"))){List<Map<String,Object>> tracks=new ArrayList<>();if(yes(m,"consent_microphone"))tracks.add(Map.of("sid","TR_m"+m.get("id"),"source","MICROPHONE","muted",false));if(yes(m,"consent_camera"))tracks.add(Map.of("sid","TR_c"+m.get("id"),"source","CAMERA","muted",false));peers.add(Map.of("sid","PA_"+m.get("id"),"identity",m.get("identity"),"state","ACTIVE","tracks",tracks));}network.rooms.get(string(r,"room_name")).put("participants",peers);}
     static Session ready(Session s,int generation,boolean receiving){var r=store.generation(Long.parseLong(s.id()),generation);var peers=store.members(number(r,"id"));for(int i=0;i<2;i++){var own=peers.get(i);var other=peers.get(1-i);s=media.ready(number(own,"user_id"),s.id(),new Ready(s.controlEpoch(),generation,"PA_"+own.get("id"),"PA_"+other.get("id"),true,receiving,false));}return s;}
     static Session active(long agent,Consent c){Session s=accepted(create(agent,c),agent,c);join(s,1);return ready(s,1,true);}
     static void end(Session s){s=media.get(7L,s.id());media.end(7L,s.id(),new End(s.controlEpoch(),null));maintenance.processOutbox();assertEquals("ended",media.get(7L,s.id()).status());}
+    @Test @Order(0) void transferAvailabilityUsesTheRequestedBusinessOnly() {
+        db.update("UPDATE support_agent_profile SET roles_json=JSON_ARRAY('support_agent','expert'),accepting=0,expert_accepting=1 WHERE user_id=78");
+        try {
+            assertDoesNotThrow(()->policy.textCapacity(78,"expert"));
+            assertThrows(ConversationProblem.class,()->policy.textCapacity(78,"support_agent"));
+            assertEquals(true,media.experts(7L,0,100,"expert").items().stream().filter(r->"78".equals(r.get("user_id"))).findFirst().orElseThrow().get("available"));
+            assertEquals(false,media.experts(7L,0,100,"support_agent").items().stream().filter(r->"78".equals(r.get("user_id"))).findFirst().orElseThrow().get("available"));
+            db.update("UPDATE support_agent_profile SET accepting=1,presence_expires_at=DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR),expert_accepting=0 WHERE user_id=78");
+            assertDoesNotThrow(()->policy.textCapacity(78,"support_agent"));
+            assertThrows(ConversationProblem.class,()->policy.textCapacity(78,"expert"));
+        } finally {
+            db.update("UPDATE support_agent_profile SET roles_json=JSON_ARRAY('expert'),accepting=0,expert_accepting=1 WHERE user_id=78");
+        }
+    }
     @Test @Order(1) void twoConsentsRealReadyAndMediaHangupPreserveText()throws Exception {
-        Session s=create(71,AUDIO);assertEquals("invited",s.status());assertThrows(ConversationProblem.class,()->media.token(7L,s.id(),new TokenRequest(s.controlEpoch(),1)));Session accepted=accepted(s,71,AUDIO);assertEquals("connecting",accepted.status());assertNotNull(media.token(7L,s.id(),new TokenRequest(accepted.controlEpoch(),1)).participantToken());assertNotNull(media.token(71L,s.id(),new TokenRequest(accepted.controlEpoch(),1)).participantToken());join(accepted,1);
+        Session s=create(71,AUDIO);assertEquals("invited",s.status());
+        var invitation=media.invitations(71L,0,50).items().stream().filter(row->row.sessionId().equals(s.id())).findFirst().orElseThrow();
+        assertEquals(s.requestId(),invitation.requestId());assertEquals("expert",invitation.serviceType());assertEquals("audio",invitation.mode());assertTrue(invitation.requiresResponse());assertThrows(ConversationProblem.class,()->media.token(7L,s.id(),new TokenRequest(s.controlEpoch(),1)));Session accepted=accepted(s,71,AUDIO);assertEquals("connecting",accepted.status());var customerToken=media.token(7L,s.id(),new TokenRequest(accepted.controlEpoch(),1));
+        var agentToken=media.token(71L,s.id(),new TokenRequest(accepted.controlEpoch(),1));
+        assertNotNull(customerToken.participantToken());assertNotNull(agentToken.participantToken());
+        assertEquals(customerToken.roomName(),agentToken.roomName());
+        assertEquals(agentToken.participantIdentity(),customerToken.peerIdentity());
+        assertEquals(customerToken.participantIdentity(),agentToken.peerIdentity());
+        join(accepted,1);
         Session baseline=ready(accepted,1,false);assertEquals("connecting",baseline.status());Session live=ready(baseline,1,true);assertEquals("active",live.status());end(live);
         assertEquals("active",db.queryForObject("SELECT status FROM support_request WHERE id=?",String.class,s.requestId()));assertNull(db.queryForObject("SELECT released_at FROM support_assignment WHERE id=?",java.sql.Timestamp.class,s.assignmentId()));
         var reply=support.send(71L,s.requestId(),new SendMessage(key(),List.of(new MessagePart("text","媒体结束继续文字",null,null,null,null,null,null))));assertEquals("expert",reply.senderType());assertTrue(network.rooms.containsKey("aimeet-existing-preserve"));
@@ -93,7 +116,9 @@ class MediaPersistenceTest {
     @Test @Order(2) void unauthorizedTokensConsentChangesAndStaleSidCannotMakeActive(){Session s=create(71,AUDIO);assertThrows(ConversationProblem.class,()->media.accept(7L,s.id(),new Accept(s.controlEpoch(),AUDIO)));Session accepted=accepted(s,71,AUDIO);assertThrows(ConversationProblem.class,()->media.get(8L,s.id()));assertThrows(ConversationProblem.class,()->media.accept(71L,s.id(),new Accept(accepted.controlEpoch(),VIDEO)));assertThrows(ConversationProblem.class,()->media.token(7L,s.id(),new TokenRequest(accepted.controlEpoch()-1,1)));join(accepted,1);assertThrows(ConversationProblem.class,()->media.ready(7L,s.id(),new Ready(accepted.controlEpoch(),1,"PA_wrong","PA_other",true,true,false)));assertEquals("connecting",media.get(7L,s.id()).status());end(accepted);}
     @Test @Order(3) void generationTransferWaitsForReadySurvivesRemovalFailureAndCutsOffOldStaff()throws Exception {
         Session s=active(71,AUDIO);support.send(71L,s.requestId(),new SendMessage("old-before",List.of(new MessagePart("text","old",null,null,null,null,null,null))));CreateTransfer transferRequest=new CreateTransfer(s.controlEpoch(),key(),72L);Transfer transfer=media.createTransfer(7L,s.id(),transferRequest);assertEquals(transfer.id(),media.createTransfer(7L,s.id(),transferRequest).id());s=media.get(7L,s.id());String sessionId=s.id();assertEquals(1,s.currentGeneration());assertThrows(ConversationProblem.class,()->media.token(71L,sessionId,new TokenRequest(transfer.controlEpoch(),transfer.roomGeneration())));
-        media.approveTransfer(7L,transfer.id(),new Accept(transfer.controlEpoch(),AUDIO),false);media.approveTransfer(72L,transfer.id(),new Accept(transfer.controlEpoch(),AUDIO),true);maintenance.processOutbox();s=media.get(7L,s.id());join(s,transfer.roomGeneration());s=ready(s,transfer.roomGeneration(),true);
+        media.approveTransfer(72L,transfer.id(),new Accept(transfer.controlEpoch(),AUDIO),true);
+        assertFalse(media.invitations(72L,0,50).items().stream().filter(row->row.id().equals(transfer.id())).findFirst().orElseThrow().requiresResponse());
+        media.approveTransfer(7L,transfer.id(),new Accept(transfer.controlEpoch(),AUDIO),false);maintenance.processOutbox();s=media.get(7L,s.id());join(s,transfer.roomGeneration());s=ready(s,transfer.roomGeneration(),true);
         var preparedRoom=store.generation(Long.parseLong(s.id()),transfer.roomGeneration());
         @SuppressWarnings("unchecked") var preparedPeers=(List<Map<String,Object>>)network.rooms.get(string(preparedRoom,"room_name")).get("participants");
         Map<String,Object> temporarilyMuted=new HashMap<>(preparedPeers.getFirst());temporarilyMuted.put("tracks",List.of(Map.of("sid","TR_muted","source","MICROPHONE","muted",true)));preparedPeers.set(0,temporarilyMuted);
@@ -104,7 +129,10 @@ class MediaPersistenceTest {
         Transfer next=media.createTransfer(7L,switched.id(),new CreateTransfer(switched.controlEpoch(),key(),76L));media.approveTransfer(7L,next.id(),new Accept(next.controlEpoch(),AUDIO),false);media.approveTransfer(76L,next.id(),new Accept(next.controlEpoch(),AUDIO),true);maintenance.processOutbox();Session nextSession=media.get(7L,switched.id());join(nextSession,next.roomGeneration());ready(nextSession,next.roomGeneration(),true);maintenance.advanceTransfers();maintenance.processOutbox();maintenance.advanceTransfers();Session third=media.get(7L,switched.id());assertEquals(3,third.currentGeneration());
         assertThrows(ConversationProblem.class,()->media.getTransfer(72L,transfer.id()));assertThrows(ConversationProblem.class,()->media.get(72L,third.id()));support.send(76L,third.requestId(),new SendMessage("third-generation",List.of(new MessagePart("text","third",null,null,null,null,null,null))));assertEquals(2,conversations.messages(72L,third.conversationId(),0,50).items().size());assertEquals(3,conversations.messages(76L,third.conversationId(),0,50).items().size());maintenance.processOutbox();end(third);
     }
-    @Test @Order(4) void pendingTargetReservesTextAndMediaCapacityAndCancelKeepsOriginal(){Session one=active(73,AUDIO),two=active(74,AUDIO);Transfer reserved=media.createTransfer(7L,one.id(),new CreateTransfer(one.controlEpoch(),key(),75L));assertThrows(ConversationProblem.class,()->media.createTransfer(7L,two.id(),new CreateTransfer(two.controlEpoch(),key(),75L)));String queued=request(75,false);assertThrows(ConversationProblem.class,()->support.claim(75L,queued));media.rejectTransfer(7L,reserved.id(),new Epoch(reserved.controlEpoch()),true);maintenance.processOutbox();assertEquals("active",support.claim(75L,queued).status());assertEquals("73",media.get(7L,one.id()).agentUserId());assertEquals(1,media.get(7L,one.id()).currentGeneration());end(one);end(two);}
+    @Test @Order(4) void pendingTargetReservesTextAndMediaCapacityAndCancelKeepsOriginal(){Session one=active(73,AUDIO);
+        Session other=media.create(8L,new Create(request(8L,74,true),key(),"audio",AUDIO));
+        Session two=media.accept(74L,other.id(),new Accept(other.controlEpoch(),AUDIO));
+        maintenance.processOutbox();join(two,1);ready(two,1,true);Transfer reserved=media.createTransfer(7L,one.id(),new CreateTransfer(one.controlEpoch(),key(),75L));assertThrows(ConversationProblem.class,()->media.createTransfer(8L,two.id(),new CreateTransfer(two.controlEpoch(),key(),75L)));String queued=request(75,false);assertThrows(ConversationProblem.class,()->support.claim(75L,queued));media.rejectTransfer(7L,reserved.id(),new Epoch(reserved.controlEpoch()),true);maintenance.processOutbox();assertEquals("active",support.claim(75L,queued).status());assertEquals("73",media.get(7L,one.id()).agentUserId());assertEquals(1,media.get(7L,one.id()).currentGeneration());end(one);media.end(8L,two.id(),new End(two.controlEpoch(),null));maintenance.processOutbox();}
     @Test @Order(5) void expiredOutboxLeaseAndResponsibilityRevocationRecoverWithoutTouchingForeignRooms(){Session s=accepted(create(76,AUDIO),76,AUDIO);join(s,1);s=ready(s,1,true);Session before=s;support.requeue(76L,s.requestId(),null,false);assertEquals("ending",media.get(7L,s.id()).status());assertThrows(ConversationProblem.class,()->media.token(76L,before.id(),new TokenRequest(before.controlEpoch(),1)));db.update("UPDATE support_media_outbox SET status='running',lease_token='abandoned-attempt',lease_expires_at=DATE_SUB(CURRENT_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE session_id=? AND kind='delete_room'",s.id());maintenance.processOutbox();assertEquals("ended",media.get(7L,s.id()).status());assertTrue(network.rooms.containsKey("aimeet-existing-preserve"));assertEquals("B5-legacy-unchanged",db.queryForObject("SELECT content FROM ai_agent_chat_history WHERE id=1",String.class));}
     static String sign(byte[] body)throws Exception{String head=Base64.getUrlEncoder().withoutPadding().encodeToString("{\"alg\":\"HS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));String digest=Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(body));String payload=Base64.getUrlEncoder().withoutPadding().encodeToString(JSON.writeValueAsBytes(Map.of("iss",API_KEY,"exp",Instant.now().getEpochSecond()+60,"nbf",Instant.now().getEpochSecond()-1,"sha256",digest)));Mac mac=Mac.getInstance("HmacSHA256");mac.init(new SecretKeySpec(API_SECRET.getBytes(StandardCharsets.UTF_8),"HmacSHA256"));return head+"."+payload+"."+Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal((head+"."+payload).getBytes(StandardCharsets.US_ASCII)));}
     @Test @Order(6) void signedLateWebhookIsIdempotentAndCannotReviveEndedGeneration()throws Exception {Session s=active(77,AUDIO);var r=store.generation(Long.parseLong(s.id()),1);var m=store.members(number(r,"id")).getFirst();end(s);byte[] body=JSON.writeValueAsBytes(Map.of("id",key(),"event","participant_joined","room",Map.of("name",r.get("room_name"),"sid",r.get("livekit_sid")),"participant",Map.of("identity",m.get("identity"),"sid","PA_late")));String signed=sign(body);assertThrows(LiveKitFailure.class,()->webhooks.webhook((new String(body,StandardCharsets.UTF_8)+" ").getBytes(StandardCharsets.UTF_8),signed));try(var executor=Executors.newFixedThreadPool(3)){List<Callable<Object>> calls=List.of(()->webhooks.webhook(body,signed),()->webhooks.webhook(body,signed),()->webhooks.webhook(body,signed));for(var done:executor.invokeAll(calls))assertNotNull(done.get());}assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM support_media_webhook WHERE session_id=?",Long.class,s.id()));maintenance.processOutbox();assertEquals("ended",media.get(7L,s.id()).status());}
@@ -131,6 +159,7 @@ class MediaPersistenceTest {
         var message=support.send(78L,s.requestId(),new SendMessage("send-live-capture",List.of(new MessagePart("image",null,null,null,null,null,null,null,annotation.renderAttachmentId()))));
         for(String attachment:List.of(source,frame.frameAttachmentId(),annotation.renderAttachmentId()))assertEquals(message.id(),db.queryForObject("SELECT linked_message_id FROM ai_attachment WHERE id=?",String.class,attachment));
         var metadata=attachments.get(7L,annotation.renderAttachmentId()).metadata();assertEquals("client_live_capture",metadata.get("source_type"));assertEquals("client_declared",metadata.get("verification"));assertEquals(s.id(),metadata.get("media_session_id"));assertEquals(frame.id(),annotations.getFrame(7L,frame.id()).id());
+        end(s);
     }
     @Test @Order(8) void concurrentInvitationsExpiryAndAccountDisableUsePersistentCurrentState()throws Exception {
         String request=request(71,true),client=key();Create body=new Create(request,client,"audio",AUDIO);Session s;
@@ -153,7 +182,7 @@ class MediaPersistenceTest {
 
     @Test @Order(11) void aggregateDrainIsAdminCountsOnlyAndNeverGrantsConversationAccess(){assertThrows(ConversationProblem.class,()->media.drainStatus(7L,null));db.update("UPDATE sys_user SET super_admin=1 WHERE id=8");try{var status=media.drainStatus(8L,null);assertEquals(Set.of("enabled","pending_sessions","pending_operations","cleanup_complete"),status.keySet());assertTrue((Boolean)status.get("cleanup_complete"));String privateConversation=conversations.create(7L,new CreateConversation("private",null)).id();assertThrows(ConversationProblem.class,()->media.drainStatus(8L,privateConversation));}finally{db.update("UPDATE sys_user SET super_admin=0 WHERE id=8");}}
 
-    @Test @Order(12) void datetimeMeasurementsStayRealAcrossMatchingJdbcAndMysqlTimezones(){Session s=create(78,AUDIO);Instant now=Instant.now();assertTrue(Duration.between(now,s.createdAt()).abs().toSeconds()<10);long remaining=Duration.between(now,s.expiresAt()).toSeconds();assertTrue(remaining>=30 && remaining<=50,"invitation should be seconds away, never eight hours");db.update("UPDATE support_media_session SET expires_at=DATE_SUB(CURRENT_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE id=?",s.id());maintenance.expire();maintenance.processOutbox();assertEquals("expired",media.get(7L,s.id()).status());}
+    @Test @Order(12) void datetimeMeasurementsStayRealAcrossMatchingJdbcAndMysqlTimezones(){Session s=create(78,AUDIO);Instant now=Instant.now();assertTrue(Duration.between(now,s.createdAt()).abs().toSeconds()<10);long remaining=Duration.between(now,s.expiresAt()).toSeconds();assertTrue(remaining>=25 && remaining<=30,"invitation should be seconds away, never eight hours");db.update("UPDATE support_media_session SET expires_at=DATE_SUB(CURRENT_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE id=?",s.id());maintenance.expire();maintenance.processOutbox();assertEquals("expired",media.get(7L,s.id()).status());}
 
     @Test @Order(13) void tokenOwnershipReadsLatestAfterRoomTransitionDespiteRepeatableReadSnapshot() {
         Session invited=create(71,AUDIO);
@@ -169,6 +198,28 @@ class MediaPersistenceTest {
                     "Current locked state must not be denied using an older consistent-read snapshot");
             return null;
         });
+        end(accepted);
+    }
+
+    @Test @Order(14) void staffCancellationAndCustomerOccupancyPreserveBothTextRequests() {
+        String first=request(71,true),second=request(72,true);
+        // Explicit synthetic foreground presence for this native-customer fixture only.
+        var presence=Mockito.mock(CallPresenceService.class);
+        Mockito.when(presence.requireReady(Mockito.eq(7L),Mockito.anyString(),Mockito.eq("audio"))).thenAnswer(call->new CallPresenceCache.Lease(7,call.getArgument(1),0,0,false,Instant.now().plusSeconds(15)));
+        media.setCallPresence(presence);
+        Session invited=media.create(71L,new Create(first,key(),"audio",AUDIO));
+        var occupied=assertThrows(ConversationProblem.class,
+                ()->media.create(72L,new Create(second,key(),"audio",AUDIO)));
+        assertEquals("MEDIA_CUSTOMER_BUSY",occupied.getMessage());
+        assertThrows(ConversationProblem.class,()->media.cancel(7L,invited.id(),new Epoch(invited.controlEpoch())));
+        assertEquals("canceled",media.cancel(71L,invited.id(),new Epoch(invited.controlEpoch())).status());
+        assertEquals("canceled",media.cancel(71L,invited.id(),new Epoch(invited.controlEpoch())).status());
+        assertThrows(ConversationProblem.class,()->media.accept(7L,invited.id(),new Accept(invited.controlEpoch(),AUDIO)));
+        Session another=media.create(72L,new Create(second,key(),"audio",AUDIO));
+        Session accepted=media.accept(7L,another.id(),new Accept(another.controlEpoch(),AUDIO));
+        assertEquals(accepted.controlEpoch(),media.accept(7L,another.id(),new Accept(another.controlEpoch(),AUDIO)).controlEpoch());
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM support_media_outbox WHERE session_id=? AND kind='create_room'",Integer.class,another.id()));
+        assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM support_request WHERE id IN (?,?) AND status='active'",Integer.class,first,second));
         end(accepted);
     }
 

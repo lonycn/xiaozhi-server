@@ -44,7 +44,7 @@ class RealtimePersistenceTest {
             try(var connection=source.getConnection();var liq=new Liquibase("db/changelog/"+migration+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){liq.update(new Contexts());liq.update(new Contexts());}
             if("realtime-ai".equals(migration))seedPreVadCreateRows();
         }
-        assertEquals(6,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));db.update("INSERT INTO support_agent_profile(user_id,role,enabled,capacity_text,accepting,presence_expires_at) VALUES(71,'expert',1,20,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))");
+        assertEquals(8,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));db.update("INSERT INTO support_agent_profile(user_id,role,enabled,capacity_text,expert_accepting,expert_presence_expires_at) VALUES(71,'expert',1,20,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))");
     }
     static void seedPreVadCreateRows()throws Exception {
         assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='ai_realtime_session' AND column_name='turn_detection_mode'",Long.class));
@@ -100,7 +100,7 @@ class RealtimePersistenceTest {
         db.update("UPDATE ai_realtime_session SET request_hash=? WHERE id=?",hash(json.writeValueAsString(legacy)),vad.id());
         assertEquals(409,error(()->realtime.create(7L,new Create(vadConversation,vadClient,consent))));
     }
-    @Test @Order(1) void migrationSentinelAndEnvironmentGuardRemainAppendOnly(){assertThrows(IllegalArgumentException.class,()->guard("jdbc:mysql://prod:3306/xiaozhi"));assertThrows(IllegalArgumentException.class,()->guard("jdbc:mysql://127.0.0.1:34776/xiaozhi_dev"));assertEquals(6,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));assertEquals("P3-legacy-unchanged",db.queryForObject("SELECT content FROM ai_agent_chat_history WHERE id=1",String.class));}
+    @Test @Order(1) void migrationSentinelAndEnvironmentGuardRemainAppendOnly(){assertThrows(IllegalArgumentException.class,()->guard("jdbc:mysql://prod:3306/xiaozhi"));assertThrows(IllegalArgumentException.class,()->guard("jdbc:mysql://127.0.0.1:34776/xiaozhi_dev"));assertEquals(8,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));assertEquals("P3-legacy-unchanged",db.queryForObject("SELECT content FROM ai_agent_chat_history WHERE id=1",String.class));}
     @Test @Order(2) void explicitOwnerConsentCancelsB2ButConnectionIsNotReady(){
         String c=conversation();var old=conversations.send(7L,c,text("before","真实已有文字"));var b2=ai.list(7L,c,0,10).items().getFirst();var lease=ai.claim(new AiModels.Claim("b2-fixture"));assertNotNull(lease);var session=create(c);assertEquals("canceled",ai.get(7L,c,b2.runId()).status());assertEquals("pending",session.status());assertEquals(409,error(()->ai.delta(lease.runId(),new AiModels.Delta(lease.leaseToken(),1L,"late"))));
         var task=connect(session);assertEquals("connecting",realtime.get(7L,session.id()).status());assertTrue(task.context().stream().anyMatch(m->m.content().contains(old.parts().getFirst().text())));assertEquals(16000,task.inputAudio().sampleRate());assertEquals(24000,task.outputAudio().sampleRate());assertEquals(190000,task.limits().maxFrameBytes());emit(task,1,"session.ready",null,null);assertEquals("active",realtime.get(7L,session.id()).status());

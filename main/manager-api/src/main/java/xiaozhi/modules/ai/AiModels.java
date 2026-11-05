@@ -25,6 +25,8 @@ public final class AiModels {
         public Usage(Long inputTokens,Long outputTokens,Long totalTokens) { this(inputTokens,outputTokens,totalTokens,null); }
     }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record MediaPolicy(boolean allowHistory) { }
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record ProviderRequest(Integer round, String providerRequestId, Usage usage, String finishReason) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Complete(String leaseToken, Long lastSequence, String finishReason, Usage usage, String providerRequestId,
@@ -38,6 +40,10 @@ public final class AiModels {
         public Fail(String leaseToken,String errorCode) { this(leaseToken,errorCode,null,null,null); }
     }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record UsageAudit(String leaseToken,Integer attempt,List<ProviderRequest> providerRequests) {
+        @Override public String toString(){return "ProviderUsageAudit[redacted]";}
+    }
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record MediaRef(String attachmentId, String variant, String mimeType, String kind, Long timeMs) { }
     public record ContextMessage(String role, String content,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
@@ -45,15 +51,33 @@ public final class AiModels {
         public ContextMessage(String role, String content) { this(role, content, null); }
     }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record ToolPolicy(int maxRounds,int maxCalls,int maxArgumentBytes,int maxResultBytes,int timeoutSeconds,int maxOutputChars) { }
+    public record ToolPolicy(int maxRounds,int maxCalls,int maxArgumentBytes,int maxResultBytes,int timeoutSeconds,int maxOutputChars,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY) List<String> inputModalities) {
+        public ToolPolicy(int maxRounds,int maxCalls,int maxArgumentBytes,int maxResultBytes,int timeoutSeconds,int maxOutputChars){this(maxRounds,maxCalls,maxArgumentBytes,maxResultBytes,timeoutSeconds,maxOutputChars,null);}
+    }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Task(String runId, String conversationId, String inputMessageId, String outputMessageId,
             long controlEpoch, int attempt, String leaseToken, int leaseSeconds, String model, List<ContextMessage> messages,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY) List<JsonNode> tools,
-            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) ToolPolicy toolPolicy) {
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) ToolPolicy toolPolicy,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) MediaPolicy mediaPolicy,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) xiaozhi.modules.aiskill.AiSkillService.Snapshot skill,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Boolean usageAudit) {
+        public Task(String runId,String conversationId,String inputMessageId,String outputMessageId,long controlEpoch,
+                int attempt,String leaseToken,int leaseSeconds,String model,List<ContextMessage> messages,List<JsonNode> tools,ToolPolicy policy,MediaPolicy mediaPolicy,xiaozhi.modules.aiskill.AiSkillService.Snapshot skill){
+            this(runId,conversationId,inputMessageId,outputMessageId,controlEpoch,attempt,leaseToken,leaseSeconds,model,messages,tools,policy,mediaPolicy,skill,null);
+        }
+        public Task(String runId,String conversationId,String inputMessageId,String outputMessageId,long controlEpoch,
+                int attempt,String leaseToken,int leaseSeconds,String model,List<ContextMessage> messages,List<JsonNode> tools,ToolPolicy policy,MediaPolicy mediaPolicy){
+            this(runId,conversationId,inputMessageId,outputMessageId,controlEpoch,attempt,leaseToken,leaseSeconds,model,messages,tools,policy,mediaPolicy,null);
+        }
+        public Task(String runId,String conversationId,String inputMessageId,String outputMessageId,long controlEpoch,
+                int attempt,String leaseToken,int leaseSeconds,String model,List<ContextMessage> messages,List<JsonNode> tools,ToolPolicy policy){
+            this(runId,conversationId,inputMessageId,outputMessageId,controlEpoch,attempt,leaseToken,leaseSeconds,model,messages,tools,policy,null);
+        }
         public Task(String runId,String conversationId,String inputMessageId,String outputMessageId,long controlEpoch,
                 int attempt,String leaseToken,int leaseSeconds,String model,List<ContextMessage> messages) {
-            this(runId,conversationId,inputMessageId,outputMessageId,controlEpoch,attempt,leaseToken,leaseSeconds,model,messages,null,null);
+            this(runId,conversationId,inputMessageId,outputMessageId,controlEpoch,attempt,leaseToken,leaseSeconds,model,messages,null,null,null);
         }
     }
     public record Empty() { }

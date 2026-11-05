@@ -212,7 +212,7 @@ export default {
 }
 
 .drawer-title {
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   font-weight: 600;
   color: #3d4566;
 }
@@ -223,7 +223,7 @@ export default {
   border-radius: 50%;
   border: 2px solid #cfcfcf;
   background: none;
-  font-size: 28px;
+  font-size: var(--admin-font-illustration);
   font-weight: lighter;
   color: #cfcfcf;
   cursor: pointer;
@@ -252,7 +252,7 @@ export default {
 
 .slider-hint {
   display: block;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #909399;
   margin-top: 8px;
   line-height: 1.5;
@@ -284,7 +284,7 @@ export default {
 }
 
 :deep(.el-form-item__label) {
-  font-size: 14px !important;
+  font-size: var(--admin-font-base) !important;
   color: #3d4566 !important;
   font-weight: 500;
   padding-bottom: 8px;
@@ -297,7 +297,7 @@ export default {
   margin-left: 4px;
   color: #909399;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 .replacement-label i:hover {
   color: #409eff;
@@ -306,7 +306,7 @@ export default {
   background: #e6ebff;
   color: #5778ff;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   font-weight: normal;
   border: none;
 }

@@ -27,6 +27,7 @@
 
         <result column="chatHistoryConf" property="chatHistoryConf"/>
         <result column="systemPrompt" property="systemPrompt"/>
+        <result column="esp32ReplyLength" property="esp32ReplyLength"/>
         <result column="summaryMemory" property="summaryMemory"/>
         <result column="langCode" property="langCode"/>
         <result column="language" property="language"/>
@@ -64,6 +65,7 @@
                a.intent_model_id   AS intentModelId,
                a.chat_history_conf AS chatHistoryConf,
                a.system_prompt     AS systemPrompt,
+               a.esp32_reply_length AS esp32ReplyLength,
                a.summary_memory    AS summaryMemory,
                a.lang_code         AS langCode,
                a.language          AS language,
@@ -108,6 +110,7 @@
             intent_model_id = #{agent.intentModelId,jdbcType=VARCHAR},
             chat_history_conf = #{agent.chatHistoryConf,jdbcType=INTEGER},
             system_prompt = #{agent.systemPrompt,jdbcType=LONGVARCHAR},
+            esp32_reply_length = #{agent.esp32ReplyLength,jdbcType=VARCHAR},
             summary_memory = #{agent.summaryMemory,jdbcType=LONGVARCHAR},
             lang_code = #{agent.langCode,jdbcType=VARCHAR},
             language = #{agent.language,jdbcType=VARCHAR},

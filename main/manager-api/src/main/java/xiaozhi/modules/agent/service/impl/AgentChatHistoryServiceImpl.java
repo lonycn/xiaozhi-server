@@ -49,13 +49,15 @@ public class AgentChatHistoryServiceImpl extends CrudRepository<AiAgentChatHisto
         String agentId = (String) params.get("agentId");
         int page = Integer.parseInt(params.get(Constant.PAGE).toString());
         int limit = Integer.parseInt(params.get(Constant.LIMIT).toString());
+        String macAddress = (String) params.get("macAddress");
 
         // 构建查询条件
         QueryWrapper<AgentChatHistoryEntity> wrapper = new QueryWrapper<>();
-        wrapper.select("session_id", "MAX(created_at) as created_at", "COUNT(*) as chat_count")
+        wrapper.select("session_id", "MAX(created_at) as created_at", "COUNT(*) as chat_count", "MIN(mac_address) as mac_address")
                 .eq("agent_id", agentId)
+                .eq(macAddress != null && !macAddress.isBlank(), "mac_address", macAddress)
                 .groupBy("session_id")
-                .orderByDesc("created_at");
+                .orderByDesc("created_at").orderByDesc("session_id");
 
         // 执行分页查询
         Page<Map<String, Object>> pageParam = new Page<>(page, limit);
@@ -67,6 +69,7 @@ public class AgentChatHistoryServiceImpl extends CrudRepository<AiAgentChatHisto
             dto.setCreatedAt((LocalDateTime) map.get("created_at"));
             dto.setChatCount(((Number) map.get("chat_count")).intValue());
             dto.setTitle(agentChatTitleService.getTitleBySessionId(dto.getSessionId()));
+            dto.setMacAddress((String) map.get("mac_address"));
             return dto;
         }).collect(Collectors.toList());
 
@@ -75,10 +78,24 @@ public class AgentChatHistoryServiceImpl extends CrudRepository<AiAgentChatHisto
 
     @Override
     public List<AgentChatHistoryDTO> getChatHistoryBySessionId(String agentId, String sessionId) {
+        return getChatHistoryBySessionId(agentId, sessionId, null);
+    }
+
+    @Override
+    public List<String> getHistoryDevicesByAgentId(String agentId) {
+        QueryWrapper<AgentChatHistoryEntity> wrapper = new QueryWrapper<>();
+        wrapper.select("DISTINCT mac_address").eq("agent_id", agentId)
+                .isNotNull("mac_address").ne("mac_address", "").orderByAsc("mac_address");
+        return baseMapper.selectObjs(wrapper).stream().map(Object::toString).toList();
+    }
+
+    @Override
+    public List<AgentChatHistoryDTO> getChatHistoryBySessionId(String agentId, String sessionId, String macAddress) {
         // 构建查询条件
         QueryWrapper<AgentChatHistoryEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("agent_id", agentId)
                 .eq("session_id", sessionId)
+                .eq(macAddress != null && !macAddress.isBlank(), "mac_address", macAddress)
                 .orderByAsc("created_at");
 
         // 查询聊天记录

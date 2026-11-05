@@ -21,7 +21,7 @@ class ExternalInvitationControllerTest {
         when(db.query(anyString(),any(RowMapper.class),any(Object[].class))).thenReturn(List.of());
         new ExternalInvitationController(identity,authority,db).list(0,50,request,response);
         verify(authority,times(2)).validate(23,17,42);
-        verify(db).query(argThat(sql -> sql.contains("c.owner_user_id=?") && sql.contains("x.external_source_id IS NULL") && sql.contains("x.external_source_id=t.source_id") && sql.contains("x.external_token_id=t.id") && sql.contains("p.tenant_type=?") && sql.contains("i.issuer=?")),
+        verify(db).query(argThat(sql -> sql.contains("NULLIF(profile.display_name") && sql.contains("c.owner_user_id=?") && sql.contains("x.external_source_id IS NULL") && sql.contains("x.external_source_id=t.source_id") && sql.contains("x.external_token_id=t.id") && sql.contains("p.tenant_type=?") && sql.contains("i.issuer=?")),
                 any(RowMapper.class),eq(17L),eq(23L),eq(42L),eq(42L),eq(42L),eq("org"),eq("x"),eq("issuer"),eq("subject"),eq(0L),eq(51));
     }
     @Test void rejectsRevokedSourceBeforeQuery() {

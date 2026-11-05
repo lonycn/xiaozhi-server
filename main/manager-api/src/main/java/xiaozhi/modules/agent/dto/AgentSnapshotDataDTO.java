@@ -28,6 +28,7 @@ public class AgentSnapshotDataDTO implements Serializable {
     private String intentModelId;
     private Integer chatHistoryConf;
     private String systemPrompt;
+    private String esp32ReplyLength;
     private String summaryMemory;
     private String langCode;
     private String language;

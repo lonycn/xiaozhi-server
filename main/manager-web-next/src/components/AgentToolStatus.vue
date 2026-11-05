@@ -67,7 +67,7 @@ export default {
 };
 </script>
 <style scoped>
-.agent-tool-status { border: 1px solid #dce8f6; border-radius: 8px; background: #f8fbff; padding: 8px 12px; color: #274563; font-size: 13px; }
+.agent-tool-status { border: 1px solid #dce8f6; border-radius: 8px; background: #f8fbff; padding: 8px 12px; color: #274563; font-size: var(--admin-font-base); }
 summary { cursor: pointer; font-weight: 600; }
 ol { list-style: none; padding: 0; margin: 8px 0; max-height: 180px; overflow-y: auto; }
 li { padding: 6px 0; border-top: 1px solid #e4edf7; overflow-wrap: anywhere; }

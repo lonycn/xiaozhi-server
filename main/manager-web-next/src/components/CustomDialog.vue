@@ -163,13 +163,13 @@ export default {
 }
 
 :deep(.el-dialog__title) {
-  font-size: 16px;
+  font-size: var(--admin-font-lg);
   font-weight: 500;
   color: #1a1a1a;
 }
 
-:deep(.dialog-title) {
-  font-size: 18px;
+.dialog-title {
+  font-size: var(--admin-font-lg);
   display: inline-flex;
   align-items: center;
   > span {
@@ -178,7 +178,7 @@ export default {
   }
 }
 
-:deep(.title-icon) {
+.title-icon {
   width: 24px;
   height: 24px;
   margin-right: 8px;
@@ -198,7 +198,7 @@ export default {
   justify-content: center;
 
   .el-dialog__close {
-    font-size: 18px;
+    font-size: var(--admin-font-lg);
     color: #666;
     position: static;
     transform: none;
@@ -218,17 +218,21 @@ export default {
   padding: 12px 20px 16px;
 }
 
-:deep(.dialog-footer) {
+.dialog-footer {
   display: flex;
   justify-content: flex-end;
 
-  .el-button {
-    padding: 10px 20px;
+  :deep(.el-button) {
+    padding: 8px 16px;
+    min-height: 36px;
+    height: auto;
+    font-size: var(--admin-font-base);
+    line-height: 20px;
     display: flex;
     align-items: center;
   }
 
-  .el-button--primary {
+  :deep(.el-button--primary) {
     background: linear-gradient(to right, #4a7cfd, #8154fc);
     border: none;
 
@@ -245,6 +249,7 @@ export default {
   }
 
   .confirm-icon {
+    flex: 0 0 16px;
     width: 16px;
     height: 16px;
     margin-right: 4px;

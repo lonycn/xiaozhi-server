@@ -115,9 +115,10 @@ class TTSProviderBase(ABC):
             f"tts-{datetime.now().date()}@{uuid.uuid4().hex}{extension}",
         )
 
-    def handle_opus(self, opus_data: bytes):
+    def handle_opus(self, opus_data: bytes, sentence_id=None):
         logger.bind(tag=TAG).debug(f"推送数据到队列里面帧数～～ {len(opus_data)}")
-        self.tts_audio_queue.put((SentenceType.MIDDLE, opus_data, None, getattr(self, 'current_sentence_id', None)))
+        bound_id = sentence_id if sentence_id is not None else getattr(self, 'current_sentence_id', None)
+        self.tts_audio_queue.put((SentenceType.MIDDLE, opus_data, None, bound_id))
 
     def handle_audio_file(self, file_audio: bytes, text):
         self.before_stop_play_files.append((file_audio, text))
@@ -613,11 +614,12 @@ class TTSProviderBase(ABC):
         ):
             os.remove(tts_file)
 
-    def _process_before_stop_play_files(self):
+    def _process_before_stop_play_files(self, sentence_id=None):
+        bound_id = sentence_id if sentence_id is not None else getattr(self, 'current_sentence_id', None)
         for audio_datas, text in self.before_stop_play_files:
-            self.tts_audio_queue.put((SentenceType.MIDDLE, audio_datas, text, getattr(self, 'current_sentence_id', None)))
+            self.tts_audio_queue.put((SentenceType.MIDDLE, audio_datas, text, bound_id))
         self.before_stop_play_files.clear()
-        self.tts_audio_queue.put((SentenceType.LAST, [], None, getattr(self, 'current_sentence_id', None)))
+        self.tts_audio_queue.put((SentenceType.LAST, [], None, bound_id))
 
     def _process_remaining_text_stream(
         self, opus_handler: Callable[[bytes], None] = None

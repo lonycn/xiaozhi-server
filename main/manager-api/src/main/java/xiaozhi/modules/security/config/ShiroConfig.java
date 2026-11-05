@@ -52,7 +52,7 @@ public class ShiroConfig {
     }
 
     public static ShiroFilterFactoryBean shirFilter(WebSecurityManager securityManager, SysParamsService sysParamsService) {
-        return buildShiroFilter(securityManager, sysParamsService, "", "", "");
+        return buildShiroFilter(securityManager, sysParamsService, "", "", "", "", "");
     }
 
     @Bean("shiroFilter")
@@ -61,11 +61,11 @@ public class ShiroConfig {
             org.springframework.core.env.Environment environment) {
         // This FactoryBean is itself a BeanPostProcessor and is constructed before @Value's
         // embedded placeholder resolver is ready. Environment is available at that early phase.
-        return buildShiroFilter(securityManager, sysParamsService, environment.getProperty("ai.worker.key", ""), environment.getProperty("media.worker.key", ""), environment.getProperty("realtime.worker.key", ""));
+        return buildShiroFilter(securityManager, sysParamsService, environment.getProperty("ai.worker.key", ""), environment.getProperty("media.worker.key", ""), environment.getProperty("realtime.worker.key", ""), environment.getProperty("esp32.gateway.key", ""), environment.getProperty("answer-speech.worker.key", ""));
     }
 
     private static ShiroFilterFactoryBean buildShiroFilter(WebSecurityManager securityManager,
-            SysParamsService sysParamsService, String aiWorkerKey, String mediaWorkerKey, String realtimeWorkerKey) {
+            SysParamsService sysParamsService, String aiWorkerKey, String mediaWorkerKey, String realtimeWorkerKey, String esp32GatewayKey, String answerSpeechWorkerKey) {
         ShiroFilterConfiguration config = new ShiroFilterConfiguration();
         config.setFilterOncePerRequest(true);
 
@@ -82,6 +82,8 @@ public class ShiroConfig {
         filters.put("aiWorker", new xiaozhi.modules.ai.AiWorkerKeyFilter(aiWorkerKey));
         filters.put("mediaWorker", new xiaozhi.modules.attachment.MediaWorkerKeyFilter(mediaWorkerKey));
         filters.put("realtimeWorker", new xiaozhi.modules.realtime.RealtimeWorkerKeyFilter(realtimeWorkerKey));
+        filters.put("esp32Gateway", new xiaozhi.modules.esp32integration.Esp32BoundaryConfiguration.KeyFilter(esp32GatewayKey));
+        filters.put("answerSpeechWorker", new xiaozhi.modules.answerspeech.AnswerSpeechWorkerKeyFilter(answerSpeechWorkerKey));
         shiroFilter.setFilters(filters);
 
         // 添加Shiro的内置过滤器
@@ -116,9 +118,12 @@ public class ShiroConfig {
         filterMap.put("/agent/chat-title/**", "server");
         filterMap.put("/agent/play/**", "anon");
         filterMap.put("/voiceClone/play/**", "anon");
+        filterMap.put("/internal/esp32/**", "esp32Gateway");
+        filterMap.put("/api/v1/esp32/**", "conversation");
         filterMap.put("/internal/ai-worker/**", "aiWorker");
         filterMap.put("/internal/media-worker/**", "mediaWorker");
         filterMap.put("/internal/realtime-worker/**", "realtimeWorker");
+        filterMap.put("/internal/answer-speech-worker/**", "answerSpeechWorker");
         // Exact signed raw-body webhook endpoint; controller performs independent LiveKit verification.
         filterMap.put("/internal/livekit/webhook", "anon");
         // Only this precise content endpoint accepts a short capability. The controller verifies
@@ -132,8 +137,10 @@ public class ShiroConfig {
         filterMap.put("/api/v1/external/**", "conversation");
         filterMap.put("/api/v1/app/capabilities", "conversation");
         filterMap.put("/api/v1/admin/diagnostics/readiness", "conversation");
+        filterMap.put("/api/v1/admin/diagnostics/ai", "conversation");
         filterMap.put("/api/v1/ai/attachments/*/content", "anon");
         filterMap.put("/api/v1/ai/**", "conversation");
+        filterMap.put("/api/v1/support/avatars/*/*", "anon");
         filterMap.put("/api/v1/support/**", "conversation");
         filterMap.put("/**", "oauth2");
         shiroFilter.setFilterChainDefinitionMap(filterMap);

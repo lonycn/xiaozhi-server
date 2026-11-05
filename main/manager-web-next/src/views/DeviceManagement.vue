@@ -55,6 +55,7 @@
                   @change="handleOtaSwitchChange(scope.row)"></el-switch>
               </template>
               <template #operations="scope" >
+                <el-button v-if="esp32Available" size="small" link type="primary" @click="openEsp32(scope.row.device_id)">AI 设备状态</el-button>
                 <el-button size="small" link type="primary" @click="handleUnbind(scope.row.device_id)">
                   {{ $t('device.unbind') }}
                 </el-button>
@@ -84,6 +85,14 @@
       </div>
     </div>
 
+    <el-dialog v-model="esp32Open" title="ESP32 AI 设备" width="min(680px, 94vw)" destroy-on-close>
+      <Esp32DevicePanel v-if="esp32Open" :device-id="esp32DeviceId" :token="esp32Token" @show-history="esp32Sessions = $event" />
+      <el-table v-if="esp32Sessions.length" :data="esp32Sessions" style="width:100%; margin-top:12px" aria-label="设备 AI 会话">
+        <el-table-column prop="conversation_id" label="统一会话编号" min-width="200" />
+        <el-table-column prop="execution_mode" label="AI 执行模式" min-width="140" />
+      </el-table>
+    </el-dialog>
+
     <AddDeviceDialog v-model:visible="addDeviceDialogVisible" :agent-id="currentAgentId"
       @refresh="fetchBindDevices(currentAgentId)" />
     <ManualAddDeviceDialog v-model:visible="manualAddDeviceDialogVisible" :agent-id="currentAgentId"
@@ -94,6 +103,9 @@
 
 <script>
 import Api from '@/apis/api';
+import Esp32DevicePanel from '../components/Esp32DevicePanel.vue';
+import store from '../store';
+import { getServiceUrl } from '../apis/serviceUrl';
 import AddDeviceDialog from "@/components/AddDeviceDialog.vue";
 import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
 import MacAddressMask from "@/components/MacAddressMask.vue";
@@ -110,6 +122,7 @@ import {
 
 export default {
   components: {
+    Esp32DevicePanel,
     AddDeviceDialog,
     ManualAddDeviceDialog,
     MacAddressMask,
@@ -128,6 +141,7 @@ export default {
       pageSize: 10,
       pageSizeOptions: [10, 20, 50, 100],
       deviceList: [],
+      esp32Available: false, esp32DeviceId: '', esp32Open: false, esp32Sessions: [], esp32CapabilityController: null,
       loading: false,
       userApi: null,
       firmwareTypes: [],
@@ -135,6 +149,7 @@ export default {
     };
   },
   computed: {
+    esp32Token() {try{return JSON.parse(store.getters.getToken || '{}').token || '';}catch{return '';}},
     filteredDeviceList() {
       const keyword = this.activeSearchKeyword.toLowerCase();
       if (!keyword) return this.deviceList;
@@ -169,7 +184,12 @@ export default {
       return columns;
     },
   },
+  watch: {
+    esp32Token() { this.esp32Open=false;this.esp32Sessions=[];this.esp32Available=false;this.fetchEsp32Capabilities(); },
+  },
+  beforeUnmount() { this.esp32CapabilityController?.abort(); },
   mounted() {
+    this.fetchEsp32Capabilities();
     const agentId = this.$route.query.agentId;
     if (agentId) {
       this.fetchBindDevices(agentId);
@@ -179,6 +199,17 @@ export default {
     this.getFirmwareTypes()
   },
   methods: {
+    openEsp32(id) {this.esp32DeviceId=String(id);this.esp32Sessions=[];this.esp32Open=true;},
+    async fetchEsp32Capabilities() {
+      const token=this.esp32Token;if(!token)return;
+      this.esp32CapabilityController?.abort();
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);this.esp32CapabilityController=controller;
+      try {
+        const r=await fetch(`${getServiceUrl().replace(/\/$/,'')}/api/v1/esp32/capabilities`,{headers:{Authorization:`Bearer ${token}`},signal:controller.signal});
+        const body=await r.json();if(token!==this.esp32Token||this.esp32CapabilityController!==controller)return;
+        this.esp32Available=r.ok&&body.code===0&&body.data?.ai_only===true;
+      }catch {if(token===this.esp32Token&&this.esp32CapabilityController===controller)this.esp32Available=false;}finally {clearTimeout(timer);if(this.esp32CapabilityController===controller)this.esp32CapabilityController=null;}
+    },
     async getFirmwareTypes() {
       try {
         const res = await Api.dict.getDictDataByType('FIRMWARE_TYPE')
@@ -433,8 +464,10 @@ export default {
       })
     },
     isGenerate(row) {
-      const version = row.firmwareVersion.replace(/\./g, '');
-      return Number(version) >= 200;
+      const version = row?.firmwareVersion;
+      if (typeof version !== 'string' || !/^\d+(?:\.\d+)*$/.test(version)) return false;
+      const numericVersion = Number(version.replace(/\./g, ''));
+      return Number.isFinite(numericVersion) && numericVersion >= 200;
     },
   }
 };
@@ -475,7 +508,7 @@ export default {
 
 .page-title {
   font-weight: 500;
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
 }
 
@@ -553,7 +586,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

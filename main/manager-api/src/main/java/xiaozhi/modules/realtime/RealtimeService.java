@@ -21,6 +21,16 @@ import xiaozhi.modules.realtime.RealtimeModels.*;
 @Service
 @ConditionalOnProperty(prefix="features",name="conversation-enabled",havingValue="true")
 public class RealtimeService implements RealtimeHooks {
+    private xiaozhi.modules.airuntime.AiRuntimeControl runtimeControl;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setRuntimeControl(xiaozhi.modules.airuntime.AiRuntimeControl value){runtimeControl=value;}
+    private void admitRuntime(String resource,long owner){if(runtimeControl!=null)runtimeControl.admit(xiaozhi.modules.airuntime.AiRuntimeControl.Flow.REALTIME,resource,owner);}
+    private void releaseRuntime(String resource){if(runtimeControl!=null)runtimeControl.release(xiaozhi.modules.airuntime.AiRuntimeControl.Flow.REALTIME,resource);}
+
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32integration.Esp32Policies> esp32Policies;
+    @org.springframework.beans.factory.annotation.Autowired public void setEsp32Policies(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32integration.Esp32Policies> value){esp32Policies=value;}
+    private xiaozhi.modules.esp32integration.Esp32Policies devicePolicy(){return esp32Policies==null?null:esp32Policies.getIfAvailable();}
+
     private final RealtimeStore store;
     private final ObjectMapper json;
     private final Environment environment;
@@ -35,10 +45,27 @@ public class RealtimeService implements RealtimeHooks {
     private void bindSource(Map<String,Object> s,long actor){if(external==null)return;var p=external.checkedCaller(actor);if(p==null)return;
         store.jdbc().update("UPDATE ai_realtime_session SET external_source_id=?,external_token_id=? WHERE id=?",p.sourceId(),p.tokenId(),s.get("id"));s.put("external_source_id",p.sourceId());s.put("external_token_id",p.tokenId());}
 
+    private ObjectProvider<xiaozhi.modules.realtimetool.RealtimeToolService> realtimeTools;
+    @Autowired public void setRealtimeTools(ObjectProvider<xiaozhi.modules.realtimetool.RealtimeToolService> value){realtimeTools=value;}
+    private xiaozhi.modules.realtimetool.RealtimeToolService tools(){return realtimeTools==null?null:realtimeTools.getIfAvailable();}
+    private Long generation(Map<String,Object> session){return tools()==null?null:tools().generation(session);}
+    private xiaozhi.modules.externalidentity.ExternalModels.Principal toolPrincipal(){
+        var attributes=org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        return attributes instanceof org.springframework.web.context.request.ServletRequestAttributes request && request.getRequest().getAttribute(xiaozhi.modules.externalidentity.ExternalIdentityService.ATTRIBUTE) instanceof xiaozhi.modules.externalidentity.ExternalModels.Principal principal?principal:null;
+    }
+    private ObjectProvider<xiaozhi.modules.realtimeinput.RealtimeInputService> realtimeInputs;
+    @Autowired public void setRealtimeInputs(ObjectProvider<xiaozhi.modules.realtimeinput.RealtimeInputService> value){realtimeInputs=value;}
+    private xiaozhi.modules.realtimeinput.RealtimeInputService inputs(){return realtimeInputs==null?null:realtimeInputs.getIfAvailable();}
+    /** Trusted internal composition only. Source and account authority use the same owner/callback path as all realtime operations. */
+    public <T>T withInputOwner(Long actor,String sessionId,Function<Map<String,Object>,T> action){return owner(actor,sessionId,(s,c)->action.apply(s));}
+    public <T>T withInputWorker(String sessionId,String lease,Function<Map<String,Object>,T> action){return callback(sessionId,lease,false,action);}
+    public void failInputSession(Map<String,Object> session,String reason){terminal(session,"failed",reason);}
+    private xiaozhi.modules.aicontext.ConversationEvidenceService evidenceContext;
+    @Autowired(required=false) public void setEvidenceContext(xiaozhi.modules.aicontext.ConversationEvidenceService value){evidenceContext=value;}
     private ObjectProvider<ConversationService> conversations;
     private ObjectProvider<AiExecutionService> ai;
     static final int LEASE_SECONDS=12;
-    private static final Set<String> SESSION_ERRORS=Set.of("PROVIDER_AUTH","PROVIDER_RATE_LIMIT","PROVIDER_TIMEOUT","PROVIDER_UNAVAILABLE","PROVIDER_ERROR","WORKER_ERROR","CLIENT_DISCONNECTED","UNSUPPORTED_TOOL","INPUT_LIMIT","AUDIO_TURN_LIMIT");
+    private static final Set<String> SESSION_ERRORS=Set.of("PROVIDER_AUTH","PROVIDER_RATE_LIMIT","PROVIDER_TIMEOUT","PROVIDER_UNAVAILABLE","PROVIDER_ERROR","WORKER_ERROR","CLIENT_DISCONNECTED","UNSUPPORTED_TOOL","INPUT_LIMIT","AUDIO_TURN_LIMIT","TOOL_PROTOCOL_ERROR","TOOL_ARGUMENTS_INVALID","TOOL_LIMIT_EXCEEDED","TOOL_TIMEOUT","TOOL_EXECUTION_FAILED","TOOL_RESULT_UNCERTAIN","MATERIAL_CAPTURE_PROTOCOL_REQUIRED");
     private static final Set<String> INJECTION_ERRORS=Set.of("PROVIDER_REJECTED","INJECTION_UNCONFIRMED","PROVIDER_TIMEOUT");
     private static final Set<String> FINISH=Set.of("stop","length","content_filter","tool_calls","unknown");
     public RealtimeService(RealtimeStore store,ObjectMapper json,Environment environment){this.store=store;this.json=json;this.environment=environment;}
@@ -54,7 +81,17 @@ public class RealtimeService implements RealtimeHooks {
         }catch(Exception ex){throw problem(503,"REALTIME_NOT_CONFIGURED");}
         if(!"qwen3.8-omni-flash-realtime".equals(model()))throw problem(503,"REALTIME_MODEL_NOT_CONFIGURED");
     }
-    public Map<String,Object> capabilities(){configured();boolean vad=environment.getProperty("features.realtime-server-vad-enabled",Boolean.class,false);return Map.of("turn_detection_modes",vad?List.of("manual","server_vad"):List.of("manual"),"default_turn_detection_mode","manual");}
+    public Map<String,Object> capabilities(){
+        configured();boolean vad=environment.getProperty("features.realtime-server-vad-enabled",Boolean.class,false);
+        boolean materials=environment.getProperty("features.realtime-materials-enabled",Boolean.class,false)
+                && environment.getProperty("features.attachments-enabled",Boolean.class,false)
+                && environment.getProperty("features.agent-tools-enabled",Boolean.class,false)
+                && environment.getProperty("features.realtime-tools-enabled",Boolean.class,false);
+        return Map.of("turn_detection_modes",vad?List.of("manual","server_vad"):List.of("manual"),"default_turn_detection_mode","manual",
+                "supports_materials",materials,"materials",Map.of("mode","pause_clear_then_context_ack",
+                    "allowed_parts",List.of("text","image","file"),"max_parts",3,"max_attachments",2,
+                    "max_message_text_chars",4000,"max_context_text_chars",12000,"max_image_bytes",1048576));
+    }
     private String model(){return environment.getProperty("realtime.model","qwen3.8-omni-flash-realtime");}
 
     public Session create(Long actor,Create body){
@@ -65,7 +102,7 @@ public class RealtimeService implements RealtimeHooks {
         if("server_vad".equals(detection) && !environment.getProperty("features.realtime-server-vad-enabled",Boolean.class,false))throw problem(503,"REALTIME_SERVER_VAD_DISABLED");
         String requestHash=hash(encode(new Create(body.conversationId(),body.clientSessionId(),body.consent(),detection)));
         try{return store.tx(()->{
-            account(actor,true);var c=owned(actor,body.conversationId());
+            account(actor,true);var c=owned(actor,body.conversationId());if(devicePolicy()!=null)devicePolicy().requireOrdinaryInput(body.conversationId());
             var duplicate=store.rows("SELECT * FROM ai_realtime_session WHERE conversation_id=? AND client_session_id=? FOR UPDATE",body.conversationId(),body.clientSessionId());
             if(!duplicate.isEmpty()){
                 var previous=duplicate.getFirst();boolean legacyManual="manual".equals(detection) && "manual".equals(previous.get("turn_detection_mode")) && legacyCreateHash(body).equals(previous.get("request_hash"));
@@ -80,7 +117,7 @@ public class RealtimeService implements RealtimeHooks {
             String id=id();
             store.jdbc().update("INSERT INTO ai_realtime_session(id,conversation_id,owner_user_id,client_session_id,request_hash,control_epoch,model,consent_microphone,consent_camera,context_seq,turn_detection_mode) VALUES(?,?,?,?,?,?,?,1,?,?,?)",
                     id,body.conversationId(),actor,body.clientSessionId(),requestHash,epoch,model(),Boolean.TRUE.equals(body.consent().camera())?1:0,number(c,"last_seq"),detection);
-            var row=store.session(id,true);bindSource(row,actor);event(row,"realtime.session.created",Map.of());return view(row);
+            var row=store.session(id,true);bindSource(row,actor);if(tools()!=null)tools().prepare(row,toolPrincipal());event(row,"realtime.session.created",Map.of());admitRuntime(id,actor);return view(row);
         });}catch(DuplicateKeyException|PessimisticLockingFailureException ex){throw problem(409,"REALTIME_CONFLICT_RETRY");}
     }
     /** Pre-VAD Create had exactly these three fields, in this order. Only migrated manual rows may match it. */
@@ -110,23 +147,25 @@ public class RealtimeService implements RealtimeHooks {
             String token=secret();store.jdbc().update("UPDATE ai_realtime_ticket SET status='consumed',consumed_at=CURRENT_TIMESTAMP(3) WHERE id=?",ticket.get("id"));
             store.jdbc().update("UPDATE ai_realtime_session SET status='connecting',worker_id=?,server_id=?,lease_hash=?,lease_expires_at=DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL ? SECOND) WHERE id=?",body.workerId(),body.serverId(),hash(token),LEASE_SECONDS,sessionId);
             event(s,"realtime.session.connecting",Map.of());
+            var toolCatalog=tools()==null?null:tools().catalog(s);
             return new Task(sessionId,string(s,"conversation_id"),number(s,"control_epoch"),token,body.serverId(),LEASE_SECONDS,string(s,"model"),consent(s),context(s),number(s,"context_seq"),
-                    new Limits(2,1800,65536,1920000,190000,921600,1000,16000,128000),new AudioFormat("s16le",16000,1),new AudioFormat("s16le",24000,1),string(s,"turn_detection_mode"));
+                    new Limits(2,1800,65536,1920000,190000,921600,1000,16000,128000),new AudioFormat("s16le",16000,1),new AudioFormat("s16le",24000,1),string(s,"turn_detection_mode"),toolCatalog==null?null:toolCatalog.tools(),toolCatalog==null?null:toolCatalog.toolPolicy(),toolCatalog==null?null:toolCatalog.turnGeneration(),inputs()==null?null:inputs().policy(s));
         });
     }
     public Pulse heartbeat(String sessionId,Heartbeat body){if(body==null||body.inputBusy()==null)throw problem(400,"INVALID_HEARTBEAT");return callback(sessionId,body.leaseToken(),false,s->{
         expireTasks(s);
-        if(!active(store.session(sessionId,true)))return new Pulse(false,0,List.of(),List.of());
+        var materialCommands=inputs()==null?null:inputs().pulse(s,body.leaseToken());
+        if(!active(store.session(sessionId,true)))return new Pulse(false,0,List.of(),List.of(),generation(s));
         store.jdbc().update("UPDATE ai_realtime_session SET lease_expires_at=DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL ? SECOND) WHERE id=?",LEASE_SECONDS,sessionId);
         List<Dispatch> injections=new ArrayList<>();List<Command> commands=new ArrayList<>();
-        if("active".equals(s.get("status"))&&!body.inputBusy()&&turn(s)==null&&store.rows("SELECT id FROM ai_realtime_injection WHERE session_id=? AND status='dispatched' FOR UPDATE",sessionId).isEmpty()){
+        if("active".equals(s.get("status"))&&(inputs()==null||!inputs().blocked(s))&&!body.inputBusy()&&turn(s)==null&&store.rows("SELECT id FROM ai_realtime_injection WHERE session_id=? AND status='dispatched' FOR UPDATE",sessionId).isEmpty()){
             var queued=store.rows("SELECT * FROM ai_realtime_injection WHERE session_id=? AND status='queued' ORDER BY list_sequence LIMIT 1 FOR UPDATE",sessionId);
             if(!queued.isEmpty()){var i=queued.getFirst();store.jdbc().update("UPDATE ai_realtime_injection SET status='dispatched',dispatched_at=CURRENT_TIMESTAMP(3) WHERE id=?",i.get("id"));injections.add(new Dispatch(string(i,"id"),string(i,"message_id"),string(i,"text_content"),string(i,"provider_item_id")));}
         }
         for(var command:store.rows("SELECT * FROM ai_realtime_command WHERE session_id=? AND status='queued' ORDER BY created_at,id FOR UPDATE",sessionId)){
             store.jdbc().update("UPDATE ai_realtime_command SET status='dispatched',dispatched_at=CURRENT_TIMESTAMP(3) WHERE id=?",command.get("id"));command.put("status","dispatched");commands.add(command(command));
         }
-        return new Pulse(true,LEASE_SECONDS,injections,commands);
+        return new Pulse(true,LEASE_SECONDS,injections,commands,generation(s),materialCommands==null?null:materialCommands.inputControl(),materialCommands==null?null:materialCommands.material());
     });}
     public Sent send(Long actor,String sessionId,Send body){configured();if(body==null||body.text()==null||body.text().isBlank()||body.text().length()>8000)throw problem(400,"TEXT_REQUIRED_MAX_8000");client(body.clientMessageId());
         return owner(actor,sessionId,(s,c)->{
@@ -148,7 +187,9 @@ public class RealtimeService implements RealtimeHooks {
         if("interrupting".equals(turn.get("status")))throw problem(409,"RESPONSE_ALREADY_INTERRUPTING");
         store.jdbc().update("UPDATE ai_realtime_turn SET status='interrupting' WHERE id=?",turn.get("id"));String id=id();
         store.jdbc().update("INSERT INTO ai_realtime_command(id,session_id,client_command_id,request_hash,response_id,command_type) VALUES(?,?,?,?,?,'interrupt')",id,sessionId,body.clientCommandId(),requestHash,body.responseId());
-        event(s,"realtime.response.interrupting",Map.of("response_id",body.responseId(),"message_id",turn.get("message_id")));return command(store.one("SELECT * FROM ai_realtime_command WHERE id=?",id));
+        event(s,"realtime.response.interrupting",Map.of("response_id",body.responseId(),"message_id",turn.get("message_id")));
+        if(tools()!=null)tools().invalidate(s,"INTERRUPTED",null);
+        return command(store.one("SELECT * FROM ai_realtime_command WHERE id=?",id));
     });}
     public Session end(Long actor,String sessionId,Epoch body){return owner(actor,sessionId,(s,c)->{
         if(body==null||body.expectedEpoch()==null||body.expectedEpoch()!=number(s,"control_epoch"))throw problem(409,"REALTIME_EPOCH_CONFLICT");
@@ -159,10 +200,11 @@ public class RealtimeService implements RealtimeHooks {
     @Override public boolean onUserMessage(String conversationId,String messageId){
         var active=store.rows("SELECT * FROM ai_realtime_session WHERE conversation_id=? AND active_slot=1 FOR UPDATE",conversationId);if(active.isEmpty())return false;
         var s=active.getFirst();var c=store.conversation(conversationId);String reason=expiration(s,c);if(reason!=null){terminal(s,"expired",reason);return false;}sourceActor(s,number(s,"owner_user_id"));
-        var message=store.one("SELECT * FROM ai_message WHERE id=?",messageId);StringBuilder text=new StringBuilder();
+        var message=store.one("SELECT * FROM ai_message WHERE id=?",messageId);if(inputs()!=null && inputs().onUserMessage(s,message))return true;StringBuilder text=new StringBuilder();
         for(JsonNode part:decode(string(message,"parts_json"))){if(!"text".equals(part.path("type").asText()))throw problem(409,"REALTIME_TEXT_ONLY");if(!text.isEmpty())text.append('\n');text.append(part.path("text").asText());}
         if(text.isEmpty()||text.length()>8000)throw problem(400,"REALTIME_TEXT_MAX_8000");
         long pending=store.jdbc().queryForObject("SELECT COUNT(*) FROM ai_realtime_injection WHERE session_id=? AND status IN ('queued','dispatched')",Long.class,s.get("id"));if(pending>=10)throw problem(409,"REALTIME_INJECTION_QUEUE_FULL");
+        if(tools()!=null)tools().invalidate(s,"TEXT_INJECTED",number(message,"seq"));
         String id=id();store.jdbc().update("INSERT INTO ai_realtime_injection(id,session_id,message_id,provider_item_id,text_content) VALUES(?,?,?,?,?)",id,s.get("id"),messageId,"rt-inject-"+id,text.toString());
         event(s,"realtime.injection.queued",Map.of("injection_id",id,"message_id",messageId));return true;
     }
@@ -179,6 +221,8 @@ public class RealtimeService implements RealtimeHooks {
         if(body.sequence()>50000)throw problem(409,"REALTIME_EVENT_LIMIT");
         if(body.sequence()!=number(s,"last_event_sequence")+1)throw problem(409,"REALTIME_EVENT_SEQUENCE_CONFLICT");
         if(!"session.ready".equals(body.type())&&!"session.error".equals(body.type())&&!"active".equals(s.get("status")))throw problem(409,"PROVIDER_NOT_READY");
+        if(inputs()!=null)inputs().guardEvent(s,body);
+        if(tools()!=null)tools().guardEvent(s,body);
         apply(s,body);
         store.jdbc().update("INSERT INTO ai_realtime_event(id,session_id,sequence,provider_event_id,event_type,request_hash) VALUES(?,?,?,?,?,?)",id(),sessionId,body.sequence(),body.providerEventId(),body.type(),requestHash);
         store.jdbc().update("UPDATE ai_realtime_session SET last_event_sequence=? WHERE id=?",body.sequence(),sessionId);
@@ -188,6 +232,10 @@ public class RealtimeService implements RealtimeHooks {
         String sessionId=string(s,"id");
         switch(e.type()){
             case "session.ready" -> {if(!"connecting".equals(s.get("status")))throw problem(409,"PROVIDER_ALREADY_READY");store.jdbc().update("UPDATE ai_realtime_session SET status='active',provider_session_id=?,connected_at=CURRENT_TIMESTAMP(3) WHERE id=?",e.providerSessionId(),sessionId);event(s,"realtime.session.ready",Map.of("provider_session_id",e.providerSessionId()));}
+            case "input.started" -> {if(tools()==null)throw problem(409,"REALTIME_TOOLS_DISABLED");tools().inputStarted(s,e);}
+            case "response.step.completed" -> {if(tools()==null)throw problem(409,"REALTIME_TOOLS_DISABLED");if(!tools().stepCompleted(s,e))terminal(s,"failed","TOOL_LIMIT_EXCEEDED");}
+            case "tool.result.ack" -> {if(tools()==null)throw problem(409,"REALTIME_TOOLS_DISABLED");tools().acknowledge(s,e);}
+            case "response.continue" -> {if(tools()==null)throw problem(409,"REALTIME_TOOLS_DISABLED");tools().authorizeContinue(s,e);}
             case "input.committed" -> {
                 var existing=store.rows("SELECT * FROM ai_realtime_turn WHERE session_id=? AND provider_item_id=? FOR UPDATE",sessionId,e.providerItemId());
                 if(!existing.isEmpty()){
@@ -211,11 +259,13 @@ public class RealtimeService implements RealtimeHooks {
                 event(s,"realtime.input.transcribed",Map.of("message_id",message,"source","provider_audio_transcription","provider_item_id",e.providerItemId(),"status",status));
             }
             case "response.started" -> {
+                if(tools()!=null && tools().resume(s,e))break;
                 if(turn(s)!=null)throw problem(409,"RESPONSE_ALREADY_ACTIVE");
                 if(!store.rows("SELECT id FROM ai_realtime_turn WHERE session_id=? AND provider_item_id=? FOR UPDATE",sessionId,e.responseId()).isEmpty())throw problem(409,"PROVIDER_ITEM_REUSED");
                 turnLimit(sessionId);long count=store.jdbc().queryForObject("SELECT COUNT(*) FROM ai_realtime_turn WHERE session_id=? AND kind='assistant'",Long.class,sessionId);if(count>=200)throw problem(409,"REALTIME_TURN_LIMIT");
                 String message=createMessage(s,"assistant","","streaming","provider_realtime");
                 store.jdbc().update("INSERT INTO ai_realtime_turn(id,session_id,provider_item_id,kind,source,status,message_id,output_text) VALUES(?,?,?,'assistant','provider_realtime','streaming',?,'')",id(),sessionId,e.responseId(),message);
+                if(tools()!=null)tools().started(s,e,store.one("SELECT * FROM ai_realtime_turn WHERE session_id=? AND provider_item_id=?",sessionId,e.responseId()));
                 event(s,"assistant.message.created",Map.of("message_id",message,"response_id",e.responseId(),"source","provider_realtime"));
             }
             case "response.delta" -> {
@@ -225,13 +275,18 @@ public class RealtimeService implements RealtimeHooks {
                 event(s,"assistant.text.delta",Map.of("message_id",turn.get("message_id"),"response_id",e.responseId(),"text",e.text(),"source","provider_realtime"));
             }
             case "response.completed","response.canceled" -> {
-                var turn=response(s,e.responseId());if(!Set.of("streaming","interrupting").contains(turn.get("status")))throw problem(409,"RESPONSE_ALREADY_TERMINAL");
-                boolean canceled="response.canceled".equals(e.type())||"interrupting".equals(turn.get("status"));String text=canceled?string(turn,"output_text"):e.text();String status=canceled?"canceled":"completed";
-                String usage=e.usage()==null?null:encode(e.usage());
+                var turn=response(s,e.responseId());
+                if(tools()!=null && tools().bound(s) && "response.canceled".equals(e.type()) && "canceled".equals(turn.get("status"))){tools().complete(s,e);break;}
+                if(!Set.of("streaming","interrupting").contains(turn.get("status")))throw problem(409,"RESPONSE_ALREADY_TERMINAL");
+                boolean canceled="response.canceled".equals(e.type())||"interrupting".equals(turn.get("status"));String text=canceled?string(turn,"output_text"):(tools()==null?e.text():tools().completedText(s,e));String status=canceled?"canceled":"completed";
+                if("tool_calls".equals(e.finishReason()) && tools()!=null && tools().bound(s))throw problem(400,"REALTIME_TOOL_STEP_REQUIRED");
+                var logicalUsage=tools()==null?e.usage():tools().complete(s,e);String usage=logicalUsage==null?null:encode(logicalUsage);
+                boolean overBudget=tools()!=null && tools().sessionBudgetExceeded(s);if(overBudget){canceled=true;text=string(turn,"output_text");status="canceled";}
                 store.jdbc().update("UPDATE ai_realtime_turn SET output_text=?,status=?,finish_reason=?,usage_json=?,ended_at=CURRENT_TIMESTAMP(3) WHERE id=?",text,status,e.finishReason(),usage,turn.get("id"));message(turn,text,status);
-                var extra=new LinkedHashMap<String,Object>();extra.put("message_id",turn.get("message_id"));extra.put("response_id",e.responseId());extra.put("source","provider_realtime");extra.put("usage",e.usage());
+                var extra=new LinkedHashMap<String,Object>();extra.put("message_id",turn.get("message_id"));extra.put("response_id",e.responseId());extra.put("source","provider_realtime");extra.put("usage",logicalUsage);
                 event(s,canceled?"assistant.message.canceled":"assistant.message.completed",extra);
-                if("tool_calls".equals(e.finishReason()))terminal(s,"failed","UNSUPPORTED_TOOL");
+                if(overBudget)terminal(s,"failed","TOOL_LIMIT_EXCEEDED");
+                else if("tool_calls".equals(e.finishReason()))terminal(s,"failed","UNSUPPORTED_TOOL");
             }
             case "injection.ack","injection.failed" -> {
                 var injection=store.one("SELECT * FROM ai_realtime_injection WHERE id=? AND session_id=? FOR UPDATE",e.injectionId(),sessionId);
@@ -264,6 +319,7 @@ public class RealtimeService implements RealtimeHooks {
     private <T>T callback(String sessionId,String lease,boolean dedupeTerminal,Function<Map<String,Object>,T> action){configured();if(lease==null||!lease.matches("[a-f0-9]{64}"))throw problem(409,"LEASE_INVALID");var hint=store.session(sessionId,false);return store.tx(()->{
         account(number(hint,"owner_user_id"),true);var c=store.conversation(string(hint,"conversation_id"));var s=store.session(sessionId,true);
         if(sourceFailure(s)!=null || vadDisabled(s))throw problem(409,"LEASE_INVALID");
+        if(tools()!=null)tools().validateSession(s);
         if(!"AI_ACTIVE".equals(c.get("state"))||number(c,"control_epoch")!=number(s,"control_epoch")||!hash(lease).equals(s.get("lease_hash"))||s.get("lease_expires_at")==null||!instant(s,"lease_expires_at").isAfter(Instant.now())||Duration.between(instant(s,"created_at"),Instant.now()).toSeconds()>=1800||("connecting".equals(s.get("status"))&&Duration.between(instant(s,"created_at"),Instant.now()).toSeconds()>=60)||(!dedupeTerminal&&!Set.of("connecting","active").contains(s.get("status"))))throw problem(409,"LEASE_INVALID");
         return action.apply(s);
     });}
@@ -288,6 +344,8 @@ public class RealtimeService implements RealtimeHooks {
     }
     private void terminal(Map<String,Object> s,String status,String error){
         if(!active(s))return;String sessionId=string(s,"id");
+        if(inputs()!=null)inputs().end(s);
+        if(tools()!=null)tools().discard(s,"SESSION_TERMINATED");
         for(var turn:store.rows("SELECT * FROM ai_realtime_turn WHERE session_id=? AND active_slot=1 FOR UPDATE",sessionId)){
             store.jdbc().update("UPDATE ai_realtime_turn SET status='canceled',ended_at=CURRENT_TIMESTAMP(3) WHERE id=?",turn.get("id"));message(turn,string(turn,"output_text"),"canceled");event(s,"assistant.message.canceled",Map.of("message_id",turn.get("message_id"),"response_id",turn.get("provider_item_id"),"source","provider_realtime"));
         }
@@ -301,6 +359,7 @@ public class RealtimeService implements RealtimeHooks {
         }
         store.jdbc().update("UPDATE ai_realtime_command SET status='failed',error_code='SESSION_TERMINATED' WHERE session_id=? AND status IN ('queued','dispatched')",sessionId);
         event(s,"realtime.session."+status,error==null?Map.of():Map.of("error_code",error));
+        releaseRuntime(sessionId);
     }
     private String createMessage(Map<String,Object> s,String sender,String text,String status,String source){String c=string(s,"conversation_id");var conversation=store.conversation(c);long seq=number(conversation,"last_seq")+1;String id=id();String parts=encode(text.isEmpty()?List.of():List.of(Map.of("type","text","text",text)));
         store.jdbc().update("INSERT INTO ai_message(id,conversation_id,seq,client_message_id,sender_type,sender_id,parts_json,request_hash,status) VALUES(?,?,?,?,?,?,?,?,?)",id,c,seq,"rt:"+id,sender,"user".equals(sender)?Long.toString(number(s,"owner_user_id")):"ai",parts,hash(source+":"+id),status);
@@ -312,30 +371,46 @@ public class RealtimeService implements RealtimeHooks {
     }
     private void turnLimit(String sessionId){if(store.jdbc().queryForObject("SELECT COUNT(*) FROM ai_realtime_turn WHERE session_id=?",Long.class,sessionId)>=400)throw problem(409,"REALTIME_TURN_LIMIT");}
     private Map<String,Object> turn(Map<String,Object> s){var rows=store.rows("SELECT * FROM ai_realtime_turn WHERE session_id=? AND active_slot=1 FOR UPDATE",s.get("id"));return rows.isEmpty()?null:rows.getFirst();}
-    private Receipt receipt(Map<String,Object> s,ProviderEvent e){String message=eventMessage(s,e);String status=message==null?null:store.jdbc().queryForObject("SELECT status FROM ai_message WHERE id=?",String.class,message);return new Receipt(e.sequence(),view(s),message,status);}
+    private Receipt receipt(Map<String,Object> s,ProviderEvent e){String message=eventMessage(s,e);String status=message==null?null:store.jdbc().queryForObject("SELECT status FROM ai_message WHERE id=?",String.class,message);return new Receipt(e.sequence(),view(s),message,status,generation(s),tools()==null?null:tools().continuation(s,e));}
     private String eventMessage(Map<String,Object> s,ProviderEvent event){
-        if(event.responseId()!=null||event.providerItemId()!=null){String item=event.responseId()!=null?event.responseId():event.providerItemId();var turns=store.rows("SELECT message_id FROM ai_realtime_turn WHERE session_id=? AND provider_item_id=?",s.get("id"),item);if(!turns.isEmpty())return string(turns.getFirst(),"message_id");}
+        if(event.responseId()!=null||event.providerItemId()!=null){String item=event.responseId()!=null?event.responseId():event.providerItemId();var turns=store.rows("SELECT message_id FROM ai_realtime_turn WHERE session_id=? AND provider_item_id=?",s.get("id"),item);if(!turns.isEmpty())return string(turns.getFirst(),"message_id");
+            if(event.responseId()!=null && tools()!=null && tools().bound(s))return string(tools().logicalTurn(s,event.responseId()),"message_id");}
         if(event.injectionId()!=null){var injections=store.rows("SELECT message_id FROM ai_realtime_injection WHERE session_id=? AND id=?",s.get("id"),event.injectionId());if(!injections.isEmpty())return string(injections.getFirst(),"message_id");}
         return null;
     }
-    private Map<String,Object> response(Map<String,Object> s,String responseId){var rows=store.rows("SELECT * FROM ai_realtime_turn WHERE session_id=? AND provider_item_id=? AND kind='assistant' FOR UPDATE",s.get("id"),responseId);if(rows.isEmpty())throw problem(409,"RESPONSE_NOT_STARTED");return rows.getFirst();}
-    private Session view(Map<String,Object> s){var turn=turn(s);return new Session(string(s,"id"),string(s,"conversation_id"),string(s,"status"),number(s,"control_epoch"),string(s,"model"),consent(s),string(s,"provider_session_id"),number(s,"last_event_sequence"),turn==null?null:string(turn,"provider_item_id"),turn==null?null:string(turn,"message_id"),string(s,"error_code"),instant(s,"created_at"),instant(s,"connected_at"),instant(s,"ended_at"),string(s,"turn_detection_mode"));}
+    private Map<String,Object> response(Map<String,Object> s,String responseId){var rows=store.rows("SELECT * FROM ai_realtime_turn WHERE session_id=? AND provider_item_id=? AND kind='assistant' FOR UPDATE",s.get("id"),responseId);if(rows.isEmpty()){if(tools()!=null && tools().bound(s))return tools().logicalTurn(s,responseId);throw problem(409,"RESPONSE_NOT_STARTED");}return rows.getFirst();}
+    private Session view(Map<String,Object> s){var turn=turn(s);return new Session(string(s,"id"),string(s,"conversation_id"),string(s,"status"),number(s,"control_epoch"),string(s,"model"),consent(s),string(s,"provider_session_id"),number(s,"last_event_sequence"),turn==null?null:string(turn,"provider_item_id"),turn==null?null:string(turn,"message_id"),string(s,"error_code"),instant(s,"created_at"),instant(s,"connected_at"),instant(s,"ended_at"),string(s,"turn_detection_mode"),generation(s));}
     private static Consent consent(Map<String,Object> s){return new Consent(yes(s,"consent_microphone"),yes(s,"consent_camera"));}
     private Injection injection(Map<String,Object> i){return new Injection(string(i,"id"),string(i,"session_id"),string(i,"message_id"),number(i,"list_sequence"),string(i,"status"),string(i,"provider_item_id"),string(i,"error_code"),instant(i,"created_at"),instant(i,"acknowledged_at"));}
     private Command command(Map<String,Object> c){return new Command(string(c,"id"),string(c,"session_id"),string(c,"response_id"),string(c,"command_type"),string(c,"status"),string(c,"error_code"));}
-    private List<Context> context(Map<String,Object> s){var rows=store.rows("SELECT sender_type,parts_json FROM ai_message WHERE conversation_id=? AND seq<=? AND (sender_type='user' OR (sender_type IN ('assistant','support_agent','expert') AND status='completed')) ORDER BY seq DESC LIMIT 40",s.get("conversation_id"),s.get("context_seq"));List<Context> result=new ArrayList<>();int budget=64000;
+    private List<Context> context(Map<String,Object> s){var rows=store.rows("SELECT sender_type,parts_json FROM ai_message WHERE conversation_id=? AND seq<=? AND (sender_type='user' OR (sender_type IN ('assistant','support_agent','expert') AND status='completed')) ORDER BY seq DESC LIMIT 40",s.get("conversation_id"),s.get("context_seq"));List<Context> result=new ArrayList<>(),priorEvidence=new ArrayList<>();int budget=64000;
+        if(evidenceContext!=null){int remaining=16000;for(var quoted:evidenceContext.forConversation(string(s,"conversation_id"),number(s,"owner_user_id"),number(s,"context_seq"))){
+            if(quoted.content()==null || remaining<=0)continue;int end=Math.min(remaining,quoted.content().length());if(end>0 && Character.isHighSurrogate(quoted.content().charAt(end-1)))end--;
+            if(end>0){priorEvidence.add(new Context("user",quoted.content().substring(0,end)));remaining-=end;budget-=end;}
+        }}
         for(var m:rows){StringBuilder text=new StringBuilder();for(JsonNode p:decode(string(m,"parts_json"))){if("text".equals(p.path("type").asText()))text.append(p.path("text").asText()).append('\n');else text.append("[Previous non-text message content omitted]\n");}if(text.isEmpty())continue;String sender=string(m,"sender_type");if("support_agent".equals(sender)||"expert".equals(sender))text.insert(0,"[Previous human reply]\n");String content=text.substring(0,Math.min(budget,text.length()));result.add(new Context("user".equals(sender)?"user":"assistant",content));budget-=content.length();if(budget<=0)break;}
-        Collections.reverse(result);return result;
+        Collections.reverse(result);priorEvidence.addAll(result);return priorEvidence;
     }
     private static void validate(ProviderEvent e){
         if(e==null||e.sequence()==null||e.sequence()<1||!safe(e.providerEventId(),200)||e.type()==null)throw problem(400,"INVALID_PROVIDER_EVENT");
-        Set<String> allowed=switch(e.type()){
-            case "session.ready" -> Set.of("providerSessionId");case "input.committed" -> Set.of("providerItemId");case "input.transcript" -> Set.of("providerItemId","text");case "response.started" -> Set.of("responseId");case "response.canceled" -> Set.of("responseId","usage");case "response.delta" -> Set.of("responseId","text");case "response.completed" -> Set.of("responseId","text","finishReason","usage");case "injection.ack" -> Set.of("injectionId","providerItemId","requestItemId");case "injection.failed" -> Set.of("injectionId","errorCode");case "command.ack" -> Set.of("commandId","responseId");case "session.error" -> Set.of("errorCode");default -> throw problem(400,"INVALID_PROVIDER_EVENT");};
-        Map<String,Object> values=new HashMap<>();values.put("providerSessionId",e.providerSessionId());values.put("providerItemId",e.providerItemId());values.put("requestItemId",e.requestItemId());values.put("responseId",e.responseId());values.put("injectionId",e.injectionId());values.put("commandId",e.commandId());values.put("text",e.text());values.put("finishReason",e.finishReason());values.put("usage",e.usage());values.put("errorCode",e.errorCode());
+        Set<String> required=switch(e.type()){
+            case "session.ready" -> Set.of("providerSessionId");case "input.committed" -> Set.of("providerItemId");case "input.transcript" -> Set.of("providerItemId","text");
+            case "input.started" -> Set.of("turnGeneration");case "response.started" -> Set.of("responseId");case "response.canceled" -> Set.of("responseId");
+            case "response.delta" -> Set.of("responseId","text");case "response.completed" -> Set.of("responseId","text","finishReason");
+            case "response.step.completed" -> Set.of("responseId","turnGeneration","finishReason");
+            case "tool.result.ack" -> Set.of("responseId","turnGeneration","providerCallId","providerItemId","requestItemId");
+            case "response.continue" -> Set.of("responseId","turnGeneration");
+            case "injection.ack" -> Set.of("injectionId","providerItemId","requestItemId");case "injection.failed" -> Set.of("injectionId","errorCode");
+            case "command.ack" -> Set.of("commandId","responseId");case "session.error" -> Set.of("errorCode");default -> throw problem(400,"INVALID_PROVIDER_EVENT");};
+        Set<String> allowed=new HashSet<>(required);
+        if(e.type().startsWith("response.")){allowed.add("turnGeneration");if(!e.type().equals("response.delta")&&!e.type().equals("response.started")&&!e.type().equals("response.continue"))allowed.add("usage");}
+        if(e.type().equals("response.started"))allowed.add("continuationId");if(e.type().equals("input.started"))allowed.add("providerItemId");
+        Map<String,Object> values=new HashMap<>();values.put("providerSessionId",e.providerSessionId());values.put("providerItemId",e.providerItemId());values.put("requestItemId",e.requestItemId());values.put("responseId",e.responseId());values.put("injectionId",e.injectionId());values.put("commandId",e.commandId());values.put("text",e.text());values.put("finishReason",e.finishReason());values.put("usage",e.usage());values.put("errorCode",e.errorCode());values.put("turnGeneration",e.turnGeneration());values.put("providerCallId",e.providerCallId());values.put("continuationId",e.continuationId());
         for(var value:values.entrySet())if(value.getValue()!=null&&!allowed.contains(value.getKey()))throw problem(400,"UNEXPECTED_PROVIDER_EVENT_FIELD");
-        for(String field:allowed){if(Set.of("usage").contains(field))continue;if(values.get(field)==null)throw problem(400,"MISSING_PROVIDER_EVENT_FIELD");}
+        for(String field:required)if(values.get(field)==null)throw problem(400,"MISSING_PROVIDER_EVENT_FIELD");
+        if(e.turnGeneration()!=null && e.turnGeneration()<0)throw problem(400,"INVALID_TURN_GENERATION");
         if("injection.ack".equals(e.type()) && e.providerItemId().length()>100)throw problem(400,"INVALID_PROVIDER_ID");
-        if(e.providerSessionId()!=null)providerId(e.providerSessionId());if(e.providerItemId()!=null)providerId(e.providerItemId());if(e.requestItemId()!=null)providerId(e.requestItemId());if(e.responseId()!=null)providerId(e.responseId());if(e.injectionId()!=null)validId(e.injectionId());if(e.commandId()!=null)validId(e.commandId());
+        if(e.providerSessionId()!=null)providerId(e.providerSessionId());if(e.providerItemId()!=null)providerId(e.providerItemId());if(e.requestItemId()!=null)providerId(e.requestItemId());if(e.responseId()!=null)providerId(e.responseId());if(e.providerCallId()!=null)providerId(e.providerCallId());if(e.injectionId()!=null)validId(e.injectionId());if(e.commandId()!=null)validId(e.commandId());if(e.continuationId()!=null&&!e.continuationId().matches("[a-f0-9]{32}"))throw problem(400,"INVALID_CONTINUATION_ID");
         if(e.text()!=null&&(e.text().length()>("response.completed".equals(e.type())?128000:16000)||("response.delta".equals(e.type())&&e.text().isEmpty())))throw problem(400,"INVALID_EVENT_TEXT");
         if(e.finishReason()!=null&&!FINISH.contains(e.finishReason()))throw problem(400,"INVALID_FINISH_REASON");
         if(e.usage()!=null&&(e.usage().inputTokens()==null||e.usage().outputTokens()==null||e.usage().totalTokens()==null||e.usage().inputTokens()<0||e.usage().outputTokens()<0||e.usage().totalTokens()<0))throw problem(400,"INVALID_USAGE");

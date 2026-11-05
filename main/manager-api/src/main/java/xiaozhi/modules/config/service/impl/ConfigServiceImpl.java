@@ -21,6 +21,7 @@ import xiaozhi.common.redis.RedisKeys;
 import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.common.utils.ConvertUtils;
 import xiaozhi.common.utils.JsonUtils;
+import xiaozhi.modules.agent.Esp32ReplyLength;
 import xiaozhi.modules.agent.dao.AgentVoicePrintDao;
 import xiaozhi.modules.agent.entity.AgentContextProviderEntity;
 import xiaozhi.modules.agent.entity.AgentEntity;
@@ -223,7 +224,7 @@ public class ConfigServiceImpl implements ConfigService {
         // 构建模块配置
         buildModuleConfig(
                 agent.getAgentName(),
-                agent.getSystemPrompt(),
+                Esp32ReplyLength.apply(agent.getEsp32ReplyLength(), agent.getSystemPrompt()),
                 agent.getSummaryMemory(),
                 voice,
                 referenceAudio,

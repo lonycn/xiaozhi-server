@@ -24,6 +24,7 @@ public final class MediaModels {
     public record Consent(@JsonDeserialize(using=StrictBoolean.class) Boolean microphone,@JsonDeserialize(using=StrictBoolean.class) Boolean camera,@JsonDeserialize(using=StrictBoolean.class) Boolean allowSnapshots) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Create(String requestId,String clientSessionId,String mode,Consent consent) { }
+    public record DialResult(String status, Session session) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Epoch(Long expectedEpoch) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -53,9 +54,18 @@ public final class MediaModels {
             String cleanupStatus,String errorCode,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant expiresAt,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant createdAt,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant endedAt) { }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Token(String serverUrl,String participantToken,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant expiresAt,String sessionId,
-            @JsonSerialize(using=NumericLong.class) long controlEpoch,int roomGeneration,String participantIdentity,List<String> publishSources) {
+            @JsonSerialize(using=NumericLong.class) long controlEpoch,int roomGeneration,String participantIdentity,List<String> publishSources,String roomName,String peerIdentity) {
         @Override public String toString(){return "MediaToken[redacted]";}
     }
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Invitation(String id,String type,String sessionId,String conversationId,String fromUserId,String toUserId,String status,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant expiresAt) { }
+    public record InvitationPreview(String id,String type,String sessionId,String conversationId,String fromUserId,String toUserId,
+            String status,@JsonFormat(shape=JsonFormat.Shape.STRING) Instant expiresAt,String callerName,String recipientType,
+            @JsonSerialize(using=NumericLong.class) long controlEpoch) { }
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record Invitation(String id,String type,String sessionId,String conversationId,String fromUserId,String toUserId,String status,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) Instant expiresAt,String requestId,String serviceType,String mode,boolean requiresResponse) {
+        public Invitation(String id,String type,String sessionId,String conversationId,String fromUserId,String toUserId,String status,Instant expiresAt) {
+            this(id,type,sessionId,conversationId,fromUserId,toUserId,status,expiresAt,null,null,null,true);
+        }
+    }
 }

@@ -81,6 +81,13 @@ public final class LiveKitAdapter implements AutoCloseable {
                 && config.tokenTtlSeconds()>=15 && config.tokenTtlSeconds()<=120;
         } catch(RuntimeException ignored) { return false; }
     }
+    public static boolean securePublicUrl(String value) {
+        try {
+            return endpoint(value,Set.of("wss"));
+        } catch(IllegalArgumentException malformed) {
+            return false;
+        }
+    }
     private static boolean endpoint(String value,Set<String> schemes) {
         if(value==null || value.isBlank())return false;
         URI uri=URI.create(value);

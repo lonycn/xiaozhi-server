@@ -54,6 +54,7 @@ import xiaozhi.modules.agent.entity.AgentSnapshotEntity;
 import xiaozhi.modules.agent.entity.AgentTagEntity;
 import xiaozhi.modules.agent.entity.AgentTagRelationEntity;
 import xiaozhi.modules.agent.Enums.AgentSnapshotField;
+import xiaozhi.modules.agent.Esp32ReplyLength;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentContextProviderService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
@@ -345,6 +346,7 @@ public class AgentSnapshotServiceImpl extends BaseServiceImpl<AgentSnapshotDao, 
         data.setIntentModelId(agent.getIntentModelId());
         data.setChatHistoryConf(agent.getChatHistoryConf());
         data.setSystemPrompt(agent.getSystemPrompt());
+        data.setEsp32ReplyLength(agent.getEsp32ReplyLength());
         data.setSummaryMemory(agent.getSummaryMemory());
         data.setLangCode(agent.getLangCode());
         data.setLanguage(agent.getLanguage());
@@ -459,6 +461,7 @@ public class AgentSnapshotServiceImpl extends BaseServiceImpl<AgentSnapshotDao, 
             case CORRECT_WORD_FILE_IDS -> normalizeStringList((List<String>) value);
             case TAG_NAMES -> normalizeStringList((List<String>) value);
             case SUMMARY_MEMORY -> normalizeBlankText(value);
+            case ESP32_REPLY_LENGTH -> value == null ? Esp32ReplyLength.STANDARD : value;
             default -> value;
         };
     }

@@ -17,8 +17,13 @@ public final class ExternalPathPolicy {
         if(method.equals("GET")) {
             return path.equals("/api/v1/app/capabilities")
                 || path.equals("/api/v1/external/media-invitations")
+                || path.equals("/api/v1/support/experts")
                 || path.equals("/api/v1/ai/conversations")
-                || path.matches("/api/v1/ai/conversations/"+C+"(?:/(?:messages|events|runs|stream|tools))?")
+                || path.equals("/api/v1/ai/skills")
+                || path.equals("/api/v1/ai/runtime-control")
+                || path.matches("/api/v1/ai/conversations/"+C+"/skill")
+                || path.matches("/api/v1/ai/conversations/"+C+"/speech/"+C+"(?:/audio)?")
+                || path.matches("/api/v1/ai/conversations/"+C+"(?:/(?:messages|events|runs|stream|tools|tool-results|context))?")
                 || path.matches("/api/v1/ai/conversations/"+C+"/runs/"+C)
                 || path.matches("/api/v1/ai/attachments/"+N)
                 || path.matches("/api/v1/support/requests/"+C)
@@ -31,6 +36,9 @@ public final class ExternalPathPolicy {
         }
         if(method.equals("POST"))return path.equals("/api/v1/ai/conversations")
             || path.matches("/api/v1/ai/conversations/"+C+"/(?:messages|handoff|resume-ai)")
+            || path.matches("/api/v1/ai/conversations/"+C+"/skill")
+            || path.matches("/api/v1/ai/conversations/"+C+"/messages/"+C+"/speech")
+            || path.matches("/api/v1/ai/conversations/"+C+"/speech/"+C+"/cancel")
             || path.matches("/api/v1/ai/conversations/"+C+"/runs/"+C+"/(?:cancel|retry)")
             || path.equals("/api/v1/ai/uploads/init")
             || path.matches("/api/v1/ai/uploads/"+N+"/complete")
@@ -44,16 +52,23 @@ public final class ExternalPathPolicy {
     public static boolean mediaAllowed(String method,String path) {
         if(method.equals("GET"))return path.equals("/api/v1/support/media-drain") || path.matches("/api/v1/support/media-transfers/"+N) || path.equals("/api/v1/ai/realtime/capabilities") || path.matches("/api/v1/ai/realtime/sessions/(?:"+C+"|current)")
             || path.matches("/api/v1/ai/realtime/sessions/"+C+"/injections")
+            || path.matches("/api/v1/ai/realtime/sessions/"+C+"/input-state")
+            || path.matches("/api/v1/ai/realtime/sessions/"+C+"/materials/"+C)
             || path.matches("/api/v1/support/media-sessions/(?:"+N+"|current)");
-        if(method.equals("POST"))return path.equals("/api/v1/ai/realtime/sessions")
+        if(method.equals("POST"))return path.equals("/api/v1/external/call-presence")
+            || path.equals("/api/v1/ai/realtime/sessions")
             || path.matches("/api/v1/ai/realtime/sessions/"+C+"/(?:connect-ticket|messages|interrupt|end)")
+            || path.matches("/api/v1/ai/realtime/sessions/"+C+"/(?:input-pauses|materials)")
+            || path.matches("/api/v1/ai/realtime/sessions/"+C+"/input-pauses/"+C+"/(?:resume|cancel)")
             || path.matches("/api/v1/support/media-transfers/"+N+"/(?:approve|reject|cancel)")
+            || path.equals("/api/v1/support/media-sessions/dial")
             || path.equals("/api/v1/support/media-sessions")
-            || path.matches("/api/v1/support/media-sessions/"+N+"/(?:accept|reject|token|ready|end)");
+            || path.matches("/api/v1/support/media-sessions/"+N+"/(?:accept|reject|cancel|token|ready|end)");
         return false;
     }
     public static Set<String> queryKeys(String method,String path) {
         if(!method.equals("GET"))return Set.of();
+        if(path.equals("/api/v1/support/experts"))return Set.of("before","limit");
         if(path.equals("/api/v1/external/media-invitations"))return Set.of("after","limit");
         if(path.equals("/api/v1/support/media-drain"))return Set.of("conversation_id");
         if(path.endsWith("/sessions/current") || path.equals("/api/v1/support/media-sessions/current"))return Set.of("conversation_id");
@@ -63,7 +78,7 @@ public final class ExternalPathPolicy {
         if(path.equals("/api/v1/support/annotations"))return Set.of("conversation_id","after","limit");
         if(path.endsWith("/messages") || path.endsWith("/events"))return Set.of("after","limit");
         if(path.endsWith("/stream"))return Set.of("after");
-        if(path.equals("/api/v1/ai/conversations") || path.endsWith("/runs") || path.endsWith("/tools"))return Set.of("before","limit");
+        if(path.equals("/api/v1/ai/conversations") || path.endsWith("/runs") || path.endsWith("/tools") || path.endsWith("/tool-results"))return Set.of("before","limit");
         return Set.of();
     }
 }

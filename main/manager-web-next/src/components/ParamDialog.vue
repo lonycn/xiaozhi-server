@@ -197,7 +197,7 @@ export default {
         font-weight: 500;
         padding-right: 14px;
         text-align: right;
-        font-size: 15px;
+        font-size: var(--admin-font-base);
         letter-spacing: 0.2px;
         line-height: 44px;
       }
@@ -211,7 +211,7 @@ export default {
         height: 44px;
         padding: 0 14px;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         color: #334155;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
@@ -237,7 +237,7 @@ export default {
         border: 1px solid #e2e8f0;
         height: 44px;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         color: #334155;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
@@ -261,7 +261,7 @@ export default {
         border: 1px solid #e2e8f0;
         padding: 10px 14px;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         color: #334155;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         line-height: 1.5;

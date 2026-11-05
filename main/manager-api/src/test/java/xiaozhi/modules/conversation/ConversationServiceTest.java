@@ -87,4 +87,33 @@ class ConversationServiceTest {
         assertThrows(ConversationProblem.class, () -> service.list(7L, 0, 0));
         verifyNoInteractions(dao);
     }
+    @Test
+    void recordsWebAndAppOriginsWithoutChangingConversationIdentity() throws Exception {
+        var request = new org.springframework.mock.web.MockHttpServletRequest();
+        var attributes = new org.springframework.web.context.request.ServletRequestAttributes(request);
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(attributes);
+        try {
+            service.create(7L, new CreateConversation("Web", null));
+            var payload = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(dao).insertEvent(anyString(), anyString(), eq(1L), eq("conversation.created"), payload.capture());
+            assertEquals("web", json.readTree(payload.getValue()).path("source").asText());
+            clearInvocations(dao);
+            request.setAttribute(xiaozhi.modules.externalidentity.ExternalIdentityService.ATTRIBUTE, mock(xiaozhi.modules.externalidentity.ExternalModels.Principal.class));
+            service.create(7L, new CreateConversation("App", null));
+            verify(dao).insertEvent(anyString(), anyString(), eq(1L), eq("conversation.created"), payload.capture());
+            assertEquals("app", json.readTree(payload.getValue()).path("source").asText());
+            clearInvocations(dao);request.addHeader("X-Conversation-Source", "web");
+            service.create(7L, new CreateConversation("External web", null));
+            verify(dao).insertEvent(anyString(), anyString(), eq(1L), eq("conversation.created"), payload.capture());
+            assertEquals("web", json.readTree(payload.getValue()).path("source").asText());
+        } finally { org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes(); }
+    }
+    @Test
+    void anOrdinaryClientCannotClaimTheHardwareChannel() {
+        var request = new org.springframework.mock.web.MockHttpServletRequest();request.addHeader("X-Conversation-Source", "hardware");
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(new org.springframework.web.context.request.ServletRequestAttributes(request));
+        try { assertEquals(400, assertThrows(ConversationProblem.class, () -> service.create(7L,new CreateConversation("spoof",null))).status());verifyNoInteractions(dao); }
+        finally { org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes(); }
+    }
+
 }

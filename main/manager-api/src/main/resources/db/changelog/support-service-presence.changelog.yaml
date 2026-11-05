@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611041600-support-service-presence
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202611041600-support-service-presence.sql
+            relativeToChangelogFile: true

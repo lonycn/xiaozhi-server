@@ -38,6 +38,9 @@ import xiaozhi.modules.sys.service.SysParamsService;
 public class OTAController {
     private final DeviceService deviceService;
     private final SysParamsService sysParamsService;
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32ota.Esp32FirmwareService> firmware;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setControlledFirmware(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32ota.Esp32FirmwareService> firmware){this.firmware=firmware;}
 
     @Operation(summary = "OTA版本和设备激活状态检查")
     @PostMapping
@@ -56,7 +59,13 @@ public class OTAController {
         if (!macAddressValid) {
             return createResponse(DeviceReportRespDTO.createError("Invalid device ID"));
         }
-        return createResponse(deviceService.checkDeviceActive(deviceId, clientId, deviceReportReqDTO));
+        DeviceReportRespDTO result=deviceService.checkDeviceActive(deviceId, clientId, deviceReportReqDTO);
+        var controlled=firmware==null?null:firmware.getIfAvailable();
+        if(controlled!=null&&controlled.enrolled(deviceId)) {
+            try{result.setFirmware(controlled.manifest(deviceId,clientId,deviceReportReqDTO));}
+            catch(java.io.IOException e){throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"firmware_temporarily_unavailable");}
+        }
+        return createResponse(result);
     }
 
     @Operation(summary = "设备快速检查激活状态")

@@ -761,6 +761,9 @@ databaseChangeLog:
       file: support.changelog.yaml
       relativeToChangelogFile: true
   - include:
+      file: support-public-profiles.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
       file: ai-execution.changelog.yaml
       relativeToChangelogFile: true
   - include:
@@ -798,4 +801,58 @@ databaseChangeLog:
       relativeToChangelogFile: true
   - include:
       file: ai-provider-request-usage.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: ai-context.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: ai-public-results.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: realtime-tools.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: realtime-inputs.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: answer-speech.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: ai-skills.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: esp32-gateway.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: esp32-conversation.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: esp32-ai.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: esp32-firmware.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: cosyvoice-v2-voices.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: cosyvoice-v35-flash.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: model-test.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: ai-runtime-control.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: ai-provider-attempt-audit.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: esp32-intents.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: chat-archive.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: esp32-reply-length.changelog.yaml
       relativeToChangelogFile: true

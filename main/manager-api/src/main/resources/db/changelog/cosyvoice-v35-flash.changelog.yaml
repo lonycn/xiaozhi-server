@@ -1,0 +1,19 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611051800-cosyvoice-v35-model
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202611051800-cosyvoice-v35-model.sql
+      relativeToChangelogFile: true
+  - changeSet:
+      id: 202611051600-cosyvoice-v35-flash
+      author: codex
+      # A model may be switched after the initial migration; seed only when selected.
+      runAlways: true
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202611051600-cosyvoice-v35-flash.sql
+      relativeToChangelogFile: true

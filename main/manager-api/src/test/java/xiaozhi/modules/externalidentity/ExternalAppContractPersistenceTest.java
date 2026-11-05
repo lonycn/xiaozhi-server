@@ -31,6 +31,7 @@ import xiaozhi.modules.supportmedia.livekit.LiveKitAdapter;
 class ExternalAppContractPersistenceTest {
     static JdbcTemplate db; static ExternalIdentityService identity; static ExternalMediaAuthority authority;
     static ExternalInvitationController inbox; static ConversationService conversations; static SupportService support;
+    static CallPresenceService presence; static CallPresenceCache presenceCache; static final Map<String,CallPresenceCache.Lease> presenceLeases=new java.util.concurrent.ConcurrentHashMap<>();
     static MediaService media; static MediaMaintenance maintenance; static MockEnvironment env;
     static final Consent CONSENT=new Consent(true,false,false);
     static String key(){return UUID.randomUUID().toString().replace("-","");}
@@ -39,7 +40,7 @@ class ExternalAppContractPersistenceTest {
         ExternalIdentityPersistenceTest.initialize(System.getenv("EXTERNAL_APP_TEST_JDBC_URL"));
         db=ExternalIdentityPersistenceTest.db; identity=ExternalIdentityPersistenceTest.service;
         var source=(DriverManagerDataSource)db.getDataSource();
-        try(var connection=source.getConnection();var migration=new Liquibase("db/changelog/support-summary.changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){migration.update(new Contexts());}
+        for(String name:List.of("support-summary","support-public-profiles"))try(var connection=source.getConnection();var migration=new Liquibase("db/changelog/"+name+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){migration.update(new Contexts());}
         var manager=new DataSourceTransactionManager(source); var dao=new ConversationDao(db);
         conversations=ExternalIdentityPersistenceTest.conversations;
         env=new MockEnvironment().withProperty("support-media.livekit.room-prefix","test-room-").withProperty("features.support-media-enabled","true").withProperty("features.external-realtime-media-enabled","true");
@@ -49,15 +50,58 @@ class ExternalAppContractPersistenceTest {
         var store=new MediaStore(db,manager);var policy=new MediaPolicy(store,dao);policy.setExternal(authority);
         var livekit=new LiveKitAdapter(new LiveKitAdapter.Config("http://fixture.invalid","ws://fixture.invalid","fixture-key","fixture-secret-at-least-32-characters","test-room-"),ExternalIdentityPersistenceTest.JSON,policy,Clock.systemUTC(),
             (uri,authorization,body,timeout)->new LiveKitAdapter.RpcResponse(404,"{\"code\":\"not_found\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        media=new MediaService(store,policy,livekit,dao,ExternalIdentityPersistenceTest.JSON,env);maintenance=new MediaMaintenance(media,store,policy,livekit);
+        presenceCache=mock(CallPresenceCache.class);
+        when(presenceCache.get(anyLong(),anyString())).thenAnswer(call->presenceLeases.get(call.getArgument(0)+":"+call.getArgument(1)));
+        doAnswer(call->{var lease=(CallPresenceCache.Lease)call.getArgument(0);presenceLeases.put(lease.userId()+":"+lease.conversationId(),lease);return null;}).when(presenceCache).publish(any());
+        doAnswer(call->{String key=call.getArgument(0)+":"+call.getArgument(1);presenceLeases.computeIfPresent(key,(k,v)->v.sourceId()==(Long)call.getArgument(2) && v.tokenId()==(Long)call.getArgument(3)?null:v);return null;}).when(presenceCache).remove(anyLong(),anyString(),anyLong(),anyLong());
+        presence=new CallPresenceService(store,policy,authority,presenceCache,env);
+        media=new MediaService(store,policy,livekit,dao,ExternalIdentityPersistenceTest.JSON,env);media.setCallPresence(presence);maintenance=new MediaMaintenance(media,store,policy,livekit);
         support=new SupportService(db,ExternalIdentityPersistenceTest.JSON,manager,conversations);support.setMediaHooksForTests(media);
         db.update("INSERT INTO sys_user(id,username,password,super_admin,status,create_date) VALUES(71,'fixture-staff','fixture',0,1,CURRENT_TIMESTAMP(3))");
-        db.update("INSERT INTO support_agent_profile(user_id,role,capacity_text,accepting,presence_expires_at) VALUES(71,'expert',20,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))");
+        db.update("INSERT INTO support_agent_profile(user_id,role,capacity_text,accepting,presence_expires_at) VALUES(71,'support_agent',20,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))");
     }
     static Principal principal(Exchanged value){return identity.authenticate(value.token());}
     static MockHttpServletRequest request(Principal p){var req=new MockHttpServletRequest();req.setAttribute(ExternalIdentityService.ATTRIBUTE,p);return req;}
     static void caller(Principal p){RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request(p)));}
-    static List<Invitation> list(Principal p,long after,int limit){return inbox.list(after,limit,request(p),new MockHttpServletResponse()).getData().items();}
+    static List<InvitationPreview> list(Principal p,long after,int limit){return inbox.list(after,limit,request(p),new MockHttpServletResponse()).getData().items();}
+
+    @Test void realPresenceOwnershipExpiryRevocationRolesBusyAndIdempotency()throws Exception {
+        var app=principal(ExternalIdentityPersistenceTest.login("presence-"+key(),"APP","1"));
+        var anotherSource=principal(ExternalIdentityPersistenceTest.login(app.subject(),"OTHER","1"));
+        var foreignTenant=principal(ExternalIdentityPersistenceTest.login(app.subject(),"FOREIGN","2"));
+        db.update("INSERT INTO sys_user(id,username,password,super_admin,status,create_date) VALUES(72,'fixture-expert','fixture',0,1,CURRENT_TIMESTAMP(3))");
+        db.update("INSERT INTO support_agent_profile(user_id,role,roles_json,capacity_text,expert_accepting,expert_presence_expires_at) VALUES(72,'support_agent',JSON_ARRAY('support_agent','expert'),20,1,DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 HOUR))");
+        for(String role:List.of("support_agent","expert")){
+            long staff=role.equals("expert")?72:71;
+            String conversation=conversations.create(app.userId(),new CreateConversation("presence fixture",null)).id();
+            var request=support.handoff(app.userId(),conversation,new Handoff(key(),"text",null,role));support.claim(staff,request.requestId());
+            String requestId=request.requestId();
+            assertEquals("offline",presence.availability(staff,requestId).status());
+            assertEquals(404,assertThrows(ConversationProblem.class,()->presence.availability(staff==71?72L:71L,requestId)).status());
+            assertEquals(404,assertThrows(ConversationProblem.class,()->presence.publish(foreignTenant,new CallPresenceService.Update(conversation,true,false))).status());
+            assertEquals("MEDIA_CUSTOMER_OFFLINE",assertThrows(ConversationProblem.class,()->media.create(staff,new Create(requestId,key(),"audio",CONSENT))).getMessage());
+            presence.publish(app,new CallPresenceService.Update(conversation,true,false));assertEquals("online",presence.availability(staff,requestId).status());
+            // Old source teardown cannot erase a newly selected foreground source.
+            presence.publish(anotherSource,new CallPresenceService.Update(conversation,true,false));presence.publish(app,new CallPresenceService.Update(conversation,false,false));
+            assertEquals(anotherSource.sourceId(),presenceLeases.get(app.userId()+":"+conversation).sourceId());
+            presence.publish(app,new CallPresenceService.Update(conversation,true,false));
+            assertEquals("MEDIA_CUSTOMER_VIDEO_UNAVAILABLE",assertThrows(ConversationProblem.class,()->media.create(staff,new Create(requestId,key(),"video",new Consent(true,true,false)))).getMessage());
+            String client=key();var body=new Create(requestId,client,"audio",CONSENT);var session=media.create(staff,body);
+            assertEquals(app.sourceId(),db.queryForObject("SELECT external_source_id FROM support_media_session WHERE id=?",Long.class,session.id()));
+            assertEquals("busy",presence.availability(staff,requestId).status());
+            presence.publish(app,new CallPresenceService.Update(conversation,false,false));
+            assertEquals(session.id(),media.create(staff,body).id(),"Idempotent create survives presence teardown");
+            caller(anotherSource);assertThrows(ExternalProblem.class,()->media.accept(app.userId(),session.id(),new Accept(session.controlEpoch(),CONSENT)));
+            caller(null);media.cancel(staff,session.id(),new Epoch(session.controlEpoch()));maintenance.processOutbox();
+            assertEquals("active",db.queryForObject("SELECT status FROM support_request WHERE id=?",String.class,requestId));
+            presenceLeases.put(app.userId()+":"+conversation,new CallPresenceCache.Lease(app.userId(),conversation,app.sourceId(),app.tokenId(),true,Instant.now().minusSeconds(1)));
+            assertEquals("offline",presence.availability(staff,requestId).status());
+        }
+        String revokedConversation=conversations.create(app.userId(),new CreateConversation("revoked fixture",null)).id();
+        presence.publish(app,new CallPresenceService.Update(revokedConversation,true,false));identity.logout(app);
+        assertNull(presence.ready(app.userId(),revokedConversation));
+    }
+
     @AfterEach void reset(){RequestContextHolder.resetRequestAttributes();}
     @Test void identityScopedPreviewBindingAndOwnerEndPreserveHistory() throws Exception {
         String subject="contract-"+key(); var a=principal(ExternalIdentityPersistenceTest.login(subject,"A","1"));
@@ -77,10 +121,17 @@ class ExternalAppContractPersistenceTest {
         conversations.send(owner,conversation,new SendMessage(key(),List.of(new MessagePart("text","preserve contract history",null,null,null,null,null,null))));
         var req=support.handoff(owner,conversation,new Handoff(key(),"text",null));support.claim(71L,req.requestId());
         db.update("INSERT INTO support_summary_revision(conversation_id,version,origin,source_through_seq,source_truncated,fields_json,released_assignment_ids) VALUES(?,1,'deterministic_excerpt',1,0,'{}','[]')",conversation);
+        presence.publish(a,new CallPresenceService.Update(conversation,true,false));
         var session=media.create(71L,new Create(req.requestId(),key(),"audio",CONSENT));
-        assertEquals(1,list(a,0,50).size());assertEquals(1,list(b,0,50).size());
+        var preview=list(a,0,50).getFirst();
+        assertEquals(session.id(),preview.sessionId());
+        assertEquals(conversation,preview.conversationId());
+        assertEquals("fixture-staff",preview.callerName());
+        assertEquals("human",preview.recipientType());
+        assertEquals(session.controlEpoch(),preview.controlEpoch());
+        assertTrue(list(b,0,50).isEmpty());assertTrue(list(otherToken,0,50).isEmpty());
         assertTrue(list(otherTenant,0,50).isEmpty());assertTrue(list(otherUser,0,50).isEmpty());assertTrue(list(otherIssuer,0,50).isEmpty());
-        assertNull(db.queryForObject("SELECT external_source_id FROM support_media_session WHERE id=?",Long.class,session.id()));
+        assertEquals(a.sourceId(),db.queryForObject("SELECT external_source_id FROM support_media_session WHERE id=?",Long.class,session.id()));
         caller(a);var accepted=media.accept(owner,session.id(),new Accept(session.controlEpoch(),CONSENT));assertEquals("connecting",accepted.status());
         assertEquals(a.sourceId(),db.queryForObject("SELECT external_source_id FROM support_media_session WHERE id=?",Long.class,session.id()));
         assertEquals(a.tokenId(),db.queryForObject("SELECT external_token_id FROM support_media_session WHERE id=?",Long.class,session.id()));

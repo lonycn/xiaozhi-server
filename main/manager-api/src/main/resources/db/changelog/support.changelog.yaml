@@ -7,3 +7,9 @@ databaseChangeLog:
             encoding: utf8
             path: 202610301200.sql
             relativeToChangelogFile: true
+  - include:
+      file: support-service-types.changelog.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: support-service-presence.changelog.yaml
+      relativeToChangelogFile: true

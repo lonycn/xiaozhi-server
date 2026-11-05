@@ -23,9 +23,23 @@ class SchemaPreparationTest(unittest.TestCase):
         env = ci.environment(names, 'ci-fixture')
         self.assertTrue(all('127.0.0.1:34776/' in value for key, value in env.items() if key.endswith('_JDBC_URL')))
         self.assertIn('AGENT_TOOL_TEST_JDBC_URL', env)
+        self.assertIn('AI_CONTEXT_TEST_JDBC_URL', env)
+        self.assertIn('REALTIME_TOOL_TEST_JDBC_URL', env)
+        self.assertIn('REALTIME_INPUT_TEST_JDBC_URL', env)
         self.assertIn('EXTERNAL_APP_TEST_JDBC_URL', env)
         self.assertIn('RENEWAL_TEST_JDBC_URL', env)
         self.assertEqual(env['SPRING_DATA_REDIS_PORT'], '34777')
+
+    def test_actual_ci_suffix_and_longest_allowed_suffix_fit_mysql_identifiers(self):
+        for tag in ['a' * 16, 'b' * 24]:
+            names=ci.plan(tag)
+            self.assertEqual(len(names),len(set(names.values())))
+            self.assertTrue(all(len(name)<=64 and name.endswith('_'+tag) for name in names.values()))
+            self.assertEqual(names['ESP32_GATEWAY_UPGRADE'], 'xiaozhi_esp32_gateway_upgrade_test_gwu_' + tag)
+            self.assertEqual(set(names), set(ci.SCHEMAS))
+            for key, name in names.items():
+                self.assertTrue(name.startswith(ci.SCHEMAS[key][0]), key)
+                self.assertRegex(name, r'^[a-z0-9_]{1,64}$')
 
     def test_main_refuses_non_ci_and_existing_schema_without_mutation(self):
         with patch.dict(os.environ, {'GITHUB_ACTIONS': 'false'}, clear=True), patch.object(ci.subprocess, 'run') as run:

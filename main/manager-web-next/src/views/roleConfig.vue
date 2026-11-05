@@ -44,6 +44,10 @@
                 <el-button class="custom-tag-btn" v-else size="small" @click="showInput">+ {{ $t("roleConfig.addTag") }}</el-button>
               </div>
               <div class="header-actions">
+                <el-button v-if="esp32IntentsEnabled && $route.query.agentId"
+                  @click="$router.push({ path: '/esp32-intents', query: { agentId: $route.query.agentId } })">
+                  {{ $t('esp32Intent.title') }}
+                </el-button>
                 <div class="hint-text">
                   <img loading="lazy" src="@/assets/home/info.png" alt="" />
                   <span>{{ $t("roleConfig.restartNotice") }}</span>
@@ -108,7 +112,7 @@
                         </el-tooltip>
                       </template>
                       <div style="display: flex; align-items: center; justify-content: space-between;">
-                        <span style="color: #606266; font-size: 13px;">
+                        <span style="color: #606266; font-size: var(--admin-font-base);">
                           {{ $t('roleConfig.contextProviderSuccess', { count: currentContextProviders.length }) }}<a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/docs/context-provider-integration.md" target="_blank" class="doc-link">{{ $t('roleConfig.contextProviderDocLink') }}</a>
                         </span>
                         <el-button
@@ -136,6 +140,19 @@
                         show-word-limit
                         class="form-textarea"
                       />
+                    </el-form-item>
+
+                    <el-form-item :label="$t('agentSnapshot.field.esp32ReplyLength')">
+                      <el-select
+                        v-model="form.esp32ReplyLength"
+                        :aria-label="$t('agentSnapshot.field.esp32ReplyLength')"
+                        :disabled="!agentConfigLoaded"
+                      >
+                        <el-option :label="$t('roleConfig.esp32ReplyLength.short')" value="short" />
+                        <el-option :label="$t('roleConfig.esp32ReplyLength.standard')" value="standard" />
+                        <el-option :label="$t('roleConfig.esp32ReplyLength.detailed')" value="detailed" />
+                      </el-select>
+                      <div class="form-hint">{{ $t('roleConfig.esp32ReplyLength.help') }}</div>
                     </el-form-item>
 
                     <el-form-item>
@@ -384,9 +401,10 @@
                           </el-select>
                         </div>
                       </el-form-item>
-
+                    </div>
+                    <div class="model-row">
                       <!-- 音色选择器 -->
-                      <el-form-item class="model-item">
+                      <el-form-item class="model-item voice-select-item">
                         <template #label>
                           <el-tooltip :content="$t('roleConfig.tooltip.voiceType')" placement="top" effect="light" popper-class="custom-tooltip">
                             <span>{{ $t('roleConfig.voiceType') }}</span>
@@ -396,8 +414,10 @@
                           <el-select
                             v-model="form.ttsVoiceId"
                             filterable
+                            :loading="voiceOptionsLoading"
                             :disabled="voiceOptionsLoading"
-                            :placeholder="$t('roleConfig.pleaseSelect')"
+                            :placeholder="$t('roleConfig.searchVoice')"
+                            :aria-label="$t('roleConfig.voiceType')"
                             class="form-select"
                             @change="handleVoiceChange"
                           >
@@ -420,6 +440,7 @@
                                     link type="primary"
                                     
                                     size="small"
+                                    :aria-label="`${$t('ttsModel.preview')} ${item.label}`"
                                     @click.stop="toggleAudioPlayback(item.value)"
                                     :loading="false"
                                     class="play-button"
@@ -441,6 +462,9 @@
                           >
                             {{ $t('roleConfig.advancedSettings') }}
                           </el-button>
+                        </div>
+                        <div v-if="!voiceOptionsLoading && voiceOptions.length" class="voice-count">
+                          {{ $t('roleConfig.voiceCount', { count: voiceOptions.length }) }}
                         </div>
                       </el-form-item>
                     </div>
@@ -498,6 +522,7 @@ export default {
   components: { FunctionDialog, ContextProviderDialog, TtsAdvancedSettings, AgentSnapshotDialog},
   data() {
     return {
+      esp32IntentsEnabled: import.meta.env.VITE_ESP32_INTENTS_ENABLED === 'true',
       showContextProviderDialog: false,
       showTtsAdvancedDialog: false,
       showSnapshotDialog: false,
@@ -516,6 +541,7 @@ export default {
         ttsPitch: null,
         chatHistoryConf: 0,
         systemPrompt: "",
+        esp32ReplyLength: "standard",
         summaryMemory: "",
         langCode: "",
         language: "",
@@ -637,6 +663,7 @@ export default {
         memModelId: this.form.model.memModelId,
         intentModelId: this.form.model.intentModelId,
         systemPrompt: this.form.systemPrompt,
+        esp32ReplyLength: this.form.esp32ReplyLength,
         summaryMemory: this.form.summaryMemory,
         langCode: this.form.langCode,
         language: this.form.language,
@@ -804,6 +831,7 @@ export default {
             ttsLanguage: "",
             chatHistoryConf: 0,
             systemPrompt: "",
+            esp32ReplyLength: "standard",
             summaryMemory: "",
             langCode: "",
             language: "",
@@ -979,6 +1007,7 @@ export default {
             this.form = {
               ...this.form,
               ...agentData,
+              esp32ReplyLength: agentData.esp32ReplyLength ?? "standard",
               model: {
                 ttsModelId: agentData.ttsModelId,
                 vadModelId: agentData.vadModelId,
@@ -1937,7 +1966,7 @@ export default {
 }
 
 .page-title {
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
   color: #2c3e50;
 }
@@ -1990,7 +2019,7 @@ export default {
   gap: 13px;
   padding: 0 0 5px 0;
   font-weight: 700;
-  font-size: 19px;
+  font-size: var(--admin-font-title);
   color: #3d4566;
   justify-content: space-between;
 }
@@ -2031,7 +2060,7 @@ export default {
   border-radius: 999px;
   background: #f4f7ff;
   color: #5778ff;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   font-weight: 500;
   line-height: 1.5;
 }
@@ -2074,12 +2103,13 @@ export default {
 
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
 }
 
 .form-column {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 6px;
 }
@@ -2111,10 +2141,29 @@ export default {
   width: 100%;
 }
 
+.form-hint {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: var(--admin-font-xs);
+  line-height: 20px;
+}
+
 .voice-select-wrapper {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.voice-select-item :deep(.el-form-item__content) {
+  min-width: 0;
+}
+
+.voice-count {
+  width: 100%;
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: var(--admin-font-xs);
+  line-height: 20px;
 }
 
 .template-container {
@@ -2131,7 +2180,7 @@ export default {
   background: #e6ebff;
   line-height: 4vh;
   font-weight: 400;
-  font-size: 11px;
+  font-size: var(--admin-font-xs);
   text-align: center;
   color: #5778ff;
   cursor: pointer;
@@ -2170,7 +2219,7 @@ export default {
 }
 
 .model-row .el-form-item__label {
-  font-size: 12px !important;
+  font-size: var(--admin-font-xs) !important;
   color: #3d4566 !important;
   font-weight: 400;
   line-height: 22px;
@@ -2193,14 +2242,14 @@ export default {
   justify-content: center;
   color: #5778ff;
   font-weight: bold;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   margin-right: 8px;
   position: relative;
   background-color: #e6ebff;
 }
 
 :deep(.el-form-item__label) {
-  font-size: 12px !important;
+  font-size: var(--admin-font-xs) !important;
   color: #3d4566 !important;
   font-weight: 400;
   line-height: 22px;
@@ -2211,7 +2260,7 @@ export default {
   color: #909399;
   background: none;
   position: absolute;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   right: 3%;
 }
 
@@ -2225,7 +2274,7 @@ export default {
   border-radius: 50%;
   border: 2px solid #cfcfcf;
   background: none;
-  font-size: 30px;
+  font-size: var(--admin-font-illustration);
   font-weight: lighter;
   color: #cfcfcf;
   cursor: pointer;
@@ -2295,7 +2344,7 @@ export default {
   align-items: center;
   gap: 4px;
   color: #979db1;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   margin-right: 8px;
 }
 
@@ -2311,7 +2360,7 @@ export default {
   border-radius: 18px;
   padding: 8px 16px;
   height: 32px;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 
 .header-actions .history-btn {
@@ -2321,7 +2370,7 @@ export default {
   border-radius: 18px;
   padding: 8px 16px;
   height: 32px;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 
 .header-actions .reset-btn {
@@ -2362,7 +2411,7 @@ export default {
 
 .slider-hint {
   display: block;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #909399;
   margin-top: 4px;
   line-height: 1.5;
@@ -2384,7 +2433,7 @@ export default {
   background: #e6ebff;
   color: #5778ff;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   font-weight: normal;
   border: none;
 }
@@ -2418,12 +2467,22 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }
 @media (max-width: 760px) {
   .admin-page .right-operations { margin-left: 0; width: 100%; }
   .admin-page .search-input { max-width: 100%; }
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .config-header, .header-actions { flex-wrap: wrap; }
+  .header-actions { width: 100%; margin-left: 0; }
+  .header-actions .hint-text { width: 100%; }
+  .model-row { flex-direction: column; gap: 12px; }
+  .model-row .language-select-item { flex: 1; max-width: none; }
+  .model-select-wrapper { flex-wrap: wrap; gap: 8px; }
+  .model-select-wrapper .form-select { flex-basis: 100%; min-width: 0; }
+  .model-select-wrapper .edit-function-btn { margin-left: 0 !important; }
+  .chat-history-options { min-width: 0; }
 }
 </style>

@@ -1,0 +1,52 @@
+# Copy outside the repo, chmod 600, fill private values, then run preflight.
+# This is a LAN development candidate. It never changes existing OTA routing.
+server:
+  ip: 0.0.0.0
+  port: 29980
+  http_port: 29983
+  websocket: ws://192.168.3.152:29980/xiaozhi/v1/
+  auth_key: REPLACE_WITH_EXISTING_OTA_HMAC_KEY
+  auth:
+    enabled: true
+    allowed_devices: [] # legacy bypass list must stay empty
+  esp32:
+    enabled: true
+    deployment_profile: lan_candidate # default is formal: non-loopback manager requires HTTPS
+    local_providers: true
+    execution_mode: ai_worker
+    gateway_id: esp32-lan-canary-01
+    allowed_devices: ["REPLACE_WITH_ONE_AUTHORIZED_DEVICE_MAC"]
+    base_url: http://127.0.0.1:29993/xiaozhi
+    gateway_key: REPLACE_WITH_DISTINCT_INTERNAL_GATEWAY_KEY
+    vad_model_file: /absolute/path/to/silero_vad.onnx
+manager-api:
+  url: http://127.0.0.1:29993/xiaozhi
+  secret: REPLACE_WITH_TRUSTED_MANAGER_CONFIG_SECRET
+selected_module:
+  VAD: SileroVAD
+  ASR: WorkspaceASR
+  TTS: WorkspaceTTS
+VAD:
+  SileroVAD:
+    type: silero
+    model_dir: replaced_by_private_launcher_copy
+    threshold: 0.5
+    threshold_low: 0.2
+    min_silence_duration_ms: 500
+ASR:
+  WorkspaceASR:
+    type: qwen_workspace
+    api_key: REPLACE_WITH_AUTHORIZED_ASR_KEY
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model_name: qwen3-asr-flash
+    language: zh
+    output_dir: tmp/asr
+TTS:
+  WorkspaceTTS:
+    type: alibl_stream
+    api_key: REPLACE_WITH_AUTHORIZED_TTS_KEY
+    ws_url: wss://dashscope.aliyuncs.com/api-ws/v1/inference/
+    model: cosyvoice-v3.5-flash
+    voice: longantai_v3
+    format: pcm
+    output_dir: tmp/tts

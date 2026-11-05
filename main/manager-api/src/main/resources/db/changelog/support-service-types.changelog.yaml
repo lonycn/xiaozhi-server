@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611021700-support-service-types
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202611021700-support-service-types.sql
+            relativeToChangelogFile: true

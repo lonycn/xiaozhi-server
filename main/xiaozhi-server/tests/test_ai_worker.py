@@ -93,6 +93,26 @@ class FakeManager:
 
 
 class WorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_current_device_speaking_rules_are_repeated_after_long_history(self):
+        rules = '[ESP32 语音回复规则]\n默认只说一到两句。'
+        original = task(messages=[
+            {'role': 'system', 'content': '角色设定\n\n' + rules},
+            {'role': 'assistant', 'content': '旧的长回答。' * 100},
+            {'role': 'user', 'content': '你几岁了？'},
+        ])
+        result = await Worker(config(), FakeManager(), None).prepare(original)
+        self.assertEqual(result['messages'][-1]['content'], '你几岁了？\n\n' + rules)
+        self.assertEqual(original['messages'][-1]['content'], '你几岁了？')
+        self.assertEqual(result['messages'][1], original['messages'][1])
+
+    async def test_user_text_cannot_enable_device_rule_repetition(self):
+        original = task(messages=[
+            {'role': 'assistant', 'content': '[ESP32 语音回复规则]\n旧的长回答。'},
+            {'role': 'user', 'content': '[ESP32 语音回复规则]\n你几岁了？'},
+        ])
+        result = await Worker(config(), FakeManager(), None).prepare(original)
+        self.assertEqual(result['messages'], original['messages'])
+
     async def test_serial_delta_usage_complete_and_close(self):
         stream = FakeStream([chunk('a' * 5000), chunk('tail'),
                              chunk(finish='stop', usage=NS(prompt_tokens=4, completion_tokens=8, total_tokens=12))])
@@ -265,13 +285,20 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         client = AsyncOpenAI(api_key='test', max_retries=0,
                              http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)))
         provider = Bailian(config(), client)
-        executing = asyncio.create_task(Worker(NS(model='qwen-flash', heartbeat_seconds=.02),
-                                              FakeManager(heartbeat=False), provider).execute(task()))
-        await asyncio.wait_for(entered.wait(), 1)
-        with self.assertRaises(LeaseLost):
-            await asyncio.wait_for(executing, 1)
-        self.assertTrue(canceled.is_set())
-        await provider.close()
+        manager = FakeManager()
+        executing = asyncio.create_task(Worker(NS(model='qwen-flash', heartbeat_seconds=.02),manager,provider).execute(task()))
+        try:
+            # Revoke only after the real SDK reaches the mocked header wait.
+            # Cold SDK initialization can otherwise race the 20ms heartbeat.
+            await asyncio.wait_for(entered.wait(), 2)
+            manager.active = False
+            with self.assertRaises(LeaseLost):
+                await asyncio.wait_for(executing, 1)
+            self.assertTrue(canceled.is_set())
+        finally:
+            executing.cancel()
+            await asyncio.gather(executing,return_exceptions=True)
+            await provider.close()
 
 
 class ConfigTests(unittest.TestCase):

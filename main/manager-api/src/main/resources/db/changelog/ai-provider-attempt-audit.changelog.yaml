@@ -1,0 +1,19 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611021100-ai-provider-attempt-audit
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE ai_provider_attempt_dispatch (
+                run_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                attempt INT NOT NULL,
+                lease_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                control_epoch BIGINT NOT NULL,
+                model VARCHAR(160) NOT NULL,
+                dispatched_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                PRIMARY KEY(run_id,attempt),
+                UNIQUE KEY uk_ai_provider_dispatch_lease(lease_hash),
+                CONSTRAINT fk_ai_provider_dispatch_run FOREIGN KEY(run_id) REFERENCES ai_run(id),
+                CHECK(attempt BETWEEN 1 AND 3)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

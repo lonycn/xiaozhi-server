@@ -39,7 +39,7 @@ class ExternalIdentityPersistenceTest {
     static String keys(){return "{\""+KEY_ID+"\":{\"issuer\":\""+ISSUER+"\",\"secret_b64\":\""+Base64.getEncoder().encodeToString(KEY)+"\"}}";}
     @BeforeAll static void initialize()throws Exception { initialize(System.getenv("EXTERNAL_TEST_JDBC_URL")); }
     static void initialize(String url)throws Exception {
-        if(!url.matches("jdbc:mysql://127\\.0\\.0\\.1:34776/xiaozhi_external_test_[a-z0-9_]+(\\?.*)?"))throw new IllegalArgumentException("Requires new loopback xiaozhi_external_test_* schema on34776");
+        if(!url.matches("jdbc:mysql://127\\.0\\.0\\.1:[0-9]+/xiaozhi_external_test_[a-z0-9_]+(\\?.*)?"))throw new IllegalArgumentException("Requires new loopback xiaozhi_external_test_* schema on a numeric loopback port");
         createFreshSchema(url);
         var source=new DriverManagerDataSource(url,"root",System.getenv("EXTERNAL_TEST_DB_PASSWORD"));db=new JdbcTemplate(source);
         assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Long.class),"Refuse nonempty test schema; nothing is cleaned");
@@ -50,19 +50,63 @@ class ExternalIdentityPersistenceTest {
         db.execute("CREATE TABLE legacy_external_sentinel(id BIGINT PRIMARY KEY,value VARCHAR(80))");db.update("INSERT INTO legacy_external_sentinel VALUES(1,'preserve-existing-business-evidence')");
         db.execute("CREATE TABLE ai_agent(id VARCHAR(32) PRIMARY KEY,user_id BIGINT)");
         for(String name:List.of("conversation","support","attachments","annotations","ai-execution","realtime-ai","support-media","external-identity","realtime-source-binding","support-media-source-binding","realtime-vad"))try(var connection=source.getConnection();var migration=new Liquibase("db/changelog/"+name+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){migration.update(new Contexts());migration.update(new Contexts());}
-        assertEquals(11,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
+        assertEquals(13,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
         settings=ExternalProtocolTest.settings();var manager=new DataSourceTransactionManager(source);service=new ExternalIdentityService(db,JSON,manager,settings);
         var dao=new ConversationDao(db);conversations=new ConversationService(dao,JSON,manager);
         media=new AttachmentService(db,dao,JSON,manager,new MockEnvironment().withProperty("media.ticket-key","b6-isolated-media-signing-key-32-characters"),new PrivateObjectStore.Filesystem(Files.createTempDirectory("b6-private-evidence-")));
         conversations.setAttachments(media);mediaController=new ExternalMediaController(service,media,db);
     }
     private static void createFreshSchema(String url) {
-        var match=java.util.regex.Pattern.compile("jdbc:mysql://127\\.0\\.0\\.1:34776/(xiaozhi_external_test_[a-z0-9_]+)(\\?.*)?").matcher(url);
+        var match=java.util.regex.Pattern.compile("jdbc:mysql://127\\.0\\.0\\.1:[0-9]+/(xiaozhi_external_test_[a-z0-9_]+)(\\?.*)?").matcher(url);
         if(!match.matches())throw new IllegalArgumentException("Requires a new isolated external test schema");
         String name=match.group(1);
-        var admin=new JdbcTemplate(new DriverManagerDataSource("jdbc:mysql://127.0.0.1:34776/?serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true","root",System.getenv("EXTERNAL_TEST_DB_PASSWORD")));
+        var admin=new JdbcTemplate(new DriverManagerDataSource(url.substring(0,url.indexOf('/',"jdbc:mysql://".length()))+"/?serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true","root",System.getenv("EXTERNAL_TEST_DB_PASSWORD")));
         if(admin.queryForObject("SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=?",Long.class,name)!=0)throw new IllegalArgumentException("Refusing existing external test schema");
         admin.execute("CREATE DATABASE `"+name+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin");
+    }
+    @Test @Order(99) void accountNamespaceAndSourceRevocationAreIndependentOfBusinessRole() throws Exception {
+        String subject="934201",source="account-"+id();
+        var rawNode=(com.fasterxml.jackson.databind.node.ObjectNode)JSON.readTree(body(subject,source,subject));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)rawNode.get("tenant")).put("type","account");
+        var scope=(com.fasterxml.jackson.databind.node.ObjectNode)rawNode.get("scope");
+        scope.putArray("project_ids");scope.putArray("device_ids");
+        byte[] raw=JSON.writeValueAsBytes(rawNode);
+        var account=service.exchange(service.issue(signed(ExternalIdentityService.ISSUE,raw,id().replace("-","")),raw).ticket());
+        boolean renewalBefore=settings.renewalEnabled();
+        settings.setRenewalEnabled(true);
+        try {
+            var principal=service.authenticate(account.token());
+            var renewal=JSON.createObjectNode().put("external_subject",subject).put("source_session_id",source)
+                    .put("token_id",Long.toString(principal.tokenId())).put("requested_lifetime_seconds",300);
+            renewal.set("tenant",JSON.valueToTree(principal.tenant()));renewal.set("scope",JSON.valueToTree(principal.scope()));
+            byte[] renewRaw=JSON.writeValueAsBytes(renewal);
+            var renewed=service.renew(ExternalIdentityService.RENEW,renewRaw,renewHeaders(renewRaw));
+            assertEquals(Long.toString(principal.tokenId()),renewed.get("token_id"));
+            assertEquals(principal.userId(),service.authenticate(account.token()).userId());
+            ((com.fasterxml.jackson.databind.node.ObjectNode)renewal.get("tenant")).put("id","934202");
+            byte[] mismatch=JSON.writeValueAsBytes(renewal);
+            assertEquals("ACCOUNT_SUBJECT_MISMATCH",assertThrows(ExternalProblem.class,()->service.renew(ExternalIdentityService.RENEW,mismatch,renewHeaders(mismatch))).getMessage());
+            ((com.fasterxml.jackson.databind.node.ObjectNode)renewal.get("tenant")).put("id",subject);
+            ((com.fasterxml.jackson.databind.node.ObjectNode)renewal.get("scope")).putArray("device_ids").add("forged-device");
+            byte[] widened=JSON.writeValueAsBytes(renewal);
+            assertEquals("INVALID_ACCOUNT_SCOPE",assertThrows(ExternalProblem.class,()->service.renew(ExternalIdentityService.RENEW,widened,renewHeaders(widened))).getMessage());
+        } finally { settings.setRenewalEnabled(renewalBefore); }
+        var company=login(subject,source,subject);
+        assertNotEquals(account.userId(),company.userId());
+        assertEquals("account",service.authenticate(account.token()).tenant().type());
+        assertEquals(false,service.view(service.authenticate(account.token())).get("business_connected"));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)rawNode.get("tenant")).put("id","934202");
+        byte[] forged=JSON.writeValueAsBytes(rawNode);
+        assertEquals("ACCOUNT_SUBJECT_MISMATCH",assertThrows(ExternalProblem.class,()->service.issue(signed(ExternalIdentityService.ISSUE,forged,id().replace("-","")),forged)).getMessage());
+        revoke(subject,source);
+        assertThrows(ExternalProblem.class,()->service.authenticate(account.token()));
+        assertThrows(ExternalProblem.class,()->service.authenticate(company.token()));
+        assertEquals("SOURCE_SESSION_REVOKED",assertThrows(ExternalProblem.class,()->service.issue(signed(ExternalIdentityService.ISSUE,raw,id().replace("-","")),raw)).getMessage());
+    }
+    static Map<String,List<String>> renewHeaders(byte[] raw) {
+        String timestamp=Long.toString(Instant.now().getEpochSecond()),nonce=id().replace("-","");
+        return Map.of("x-external-key-id",List.of(KEY_ID),"x-external-timestamp",List.of(timestamp),"x-external-nonce",List.of(nonce),
+                "x-external-signature",List.of(ExternalIdentityService.signature(KEY,ExternalIdentityService.RENEW,timestamp,nonce,raw)));
     }
     static String id(){return UUID.randomUUID().toString();}
     static byte[] body(String subject,String source,String tenant)throws Exception {
@@ -282,11 +326,14 @@ class ExternalIdentityPersistenceTest {
         var ticket=f.rt().ticket(actor,vad.id(),new xiaozhi.modules.realtime.RealtimeModels.Epoch(vad.controlEpoch()));var task=f.rt().consume(new xiaozhi.modules.realtime.RealtimeModels.Consume(ticket.ticket(),"vad-worker","vad-server"));assertEquals("server_vad",task.turnDetectionMode());f.env().withProperty("features.realtime-server-vad-enabled","false");assertThrows(ConversationProblem.class,()->f.rt().heartbeat(vad.id(),new xiaozhi.modules.realtime.RealtimeModels.Heartbeat(task.leaseToken(),false)));f.rt().maintain();assertEquals("expired",db.queryForObject("SELECT status FROM ai_realtime_session WHERE id=?",String.class,vad.id()));assertEquals("pending",db.queryForObject("SELECT status FROM ai_realtime_session WHERE id=?",String.class,manual.id()));assertEquals(List.of("manual"),f.rt().capabilities().get("turn_detection_modes"));
     }
 
-    @Test @Order(16) void staffInvitationIsVisibleRejectableAndBindsOnlyOnExplicitExternalAcceptance()throws Exception {
+    @Test @Order(16) void readyStaffInvitationIsSourceBoundVisibleAndRejectable()throws Exception {
         var f=runtime();var a=service.authenticate(login("staff-invite-"+id(),"A","1").token());var consent=new xiaozhi.modules.supportmedia.MediaModels.Consent(true,false,false);
         db.update("INSERT INTO sys_user VALUES(572,'binding-staff-inviter','isolated',0,1,CURRENT_TIMESTAMP(3))");db.update("INSERT INTO support_agent_profile(user_id,role,enabled,capacity_text) VALUES(572,'expert',1,20)");
         for(boolean reject:new boolean[]{true,false}){
-            String c=ownConversation(a.userId()),r=id().replace("-",""),assignment=id().replace("-","");db.update("INSERT INTO support_request(id,conversation_id,client_request_id,request_hash,status,assigned_agent_user_id) VALUES(?,?,?,'invite','active',572)",r,c,id());db.update("INSERT INTO support_assignment(id,request_id,conversation_id,agent_user_id) VALUES(?,?,?,572)",assignment,r,c);
+            String c=ownConversation(a.userId()),r=id().replace("-",""),assignment=id().replace("-","");db.update("INSERT INTO support_request(id,conversation_id,client_request_id,request_hash,status,assigned_agent_user_id,service_type) VALUES(?,?,?,'invite','active',572,'expert')",r,c,id());db.update("INSERT INTO support_assignment(id,request_id,conversation_id,agent_user_id) VALUES(?,?,?,572)",assignment,r,c);
+            var presence=org.mockito.Mockito.mock(xiaozhi.modules.supportmedia.CallPresenceService.class);
+            org.mockito.Mockito.when(presence.requireReady(a.userId(),c,"audio")).thenReturn(new xiaozhi.modules.supportmedia.CallPresenceCache.Lease(a.userId(),c,a.sourceId(),a.tokenId(),false,Instant.now().plusSeconds(15)));
+            f.b5().setCallPresence(presence);
             caller(null);var invited=f.b5().create(572L,new xiaozhi.modules.supportmedia.MediaModels.Create(r,id(),"audio",consent));caller(a);assertEquals(invited.id(),f.b5().get(a.userId(),invited.id()).id());assertEquals(invited.id(),f.b5().current(a.userId(),c).id());
             if(reject){assertEquals("rejected",f.b5().reject(a.userId(),invited.id(),new xiaozhi.modules.supportmedia.MediaModels.Epoch(invited.controlEpoch())).status());caller(null);f.maintenance().processOutbox();}
             else{var accepted=f.b5().accept(a.userId(),invited.id(),new xiaozhi.modules.supportmedia.MediaModels.Accept(invited.controlEpoch(),consent));assertEquals(a.tokenId(),db.queryForObject("SELECT external_token_id FROM support_media_session WHERE id=?",Long.class,accepted.id()));assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM support_media_member WHERE session_id=? AND role='customer' AND external_token_id=?",Long.class,accepted.id(),a.tokenId()));caller(null);assertThrows(ExternalProblem.class,()->f.b5().get(a.userId(),accepted.id()));}

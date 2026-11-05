@@ -85,6 +85,7 @@ class ExternalRenewalPersistenceTest {
         assertEquals(f.principal.sourceId(),current.sourceId());assertEquals(f.principal.scope(),current.scope());assertEquals(f.principal.tenant(),current.tenant());
         assertTrue(current.expiresAt().isAfter(before));assertEquals(sourceBefore,sourceExpiry(f));assertEquals(tokens,db.queryForObject("SELECT COUNT(*) FROM external_access_token",Long.class));
         assertEquals(Long.toString(current.tokenId()),renewed.get("token_id"));assertFalse(JSON.writeValueAsString(renewed).contains(f.principal.tokenHash()));
+        assertEquals(300,renewed.get("expires_in"));
         f.clock.now.set(BASE.plusSeconds(301));assertNotNull(f.identity.authenticate(f.exchange.token()),"Original bearer is usable after its old expiry");
         f.clock.now.set(sourceBefore.minusSeconds(10));db.update("UPDATE external_access_token SET expires_at=? WHERE id=?",Timestamp.from(sourceBefore.minusSeconds(1)),current.tokenId());
         renew(f,300,Map.of());assertEquals(sourceBefore,tokenExpiry(f));assertEquals(sourceBefore,sourceExpiry(f));

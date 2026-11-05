@@ -13,23 +13,55 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import xiaozhi.modules.ai.AiModels.*;
+import xiaozhi.modules.chatarchive.ChatArchiveOutbox;
 import xiaozhi.modules.conversation.*;
 import xiaozhi.modules.conversation.ConversationModels.CursorPage;
 
 /** Conversation locks always precede run and message locks; callbacks never trust worker context. */
 @Service
 public class AiExecutionService {
+    private xiaozhi.modules.airuntime.AiRuntimeControl runtimeControl;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setRuntimeControl(xiaozhi.modules.airuntime.AiRuntimeControl value){runtimeControl=value;}
+    private void admitRuntime(String resource,long owner){if(runtimeControl!=null)runtimeControl.admit(xiaozhi.modules.airuntime.AiRuntimeControl.Flow.AI,resource,owner);}
+    private void releaseRuntime(String resource){if(runtimeControl!=null)runtimeControl.release(xiaozhi.modules.airuntime.AiRuntimeControl.Flow.AI,resource);}
+
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final TransactionTemplate tx;
     private final ConversationAccessService access;
+    private ChatArchiveOutbox chatArchive;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setChatArchive(ChatArchiveOutbox service) { chatArchive = service; }
     private boolean enabled;
     private String model = "qwen-flash";
     private int leaseSeconds = 45;
     private String visionModel = "";
     private String omniModel = "";
     private AiAttachmentContext attachments;
+    private xiaozhi.modules.aicontext.ConversationEvidenceService evidence;
+    private xiaozhi.modules.aiskill.AiSkillService skills;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setSkills(xiaozhi.modules.aiskill.AiSkillService value){skills=value;}
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setEvidence(xiaozhi.modules.aicontext.ConversationEvidenceService value){evidence=value;}
+    private boolean multimodalToolsEnabled;
+    private Set<String> multimodalToolModels=Set.of("qwen3-vl-plus","qwen3-vl-flash","qwen3.8-omni-flash");
+    @Value("${ai.execution.multimodal-tools-enabled:false}") public void setMultimodalToolsEnabled(boolean value){multimodalToolsEnabled=value;}
+    @Value("${ai.execution.multimodal-tools-models:qwen3-vl-plus,qwen3-vl-flash,qwen3.8-omni-flash}")
+    public void setMultimodalToolModels(String value){var models=new HashSet<String>();for(String item:value.split(",")){String name=item.trim();if(!name.matches("qwen[A-Za-z0-9_.-]{1,100}"))throw new IllegalArgumentException("Invalid tool model allowlist");models.add(name);}multimodalToolModels=Set.copyOf(models);}
     private final AiProviderUsageStore providerUsage;
+    private AiProviderUsageAudit usageAudit;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setUsageAudit(AiProviderUsageAudit value){usageAudit=value;}
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32integration.Esp32Policies> devicePolicies;
+    @org.springframework.beans.factory.annotation.Autowired public void setDevicePolicies(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32integration.Esp32Policies> value){devicePolicies=value;}
+    private void deviceRead(String id,long actor){if(devicePolicies!=null&&devicePolicies.getIfAvailable()!=null)devicePolicies.getObject().requireRead(id,actor);}
+
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32ai.Esp32AiRunGuard> esp32;
+    @org.springframework.beans.factory.annotation.Autowired public void setEsp32(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32ai.Esp32AiRunGuard> value){esp32=value;}
+    private xiaozhi.modules.esp32ai.Esp32AiRunGuard deviceGuard(){return esp32==null?null:esp32.getIfAvailable();}
+
     private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.agenttool.AgentToolService> agentTools;
     @org.springframework.beans.factory.annotation.Autowired
     public void setAgentTools(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.agenttool.AgentToolService> value) { agentTools=value; }
@@ -66,7 +98,18 @@ public class AiExecutionService {
     }
 
     /** Invoked inside the message insertion transaction after advancing its ledger cursors. */
-    public void onUserMessage(String conversationId, String inputId) {
+    public void onUserMessage(String conversationId, String inputId) { enqueue(conversationId,inputId,null,null,null); }
+    public void onDeviceUserMessage(String conversationId,String inputId,
+            xiaozhi.modules.esp32conversation.Esp32ConversationService.TrustedContext context,String turnId) {
+        onDeviceUserMessage(conversationId,inputId,context,turnId,null);
+    }
+    public void onDeviceUserMessage(String conversationId,String inputId,
+            xiaozhi.modules.esp32conversation.Esp32ConversationService.TrustedContext context,String turnId,String rolePrompt) {
+        requireEnabled();if(context==null||deviceGuard()==null)throw problem(503,"ESP32_AI_UNAVAILABLE");
+        enqueue(conversationId,inputId,context,turnId,rolePrompt);
+    }
+    private void enqueue(String conversationId,String inputId,
+            xiaozhi.modules.esp32conversation.Esp32ConversationService.TrustedContext deviceContext,String turnId,String rolePrompt) {
         if (!enabled) return;
         Map<String,Object> c = conversation(conversationId);
         if (!"AI_ACTIVE".equals(c.get("state")) || realtimeActive(conversationId)) return;
@@ -81,11 +124,15 @@ public class AiExecutionService {
                 INSERT INTO ai_run(id,conversation_id,input_message_id,output_message_id,control_epoch,output_text,model)
                 VALUES(?,?,?,?,?,'',?)
                 """, run, conversationId, inputId, output, number(c,"control_epoch"), inputNeedsVision(inputId) && !visionModel.isBlank() ? visionModel : model);
-        if(tools()!=null)tools().prepareRun(run,conversationId,number(c,"owner_user_id"),requestPrincipal());
+        if(deviceContext!=null)deviceGuard().prepare(run,deviceContext,turnId,rolePrompt);
+        else if(tools()!=null)tools().prepareRun(run,conversationId,number(c,"owner_user_id"),requestPrincipal());
+        if(deviceContext==null && skills!=null)skills.captureRun(run,conversationId,number(c,"owner_user_id"));
+        if(evidence!=null)evidence.capture(run,conversationId,sequence-1,decode(jdbc.queryForObject("SELECT parts_json FROM ai_message WHERE id=?",String.class,inputId)));
         jdbc.update("UPDATE ai_conversation SET last_seq=? WHERE id=?", sequence, conversationId);
         Map<String,Object> r = row(run, true);
         event(r, "ai.run.queued", Map.of());
         event(r, "assistant.message.created", Map.of("seq", Long.toString(sequence)));
+        admitRuntime(run,number(c,"owner_user_id"));
     }
 
     /** Called by every human mode/epoch transition inside its existing transaction. */
@@ -104,6 +151,7 @@ public class AiExecutionService {
         actor(actor); validId(conversationId);
         if (before < 0 || limit < 1 || limit > 100) throw problem(400,"INVALID_CURSOR_OR_LIMIT");
         return tx.execute(t -> {
+            deviceRead(conversationId,actor);
             var grant = access.read(actor, conversationId, true);
             // A run is mutable; released staff receive immutable events/messages only.
             if (!grant.owner() && !grant.current()) throw problem(404,"CONVERSATION_NOT_FOUND");
@@ -115,13 +163,14 @@ public class AiExecutionService {
     }
     public Run get(Long actor, String conversationId, String runId) {
         actor(actor); validId(conversationId); validId(runId);
-        return tx.execute(t -> { var grant = access.read(actor, conversationId, true);
+        return tx.execute(t -> { deviceRead(conversationId,actor);var grant = access.read(actor, conversationId, true);
             if (!grant.owner() && !grant.current()) throw problem(404,"CONVERSATION_NOT_FOUND");
             return view(inConversation(runId, conversationId)); });
     }
     public Run cancel(Long actor, String conversationId, String runId) {
         actor(actor); validId(conversationId); validId(runId);
         return tx.execute(t -> {
+            deviceRead(conversationId,actor);
             new ConversationDao(jdbc).owned(conversationId, actor, true);
             var r = inConversation(runId, conversationId);
             if (active(r)) terminal(r,"canceled",null,"ai.run.canceled");
@@ -131,6 +180,7 @@ public class AiExecutionService {
     public Run retry(Long actor, String conversationId, String runId) {
         requireEnabled(); actor(actor); validId(conversationId); validId(runId);
         return tx.execute(t -> {
+            deviceRead(conversationId,actor);
             new ConversationDao(jdbc).owned(conversationId, actor, true);
             var c = conversation(conversationId);
             var r = inConversation(runId, conversationId);
@@ -145,6 +195,7 @@ public class AiExecutionService {
                     number(c,"control_epoch"),runId);
             message(r, (String) r.get("output_text"), "queued");
             event(r,"ai.run.queued",Map.of());
+            if(runtimeControl!=null)runtimeControl.admitRetry(xiaozhi.modules.airuntime.AiRuntimeControl.Flow.AI,runId,actor);
             return view(row(runId,false));
         });
     }
@@ -161,7 +212,9 @@ public class AiExecutionService {
         for (var candidate : candidates) {
             // Waiting transcript jobs must not pin discovery to the first 32 rows forever.
             discoveryCursor.set(number(candidate,"list_sequence"));
-            Task task = tx.execute(t -> {
+            Task task;
+            try { task = tx.execute(t -> {
+                if(deviceGuard()!=null)deviceGuard().validate((String)candidate.get("id"));
                 var c = conversation((String) candidate.get("conversation_id"));
                 var r = row((String) candidate.get("id"), true);
                 if (!active(r)) return null;
@@ -196,14 +249,24 @@ public class AiExecutionService {
                 message(r,"","running");
                 if (attempt > 1) event(r,"assistant.message.reset",Map.of());
                 event(r,"ai.run.started",Map.of());
-                var catalog=tools()==null || plan.audio() || plan.vision() || !textToolsSupported(selectedModel)
+                boolean mediaInput=plan.audio()||plan.vision();
+                boolean compatible=mediaInput?multimodalToolsEnabled&&multimodalToolModels.contains(selectedModel):textToolsSupported(selectedModel);
+                var catalog=tools()==null || !compatible
                         ?null:tools().taskTools((String)r.get("id"),attempt,token,number(r,"control_epoch"));
                 var declarations=catalog==null||catalog.tools().isEmpty()?null:catalog.tools();
-                var policy=declarations==null?null:new ToolPolicy(catalog.maxRounds(),catalog.maxCalls(),4096,32768,30,120000);
+                if(skills!=null && declarations!=null){declarations=skills.filterTools((String)r.get("id"),declarations);if(declarations.isEmpty())declarations=null;}
+                List<String> modalities=new ArrayList<>(List.of("text"));if(plan.vision())modalities.add("image");if(plan.audio())modalities.add("audio");
+                var policy=declarations==null?null:new ToolPolicy(catalog.maxRounds(),catalog.maxCalls(),4096,32768,30,120000,modalities);
+                if(usageAudit!=null)usageAudit.dispatched((String)r.get("id"),attempt,number(r,"control_epoch"),token,(String)r.get("model"));
                 return new Task((String)r.get("id"),(String)r.get("conversation_id"),(String)r.get("input_message_id"),
                         (String)r.get("output_message_id"),number(r,"control_epoch"),attempt,token,leaseSeconds,
-                        (String)r.get("model"),context(r, plan.refs()),declarations,policy);
-            });
+                        (String)r.get("model"),context(r, plan.refs()),declarations,policy,evidence!=null&&evidence.hasHistory((String)r.get("id"))?new MediaPolicy(true):null,skills==null?null:skills.snapshot((String)r.get("id")),usageAudit==null?null:Boolean.TRUE);
+            }); } catch(ConversationProblem denied) {
+                if(deviceGuard()==null || !deviceGuard().bound((String)candidate.get("id")))throw denied;
+                tx.executeWithoutResult(t->{conversation((String)candidate.get("conversation_id"));var stale=row((String)candidate.get("id"),true);
+                    if(active(stale))terminal(stale,"failed","TOOL_AUTHORIZATION_EXPIRED","ai.run.failed");});
+                continue;
+            }
             if (task != null) return task;
         }
         return null;
@@ -238,13 +301,17 @@ public class AiExecutionService {
         providerUsage.validate(body.providerRequests(),body.usage(),body.toolCount());
         return callback(runId,body.leaseToken(),r -> {
             if (body.lastSequence() != number(r,"last_chunk_sequence")) throw problem(409,"CHUNK_SEQUENCE_CONFLICT");
-            if(tools()!=null && tools().hasBinding(runId)) {
+            if(deviceGuard()!=null && deviceGuard().bound(runId)) {
+                if(jdbc.queryForObject("SELECT COUNT(*) FROM esp32_ai_tool_call WHERE run_id=? AND state IN ('reserved','waiting')",Long.class,runId)>0)throw problem(409,"TOOL_EXECUTION_PENDING");
+                if(body.toolCount()!=null && body.toolCount()!=jdbc.queryForObject("SELECT COUNT(*) FROM esp32_ai_tool_call WHERE run_id=? AND run_attempt=?",Integer.class,runId,number(r,"attempt")))throw problem(400,"TOOL_COUNT_MISMATCH");
+            } else if(tools()!=null && tools().hasBinding(runId)) {
                 if(jdbc.queryForObject("SELECT COUNT(*) FROM agent_tool_call WHERE run_id=? AND status='running'",Long.class,runId)>0)
                     throw problem(409,"TOOL_EXECUTION_PENDING");
                 if(body.toolCount()!=null && !body.toolCount().equals(jdbc.queryForObject("SELECT COUNT(*) FROM agent_tool_call WHERE run_id=? AND run_attempt=?",Integer.class,runId,number(r,"attempt"))))
                     throw problem(400,"TOOL_COUNT_MISMATCH");
             }
-            providerUsage.record(runId,(int)number(r,"attempt"),(String)r.get("model"),body.providerRequests());
+            if(usageAudit==null)providerUsage.record(runId,(int)number(r,"attempt"),(String)r.get("model"),body.providerRequests());
+            else providerUsage.recordTerminal(runId,(int)number(r,"attempt"),(String)r.get("model"),body.providerRequests());
             String usage = body.usage() == null ? null : encode(body.usage());
             jdbc.update("UPDATE ai_run SET usage_json=?,finish_reason=?,provider_request_id=? WHERE id=?",usage,body.finishReason(),body.providerRequestId(),runId);
             if (body.usage()!=null) jdbc.update("INSERT INTO ai_model_usage(run_id,attempt,model,input_tokens,output_tokens,total_tokens,provider_request_id) VALUES(?,?,?,?,?,?,?)",
@@ -257,7 +324,8 @@ public class AiExecutionService {
         if (body==null || !ERRORS.contains(body.errorCode()==null ? "" : body.errorCode())) throw problem(400,"INVALID_ERROR_CODE");
         validateUsage(body.usage());providerUsage.validate(body.providerRequests(),body.usage(),body.toolCount());
         return callback(runId,body.leaseToken(),r -> {
-            providerUsage.record(runId,(int)number(r,"attempt"),(String)r.get("model"),body.providerRequests());
+            if(usageAudit==null)providerUsage.record(runId,(int)number(r,"attempt"),(String)r.get("model"),body.providerRequests());
+            else providerUsage.recordTerminal(runId,(int)number(r,"attempt"),(String)r.get("model"),body.providerRequests());
             if(body.usage()!=null) {
                 jdbc.update("UPDATE ai_run SET usage_json=? WHERE id=?",encode(body.usage()),runId);
                 jdbc.update("INSERT INTO ai_model_usage(run_id,attempt,model,input_tokens,output_tokens,total_tokens,provider_request_id) VALUES(?,?,?,?,?,?,NULL)",
@@ -275,6 +343,7 @@ public class AiExecutionService {
         if (token==null || !token.matches("[a-f0-9]{64}")) throw problem(409,"LEASE_INVALID");
         var hint = row(runId,false);
         return tx.execute(t -> {
+            if(deviceGuard()!=null)deviceGuard().validate(runId);
             var c = conversation((String)hint.get("conversation_id"));
             var r = row(runId,true);
             if (!ownerEnabled(c) || !"AI_ACTIVE".equals(c.get("state")) || number(c,"control_epoch")!=number(r,"control_epoch")
@@ -301,6 +370,7 @@ public class AiExecutionService {
     private AiAttachmentContext.Plan attachmentPlan(Map<String,Object> r) {
         var input=jdbc.queryForMap("SELECT seq,parts_json FROM ai_message WHERE id=?",r.get("input_message_id"));
         JsonNode parts=decode((String)input.get("parts_json"));
+        if(evidence!=null)parts=evidence.effectiveParts((String)r.get("id"),parts);
         boolean hasMedia=false;
         for(JsonNode part:parts) if(part.hasNonNull("attachment_id")) {hasMedia=true;break;}
         if(!hasMedia) return new AiAttachmentContext.Plan(List.of(),false,false,null);
@@ -325,7 +395,12 @@ public class AiExecutionService {
     private List<ContextMessage> context(Map<String,Object> r,List<MediaRef> currentRefs) {
         long input = jdbc.queryForObject("SELECT seq FROM ai_message WHERE id=?",Long.class,r.get("input_message_id"));
         var rows = jdbc.queryForList("SELECT id,sender_type,parts_json FROM ai_message WHERE conversation_id=? AND seq<=? AND (sender_type='user' OR (sender_type IN ('assistant','support_agent','expert') AND status='completed')) ORDER BY seq DESC LIMIT 40",r.get("conversation_id"),input);
-        List<ContextMessage> result = new ArrayList<>(); int budget=64000;
+        List<ContextMessage> supplements=evidence==null?List.of():evidence.supplement((String)r.get("id"),currentRefs);
+        List<MediaRef> onlyCurrent=evidence==null?currentRefs:evidence.currentRefs((String)r.get("id"),currentRefs);
+        int memoryChars=supplements.stream().mapToInt(m->m.content().length()).sum();
+        String rolePrompt=deviceGuard()==null?null:deviceGuard().rolePrompt((String)r.get("id"));
+        List<ContextMessage> result = new ArrayList<>();
+        int budget=Math.max(8000,64000-memoryChars-(rolePrompt==null?0:rolePrompt.length()));
         for (var row:rows) {
             StringBuilder text = new StringBuilder();
             String sender = (String)row.get("sender_type");
@@ -343,27 +418,36 @@ public class AiExecutionService {
             }
             if (text.isEmpty()) continue;
             String content = text.substring(0,Math.min(text.length(),budget));
-            result.add(new ContextMessage("user".equals(sender)?"user":"assistant",content,current ? currentRefs : null));
+            result.add(new ContextMessage("user".equals(sender)?"user":"assistant",content,current ? onlyCurrent : null));
             budget-=content.length(); if (budget<=0) break;
         }
-        Collections.reverse(result); return result;
+        Collections.reverse(result);
+        List<ContextMessage> combined=new ArrayList<>();
+        if(rolePrompt!=null)combined.add(new ContextMessage("system",rolePrompt,null));
+        combined.addAll(supplements);
+        combined.addAll(result);
+        return skills==null?combined:skills.applyContext((String)r.get("id"),combined);
     }
     private void terminal(Map<String,Object> r,String status,String error,String type) {
         if(tools()!=null && ("canceled".equals(status)||"failed".equals(status)))tools().cancelPending((String)r.get("id"));
         jdbc.update("UPDATE ai_run SET status=?,error_code=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",status,error,r.get("id"));
         message(r,(String)r.get("output_text"),status);
-        event(r,type,error==null?Map.of():Map.of("error_code",error));
+        long version = event(r,type,error==null?Map.of():Map.of("error_code",error));
+        if (chatArchive != null) chatArchive.terminal((String)r.get("conversation_id"),
+                (String)r.get("input_message_id"), (String)r.get("output_message_id"), version);
+        releaseRuntime((String)r.get("id"));
     }
     private void message(Map<String,Object> r,String text,String status) {
         jdbc.update("UPDATE ai_message SET parts_json=?,status=? WHERE id=?",encode(text.isEmpty()?List.of():List.of(Map.of("type","text","text",text))),status,r.get("output_message_id"));
     }
-    private void event(Map<String,Object> r,String type,Map<String,Object> extra) {
+    private long event(Map<String,Object> r,String type,Map<String,Object> extra) {
         String conv=(String)r.get("conversation_id");
         long seq=jdbc.queryForObject("SELECT last_event_seq FROM ai_conversation WHERE id=?",Long.class,conv)+1;
         var data=new LinkedHashMap<String,Object>(); data.put("run_id",r.get("id")); data.put("message_id",r.get("output_message_id"));
         data.put("attempt",number(r,"attempt")); data.putAll(extra);
         jdbc.update("INSERT INTO ai_conversation_event(id,conversation_id,seq,event_type,data_json) VALUES(?,?,?,?,?)",id(),conv,seq,type,encode(data));
         jdbc.update("UPDATE ai_conversation SET last_event_seq=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",seq,conv);
+        return seq;
     }
     private Map<String,Object> conversation(String id) {
         var rows=jdbc.queryForList("SELECT * FROM ai_conversation WHERE id=? FOR UPDATE",id);

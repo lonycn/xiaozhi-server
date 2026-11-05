@@ -1,0 +1,85 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611020500-realtime-inputs
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE ai_realtime_input_pause (
+                id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                session_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                client_pause_id VARCHAR(64) NOT NULL,
+                request_hash CHAR(64) NOT NULL,
+                control_epoch BIGINT NOT NULL,
+                turn_generation BIGINT NOT NULL,
+                status VARCHAR(24) NOT NULL,
+                clear_request_id VARCHAR(100) NOT NULL,
+                clear_provider_event_id VARCHAR(200) NULL,
+                clear_lease_hash CHAR(64) NULL,
+                cleared_at DATETIME(3) NULL,
+                client_resume_id VARCHAR(64) NULL,
+                resume_request_id VARCHAR(100) NULL,
+                resume_hash CHAR(64) NULL,
+                client_cancel_id VARCHAR(64) NULL,
+                resume_respond TINYINT NOT NULL DEFAULT 0,
+                resumed_at DATETIME(3) NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                active_slot TINYINT GENERATED ALWAYS AS(CASE WHEN status IN ('requested','paused','processing','prepared','context_acknowledged','resuming') THEN 1 ELSE NULL END) STORED,
+                UNIQUE KEY uk_rt_input_pause_client(session_id,client_pause_id),
+                UNIQUE KEY uk_rt_input_pause_active(session_id,active_slot),
+                CONSTRAINT fk_rt_input_pause_session FOREIGN KEY(session_id) REFERENCES ai_realtime_session(id),
+                CHECK(status IN ('requested','paused','processing','prepared','context_acknowledged','resuming','resumed','failed','ended'))
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE ai_realtime_material (
+                id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                session_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                pause_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                client_material_id VARCHAR(64) NOT NULL,
+                request_hash CHAR(64) NOT NULL,
+                parts_json LONGTEXT NOT NULL,
+                message_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+                message_seq BIGINT NULL,
+                control_epoch BIGINT NOT NULL,
+                turn_generation BIGINT NOT NULL,
+                perception_model VARCHAR(128) NOT NULL,
+                status VARCHAR(24) NOT NULL,
+                error_code VARCHAR(64) NULL,
+                dispatch_lease_hash CHAR(64) NULL,
+                dispatched_at DATETIME(3) NULL,
+                context_item_id VARCHAR(100) NOT NULL,
+                context_text MEDIUMTEXT NULL,
+                context_truncated TINYINT NOT NULL DEFAULT 0,
+                observations_json LONGTEXT NULL,
+                prepared_hash CHAR(64) NULL,
+                prepared_at DATETIME(3) NULL,
+                ack_provider_item_id VARCHAR(200) NULL,
+                ack_provider_event_id VARCHAR(200) NULL,
+                acknowledged_at DATETIME(3) NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                UNIQUE KEY uk_rt_material_client(session_id,client_material_id),
+                UNIQUE KEY uk_rt_material_context_item(session_id,context_item_id),
+                UNIQUE KEY uk_rt_material_echo(session_id,ack_provider_item_id),
+                CONSTRAINT fk_rt_material_session FOREIGN KEY(session_id) REFERENCES ai_realtime_session(id),
+                CONSTRAINT fk_rt_material_pause FOREIGN KEY(pause_id) REFERENCES ai_realtime_input_pause(id),
+                CONSTRAINT fk_rt_material_message FOREIGN KEY(message_id) REFERENCES ai_message(id),
+                CHECK(JSON_VALID(parts_json)),CHECK(observations_json IS NULL OR JSON_VALID(observations_json)),
+                CHECK(status IN ('queued','dispatched','prepared','acknowledged','failed','canceled'))
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE ai_realtime_perception_usage (
+                sequence BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                material_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                attachment_id BIGINT NOT NULL,
+                model VARCHAR(128) NOT NULL,
+                provider_request_id VARCHAR(200) NULL,
+                report_hash CHAR(64) NOT NULL,
+                input_tokens BIGINT NULL,
+                output_tokens BIGINT NULL,
+                total_tokens BIGINT NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                UNIQUE KEY uk_rt_perception_usage(material_id,attachment_id),
+                CONSTRAINT fk_rt_perception_material FOREIGN KEY(material_id) REFERENCES ai_realtime_material(id),
+                CONSTRAINT fk_rt_perception_attachment FOREIGN KEY(attachment_id) REFERENCES ai_attachment(id),
+                CHECK(input_tokens IS NULL OR input_tokens>=0),CHECK(output_tokens IS NULL OR output_tokens>=0),CHECK(total_tokens IS NULL OR total_tokens>=0)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -75,13 +75,18 @@ class ASRProviderBase(ABC):
             if conn.asr.interface_type != InterfaceType.STREAM and conn.client_voice_stop:
                 # 直接使用asr_audio中的PCM数据
                 pcm_bytes = b"".join(conn.asr_audio)
-                # 检查是否有足够的音频数据（每帧1920字节，15帧约28800字节）
                 if len(pcm_bytes) > 1920 * 15:
                     await self.handle_voice_stop(conn, [pcm_bytes])
+                elif (len(pcm_bytes) > 1920 * 8
+                      and getattr(getattr(conn, "esp32_gateway", None), "mode", None) == "ai_worker"):
+                    # Short segments already accepted by VAD may contain an exit
+                    # word. Keep them out of the general dialogue path.
+                    await self.handle_voice_stop(conn, [pcm_bytes], control_only=True)
                 conn.reset_audio_states()
 
     # 处理语音停止
-    async def handle_voice_stop(self, conn: "ConnectionHandler", asr_audio_task: List[bytes]):
+    async def handle_voice_stop(self, conn: "ConnectionHandler", asr_audio_task: List[bytes], *,
+                                control_only=False):
         """并行处理ASR和声纹识别"""
         try:
             total_start_time = time.monotonic()
@@ -163,6 +168,10 @@ class ASRProviderBase(ABC):
             text_len, _ = remove_punctuation_and_length(content_for_length_check)
             self.stop_ws_connection()
 
+            if control_only:
+                from esp32_gateway.voice_controls import classify
+                if not classify(content_for_length_check):
+                    return
             if text_len > 0:
                 audio_snapshot = asr_audio_task.copy()
                 enqueue_asr_report(conn, enhanced_text, audio_snapshot)

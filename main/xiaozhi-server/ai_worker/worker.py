@@ -4,6 +4,8 @@ import re
 import logging
 import io
 import wave
+import copy
+from contextlib import asynccontextmanager
 
 # Official inline audio cap is encoded Base64 < 10 MB, not the B3 upload cap.
 AUDIO_PREFIX = 'data:audio/wav;base64,'
@@ -37,6 +39,45 @@ def aggregate_usage(requests):
 class Worker:
     def __init__(self, config, manager, provider):
         self.config, self.manager, self.provider = config, manager, provider
+        self.audit_jobs = set()
+
+    async def audit(self, task, requests):
+        if task.get('usage_audit') is not True:
+            return
+        # Only finalized records are passed here. Never persist a pending unknown
+        # placeholder and later overwrite it with a known measurement.
+        frozen = copy.deepcopy(requests)
+        async def report():
+            try:
+                receipt = await self.manager.usage(task, frozen)
+                if not isinstance(receipt, dict) or receipt.get('recorded') is not True:
+                    raise ControlError()
+            except (ControlError, LeaseLost):
+                logger.warning('PROVIDER_USAGE_AUDIT_UNAVAILABLE')
+                raise ProviderFailure('PROVIDER_UNAVAILABLE') from None
+        job = asyncio.create_task(report())
+        self.audit_jobs.add(job)
+        job.add_done_callback(self.audit_jobs.discard)
+        # Cancellation of generation must not cancel the independent fee-only IO.
+        await asyncio.shield(job)
+
+    @asynccontextmanager
+    async def audited_stream(self, task, requests):
+        failed = False
+        try:
+            async with self.provider.stream(task) as stream:
+                yield stream
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            try:
+                await self.audit(task, requests)
+            except ProviderFailure:
+                # Preserve cancellation/authority failures; never turn a late
+                # accounting failure into a state-changing terminal callback.
+                if not failed:
+                    raise
 
     async def heartbeat(self, task):
         while True:
@@ -52,15 +93,22 @@ class Worker:
         messages = task.get('messages')
         if not isinstance(messages, list):
             raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+        media_policy = task.get('media_policy')
+        if media_policy is not None and (not isinstance(media_policy, dict) or set(media_policy) != {'allow_history'}
+                or type(media_policy['allow_history']) is not bool):
+            raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+        allow_history = isinstance(media_policy, dict) and media_policy['allow_history'] is True
         prepared, count, image_bytes, text_chars = [], 0, 0, 0
         for index, message in enumerate(messages):
+            if not isinstance(message, dict):
+                raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
             refs = message.get('attachments')
             # Keep the B2 plain-text wire format and strip internal-only properties.
             clean = {'role': message.get('role'), 'content': message.get('content', '')}
             if not refs:
                 prepared.append(clean)
                 continue
-            if not isinstance(refs, list) or index != len(messages) - 1 or clean['role'] != 'user':
+            if not isinstance(refs, list) or (index != len(messages) - 1 and not allow_history) or clean['role'] != 'user':
                 raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
             count += len(refs)
             if count > 16:
@@ -138,6 +186,15 @@ class Worker:
                     content.append({'type': 'text', 'text': note + text})
             clean['content'] = content
             prepared.append(clean)
+        # Keep a device's current speaking rules beside the latest question as
+        # well as in its role. Long historical replies otherwise dominate style.
+        marker = '[ESP32 语音回复规则]'
+        for message in prepared:
+            if message['role'] == 'system' and isinstance(message['content'], str):
+                _, found, rules = message['content'].rpartition(marker)
+                if found and prepared[-1]['role'] == 'user' and isinstance(prepared[-1]['content'], str):
+                    prepared[-1]['content'] += '\n\n' + marker + rules
+                    break
         return {**task, 'messages': prepared}
 
     async def generate(self, task):
@@ -149,25 +206,32 @@ class Worker:
         sequence = 0
         usage, finish_reason, request_id = None, None, None
         try:
-            if any(message.get('attachments') for message in task.get('messages', [])):
+            messages = task.get('messages')
+            if not isinstance(messages, list) or any(not isinstance(message, dict) for message in messages):
+                raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE')
+            if any(message.get('attachments') for message in messages):
                 prepared = await asyncio.wait_for(self.prepare(task), getattr(self.config, 'provider_timeout_seconds', 60))
             else:
                 prepared = await self.prepare(task)
         except asyncio.TimeoutError:
             raise ProviderFailure('MEDIA_INPUT_UNAVAILABLE') from None
-        async with self.provider.stream(prepared) as stream:
+        record = dict(round=1, provider_request_id=None, usage=None, finish_reason=None)
+        async with self.audited_stream(prepared, [record]) as stream:
             response = getattr(stream, 'response', None)
             headers = getattr(response, 'headers', {})
             request_id = headers.get('x-request-id') or headers.get('x-dashscope-request-id')
+            record['provider_request_id'] = request_id
             async for chunk in stream:
                 reported = actual_usage(getattr(chunk, 'usage', None))
                 if reported is not None:
                     usage = reported
+                    record['usage'] = reported
                 for choice in chunk.choices or []:
                     if getattr(choice.delta, 'tool_calls', None) or getattr(choice.delta, 'function_call', None):
                         raise ProviderFailure('UNSUPPORTED_TOOL')
                     if choice.finish_reason:
                         finish_reason = choice.finish_reason
+                        record['finish_reason'] = finish_reason
                     content = getattr(choice.delta, 'content', None)
                     if content:
                         # Serialized callbacks provide backpressure; no unbounded token queue.
@@ -194,7 +258,7 @@ class Worker:
                 content_parts = []
                 record = dict(round=round_number, provider_request_id=None, usage=None, finish_reason=None)
                 requests.append(record)
-                async with self.provider.stream(prepared) as stream:
+                async with self.audited_stream(prepared, requests) as stream:
                     headers = getattr(getattr(stream, 'response', None), 'headers', {})
                     record['provider_request_id'] = headers.get('x-request-id') or headers.get('x-dashscope-request-id')
                     async for chunk in stream:
@@ -304,5 +368,6 @@ class Worker:
             await asyncio.sleep(self.config.poll_seconds)
 
     async def close(self):
+        await asyncio.gather(*self.audit_jobs, return_exceptions=True)
         await self.provider.close()
         await self.manager.close()

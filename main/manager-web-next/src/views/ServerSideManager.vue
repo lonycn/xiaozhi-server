@@ -152,7 +152,7 @@ export default {
 
 .page-title {
   font-weight: 500;
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
 }
 
@@ -250,13 +250,13 @@ export default {
 }
 
 .server-label {
-  font-size: 16px;
+  font-size: var(--admin-font-md);
   font-weight: 500;
 }
 
 .server-value {
   margin-top: 10px;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 
 .server-actions {
@@ -264,7 +264,7 @@ export default {
   gap: 8px;
 }
 .copy-button {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   color: #5778ff;
 }
 </style>
@@ -273,7 +273,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

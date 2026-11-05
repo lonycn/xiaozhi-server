@@ -280,7 +280,7 @@ export default {
 }
 
 .page-title {
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
   color: #2c3e50;
 }
@@ -360,7 +360,7 @@ export default {
   max-height: 400px !important;
   resize: vertical !important;
   line-height: 1.6;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   padding: 10px;
   border: 1px solid #dcdfe6;
   border-radius: 4px;
@@ -369,7 +369,7 @@ export default {
 }
 
 :deep(.el-form-item__label) {
-  font-size: 12px !important;
+  font-size: var(--admin-font-xs) !important;
   color: #3d4566 !important;
   font-weight: 400;
   line-height: 22px;
@@ -380,7 +380,7 @@ export default {
   color: #909399;
   background: rgba(255, 255, 255, 0.8);
   position: absolute;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   right: 10px;
   bottom: 10px;
   padding: 2px 5px;
@@ -412,7 +412,7 @@ export default {
 }
 
 .header-title {
-  font-size: 20px;
+  font-size: var(--admin-font-title);
   font-weight: 600;
   color: #2c3e50;
 }
@@ -427,7 +427,7 @@ export default {
   border-radius: 50%;
   border: 2px solid #cfcfcf;
   background: none;
-  font-size: 30px;
+  font-size: var(--admin-font-illustration);
   font-weight: lighter;
   color: #cfcfcf;
   cursor: pointer;
@@ -458,7 +458,7 @@ export default {
   border-radius: 18px;
   padding: 8px 16px;
   height: 32px;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 
 .header-actions .reset-btn {
@@ -482,7 +482,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

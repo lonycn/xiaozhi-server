@@ -1,0 +1,20 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611032000-chat-archive-outbox
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202611032000-chat-archive-outbox.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: 202611051000-chat-archive-tenant-type
+      author: codex
+      changes:
+        - addColumn:
+            tableName: xiaozhi_chat_archive_outbox
+            columns:
+              - column:
+                  name: tenant_type
+                  type: VARCHAR(16)
+                  defaultValue: customer

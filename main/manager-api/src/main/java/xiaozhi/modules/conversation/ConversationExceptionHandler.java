@@ -14,12 +14,22 @@ import xiaozhi.common.utils.Result;
 
 /** Actual HTTP error status for new APIs; preserve the legacy APIs' response behavior. */
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = {ConversationController.class,
+@RestControllerAdvice(assignableTypes = {ConversationController.class, ConversationIndexController.class,
         xiaozhi.modules.ai.AiController.class, xiaozhi.modules.ai.AiWorkerController.class,
+        xiaozhi.modules.ai.AiProviderUsageAuditController.class,
         xiaozhi.modules.agenttool.AgentToolController.class, xiaozhi.modules.agenttool.AgentToolWorkerController.class,
-        xiaozhi.modules.app.AppCapabilitiesController.class,
+        xiaozhi.modules.app.AppCapabilitiesController.class, xiaozhi.modules.esp32integration.Esp32CapabilitiesController.class,
+        xiaozhi.modules.aicontext.AiEvidenceController.class,
+        xiaozhi.modules.answerspeech.AnswerSpeechController.class,xiaozhi.modules.answerspeech.AnswerSpeechWorkerController.class,
+        xiaozhi.modules.aiskill.AiSkillController.class,
+        xiaozhi.modules.airuntime.AiRuntimeControlController.class,
         xiaozhi.modules.attachment.AttachmentController.class, xiaozhi.modules.attachment.MediaWorkerController.class})
 public class ConversationExceptionHandler {
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<Result<Void>> deviceFailure(org.springframework.web.server.ResponseStatusException error) {
+        return ResponseEntity.status(error.getStatusCode()).body(new Result<Void>().error(error.getStatusCode().value(),"ESP32_SOURCE_UNAVAILABLE"));
+    }
+
     @ExceptionHandler(ConversationProblem.class)
     public ResponseEntity<Result<Void>> problem(ConversationProblem error) {
         return ResponseEntity.status(error.status()).contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(new Result<Void>().error(error.status(), error.getMessage()));

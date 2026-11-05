@@ -11,7 +11,7 @@
       <div class="header-center">
         <button v-if="conversationEnabled && (supportAvailable || supportAdmin)" class="equipment-management" style="border: 0; background: transparent; font: inherit;" @click="$router.push('/support')">{{ $t('support.workspace') }}</button>
         <button v-if="conversationEnabled" class="equipment-management" style="border: 0; background: transparent; font: inherit;" @click="$router.push('/conversations')">
-          <LegacyIcon class="el-icon-chat-dot-round" style="font-size: 20px; margin-right: 8px;" />
+          <LegacyIcon class="el-icon-chat-dot-round" style="font-size: var(--admin-font-title); margin-right: 8px;" />
           <span class="nav-text">统一对话</span>
         </button>
         <div class="equipment-management" :class="{
@@ -491,7 +491,7 @@ export default {
   border-radius: 30px;
   display: flex;
   justify-content: center;
-  font-size: 16px;
+  font-size: var(--admin-font-md);
   font-weight: 500;
   gap: 7px;
   color: #6c79a8;
@@ -559,7 +559,7 @@ export default {
 
   .equipment-management {
     min-width: 80px;
-    font-size: 10px;
+    font-size: var(--admin-font-xs);
   }
 }
 
@@ -577,7 +577,7 @@ export default {
 .el-dropdown-menu__item {
   min-width: 60px;
   padding: 8px 20px;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   color: #606266;
   white-space: nowrap;
 }

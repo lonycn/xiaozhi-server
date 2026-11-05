@@ -130,6 +130,13 @@ class MergeTests(unittest.TestCase):
             policy(tool_task(model='qwen-vl-unknown'))
         self.assertEqual(error.exception.code, 'UNSUPPORTED_TOOL')
 
+    def test_unknown_result_is_data_not_permission_to_retry(self):
+        calls=[dict(provider_call_id='one',name='esp32_get_status',arguments={})]
+        response={'results':[dict(provider_call_id='one',name='esp32_get_status',status='unknown',output={'error_code':'MCP_ACK_TIMEOUT'},error_code='DEVICE_UNKNOWN')]}
+        messages=result_messages(response,calls,4096)
+        self.assertEqual(json.loads(messages[0]['content'])['status'],'unknown')
+        self.assertEqual(messages[0]['tool_call_id'],'one')
+
     def test_result_identity_shape_and_size_must_match(self):
         calls = [dict(provider_call_id='a', name='get_device', arguments={})]
         good = dict(provider_call_id='a', name='get_device', status='succeeded', output={}, error_code=None)

@@ -7,8 +7,13 @@ on:
       - 'main/manager-api/**'
       - 'main/xiaozhi-server/ai_worker/**'
       - 'main/xiaozhi-server/realtime_worker/**'
+      - 'main/xiaozhi-server/answer_speech_worker/**'
+      - 'main/xiaozhi-server/core/**'
+      - 'main/xiaozhi-server/esp32_gateway/**'
+      - 'main/xiaozhi-server/tests/test_esp32*.py'
       - 'main/xiaozhi-server/tests/test_ai_worker*.py'
       - 'main/xiaozhi-server/tests/test_realtime_worker*.py'
+      - 'main/xiaozhi-server/tests/test_answer_speech_worker*.py'
       - 'dev/**'
       - '.github/workflows/server-dev.yml'
   pull_request:
@@ -16,8 +21,13 @@ on:
       - 'main/manager-api/**'
       - 'main/xiaozhi-server/ai_worker/**'
       - 'main/xiaozhi-server/realtime_worker/**'
+      - 'main/xiaozhi-server/answer_speech_worker/**'
+      - 'main/xiaozhi-server/core/**'
+      - 'main/xiaozhi-server/esp32_gateway/**'
+      - 'main/xiaozhi-server/tests/test_esp32*.py'
       - 'main/xiaozhi-server/tests/test_ai_worker*.py'
       - 'main/xiaozhi-server/tests/test_realtime_worker*.py'
+      - 'main/xiaozhi-server/tests/test_answer_speech_worker*.py'
       - 'dev/**'
       - '.github/workflows/server-dev.yml'
 
@@ -80,17 +90,40 @@ jobs:
           cache-dependency-path: |
             main/xiaozhi-server/ai_worker/requirements.txt
             main/xiaozhi-server/realtime_worker/requirements.txt
+            main/xiaozhi-server/esp32_gateway/requirements.txt
+      - name: Install Opus runtime
+        run: sudo apt-get update && sudo apt-get install -y libopus0
       - name: Install pinned worker dependencies
-        run: python -m pip install -r main/xiaozhi-server/ai_worker/requirements.txt -r main/xiaozhi-server/realtime_worker/requirements.txt
+        run: python -m pip install -r main/xiaozhi-server/ai_worker/requirements.txt -r main/xiaozhi-server/realtime_worker/requirements.txt -r main/xiaozhi-server/esp32_gateway/requirements.txt
       - name: Run AI worker tests
         working-directory: main/xiaozhi-server
         run: python -m unittest discover -s tests -p 'test_ai_worker*.py'
       - name: Run realtime worker tests
         working-directory: main/xiaozhi-server
         run: python -m unittest discover -s tests -p 'test_realtime_worker*.py'
+      - name: Run ESP32 protocol and gateway tests
+        working-directory: main/xiaozhi-server
+        run: python -m unittest discover -s tests -t . -p 'test_esp32*.py'
       - name: Run Dev tests
         env:
           XIAOZHI_AI_WORKER_PYTHON: python
         run: |
           python -m unittest discover -s dev/tests -p 'test_*.py'
           python -m unittest dev.tests.ci_test_prepare_databases
+
+  answer-speech-worker:
+    name: Answer speech worker (isolated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: main/xiaozhi-server/answer_speech_worker/requirements.txt
+      - name: Install pinned answer speech dependencies
+        run: python -m pip install -r main/xiaozhi-server/answer_speech_worker/requirements.txt
+      - name: Run answer speech worker tests
+        working-directory: main/xiaozhi-server
+        run: python -m unittest discover -s tests -p 'test_answer_speech_worker*.py'

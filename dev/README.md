@@ -6,6 +6,12 @@
 
 2026-10-30 本机 Docker VM 存储 I/O 故障已在用户授权后恢复：colima与smartmaster两个profile正常restart，原Dev18894/API18893重新连接原MySQL/Redis，原18333 S3及既有对象恢复；迁移从115正常增加至116。22:47曾生成并核验APFS克隆/恢复快照，当前路径无法找到，仍在排查；原OS/data磁盘及所有原卷目前仍在，20:39 SQL及新建post-recovery一致性SQL备份已验证现存，字节与SHA见恢复记录。未执行清库/删卷，不据此推定无法定位的快照仍可用。故障期间的18895/API18901是20:39备份的隔离恢复副本，其进程及其他本轮备用服务现已正常SIGTERM停止，数据/DB/volumes及manifest/私有配置保留可恢复，不覆盖原库。原Dev18894/18893及AI/Media/realtime worker继续running。恢复后的Omni Dev S3录音/有声视频已通过，浏览器阶段及未完成边界见 [恢复与补充验收](../docs/ai-customer-service/DEV_RECOVERY_VALIDATION_20261030.md)。
 
+## 当前已统一真实设备（2026-11-05）
+
+本机现在只运行一套 Dev Manager API（18893）和 Vue3 页面（18894）。两块实际 ESP32 的设备记录与联调历史已增量合入原 Dev 数据库。旧 19193 API、旧控制台和并行候选网页已停用，原库及 SQL 备份保留。当前后台构建与最新源码的全部 class/resource 一致。
+
+私有 `dev/.runtime/esp32-device-settings.json` 明确开启设备接入；`up` / `stop` 同时管理单一 `esp32_services.py` 网关与 OTA 代理。固件仍使用 LAN 19180/19183，内部统一转到 18893。不可再启动旧 first-board canary；其管理脚本已增加退役标记检查。迁移、备份和验证证据位于工作区 `work/esp32-unified-latest-20261105/`。
+
 ## 启停
 
 在仓库根目录执行：
@@ -39,7 +45,7 @@ python3 dev/manage.py up --build --seed-local-console
 | 配置、数据库快照、日志 | `dev/.runtime/`，忽略提交，私有文件权限 600 |
 | 功能开关 | Dev 启用统一对话及 B1 人工文字 API；默认发布配置仍关闭 |
 
-`stop` 保留 Dev 数据。不要运行删除数据卷的命令。开发环境不接管现有 ESP32，不改变设备 OTA、WebSocket、固件及原智控台。
+`stop` 保留 Dev 数据。不要运行删除数据卷的命令。默认新建的开发环境不接管设备。本机已按 2026-11-05 的明确要求统一接入现有 ESP32；固件入口不变，内部后端统一为 Dev。
 
 ## 当前页面能力
 
@@ -122,3 +128,44 @@ python3 dev/manage.py agent-tools-disable
 ```
 
 普通 `agent-tools-enable` 不开放本地技术工具。仅在明确需要本地技术验收时使用 `agent-tools-enable --technical-local`；技术工具只报告固定协议能力，不提供客户业务数据。命令会检查 JAR、worker 依赖及私有配置，并重建本 Dev API、重启 AI worker。关闭时保留会话、工具审计、数据库和私有模型配置；关闭 AI 时工具随之不可用，已有工具开关偏好保留。`agent-tools-status` 报告配置及 AI 前提下的启用状态，不代表业务数据源、外部 App 或真实业务流程已联通。
+
+### AI-first 能力（显式启用）
+
+```bash
+python3 dev/manage.py ai-first-enable --build
+python3 dev/manage.py ai-first-status
+python3 dev/manage.py ai-first-disable
+```
+
+默认关闭；先启用 AI 与 agent-tools，并准备包含 AI context、公开工具结果及 realtime tools 的最新 API JAR 和对应 worker 环境。仅在需要固定只读技术工具验收时显式添加 `--technical-local`；不添加时保留 agent-tools 原有技术工具偏好。命令按当前已配置视觉/原声模型构建受限白名单，未知模型会拒绝启用，不自动更换模型；若两者均未配置，多模态工具维持关闭。已有 realtime 开启时才在本次启用实时工具；之后再启用 realtime 需重新执行本命令。不会开启摄像头、麦克风或 realtime 本身。
+
+命令会重建本 Dev API 并重启既有 AI/realtime worker；关闭仅移除 AI-first 开关，保留基础能力、模型与私有 worker 配置、会话和审计数据。实际 provider、媒体、外部业务与设备仍需各自验证，`status` 是配置状态而非健康探测。
+
+实时上传材料处理默认关闭，仅在实时功能已启用、对应 API 与 worker 已就绪并需要该能力时，显式使用 `python3 dev/manage.py ai-first-enable --materials`。启用前会检查新版材料接口及迁移，并验证既有私有 AI 视觉配置和 Bailian HTTPS 地址；只将视觉模型及其服务地址、密钥和 workspace 写入私有 realtime worker 配置，其他 realtime 配置保留。视觉地址、密钥或 workspace 为空时使用现有 AI 对应配置。再次不带 `--materials` 执行或执行 `ai-first-disable` 会关闭该功能；旧三字段设置默认为关闭。`ai-first-status` 显示配置状态，不证明模型或真实材料链路可用。命令不会自动打开麦克风或摄像头。
+
+普通 AI 回答朗读和固定只读技能也分别默认关闭，只在需要时对本次命令显式增加 `--speech` 和/或 `--skills`；下次不带相应选项执行会关闭该能力。朗读需要先准备独立 Python 环境：`python3 -m venv dev/.venv-answer-speech`，再使用该环境的 pip 安装 `main/xiaozhi-server/answer_speech_worker/requirements.txt`。命令先检查对应 JAR 类和迁移；朗读还只读查询唯一启用且默认的 `TTS_BailianCosyVoice` 配置，校验受信 Bailian WSS 及允许的模型/音色组合。代码默认组合为 `cosyvoice-v3.5-flash` / `longantai_v3`；保留已配置的 `cosyvoice-v2` / `longxiaochun_v2`，管理端派发参数随私有 worker 配置同步，避免迁移中发生不匹配。切换前必须先确认目标组合在当前业务空间能完整生成音频；2026-11-05 新组合实测返回引擎错误 `418`，当前运行状态请以数据库默认、角色绑定及各 worker 的实际私有配置为准。它不更换原 TTS 或 AI 配置，也不从视觉配置补充密钥。预检通过后才创建独立私有 worker 密钥和配置并启动 worker；日志不记录密钥。朗读使用会话中已保存的完成消息，不要求当前有运行中的普通 AI run；技能依赖已启用的 AI、agent-tools 与 AI context，只影响之后新建的普通 AI run。`ai-first-status` 的朗读/技能与 worker 状态不代表 provider 可用或音频真实验收完成。
+
+关闭 AI-first 会停止本朗读 worker 并关闭相应标志，保留历史任务、音频、会话、数据库与卷；全栈 `stop` 停止 worker，随后 `up` 会按已保存的启用状态重启。不要通过删除或初始化数据来处理失败。
+
+AI 运行控制默认关闭；需要时在 `ai-first-enable` 上显式附加 `--runtime-control`，例如 `python3 dev/manage.py ai-first-enable --runtime-control`。该选项只设置 `ai.runtime-control.enabled=true`，使用服务端默认的每用户并发 3、全局并发 32、每用户每小时 60 次和全局每小时 1000 次限制；启动前会检查 JAR 和迁移，旧版不自动启用。其他需要保留的可选能力也必须在同一命令中继续显式指定，例如 `--speech --skills --materials`。省略 `--runtime-control` 或执行 `ai-first-disable` 会关闭此开关，保留既有数据。`ai-first-status` 仅读取并显示配置，不证明 API 已部署、provider 健康或额度服务可用。
+
+启用前会只读检查当前 JAR 是否包含待执行的 `esp32-gateway` 触发器迁移，并读取本专属 Dev MySQL 的迁移记录、binlog 和 `log_bin_trust_function_creators`。数据库或迁移记录不可读取时先失败；对 JAR 中被 master 引用的网关变更，分别检查初版 `202611020700-esp32-gateway` 及存在时的 `202611021102-esp32-gateway-strict-revocation`。所包含的触发器迁移均已执行时不受该检查限制；旧 JAR 不包含严格撤权变更时不要求该记录。若迁移尚未执行且 binlog 开启、trust 关闭，命令会在停止 worker、改 AI-first 设置和重建 API 之前报错。请由数据库管理员对**本专属 Dev**安排一次经审查的临时迁移操作，完成后恢复原有全局设置；命令本身不会授权 SUPER 或更改数据库全局变量。保留现有数据库、卷和数据，不要通过清空或初始化来处理。
+
+### 管理端模型测试
+
+在“模型配置 → 修改 → 测试模型”中，使用当前编辑参数启动短样本测试，无须保存，也不更换默认模型。测试可能产生少量供应商用量。只有管理员可以使用；最近十条测试记录按当前管理员和模型隔离，日志保存在 `ai_model_test_run`，不保存请求凭据或测试输入文件。测试音频存于私有 `model-test.audio-dir`，通过管理员鉴权接口读取。
+
+| 类型 | 当前测试方法 |
+| --- | --- |
+| LLM | OpenAI 兼容 / SiliconFlow / Ollama 短文本推理 |
+| VLLM | OpenAI 兼容 / SiliconFlow 图片问答；默认红色圆形，也可上传 PNG/JPEG |
+| ASR | 百炼 `qwen_workspace` 实际音频识别；默认普通话样音，也可上传 WAV/MP3 |
+| TTS | 百炼 CosyVoice WebSocket / OpenAI 兼容 / SiliconFlow 实际合成，成功后可加载 WAV 试听 |
+| Intent | `intent_llm` 调用依赖 LLM；`function_call` 验证虚拟工具调用结构，不执行工具；`nointent` 仅检查配置 |
+| Memory | `mem_local_short` 使用测试对话验证总结 LLM；Mem0 v3 对隔离测试用户做只读检索；`nomem` / `mem_report_only` 仅检查配置 |
+| RAG | RAGFlow 知识库列表连接检查；填写知识库 ID 后执行只读检索 |
+| VAD | Silero 阈值及静音参数检查；不代表网关 ONNX 模型推理或实物收音验收 |
+
+其他供应器明确返回“尚未适配”，不会用普通 HTTP 可达性代替推理成功。测试任务最多两个并发、八个排队；请求有响应大小和超时限制，不自动重试供应商调用。相同请求编号仅创建一次测试。关闭窗口停止前端轮询，不会重发请求；已发起的有界任务继续写入结果，可稍后查看历史。
+
+服务端从私有数据库读取原始凭据，浏览器保留掩码；修改供应器或服务地址后，原有掩码凭据不能被自动发送到新地址，须明确填入对应凭据。结果区提供实际检查范围、耗时、供应商错误、请求编号、用量与逐步脱敏日志；TTS 测试使用 PCM/WAV 输出并沿用当前采样率、音量、语速和音调。

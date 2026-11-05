@@ -33,6 +33,12 @@ class Config:
     max_output_audio_bytes: int = 86_400_000
     max_frame_total_bytes: int = 64_000_000
     max_turns: int = 100
+    perception_model: str = ''
+    perception_base_url: str = ''
+    perception_api_key: str = ''
+    perception_workspace_id: str = ''
+    perception_timeout_seconds: float = 20
+    perception_max_tokens: int = 500
 
     def __post_init__(self):
         if type(self.enabled) is not bool or type(self.allow_missing_origin) is not bool:
@@ -57,7 +63,7 @@ class Config:
         if self.port > 65535 or self.max_connections > 64 or self.queue_size > 128 or self.max_session_seconds > 1800 or self.max_turns > 100:
             raise ValueError('invalid realtime resource limit')
         if (not 0 < self.auth_timeout_seconds <= 5 or not 0 < self.manager_timeout_seconds <= 1.5
-                or not 0 < self.provider_timeout_seconds <= 3 or not 0 < self.ack_timeout_seconds <= 10):
+                or not 0 < self.provider_timeout_seconds <= 10 or not 0 < self.ack_timeout_seconds <= 10):
             raise ValueError('invalid realtime timeout')
         manager = urlsplit(self.manager_url)
         provider = urlsplit(self.provider_url)
@@ -76,6 +82,25 @@ class Config:
             if (parts.scheme not in ('http', 'https') or not parts.hostname or parts.username or parts.password
                     or parts.path or parts.query or parts.fragment):
                 raise ValueError('invalid Origin')
+        if self.perception_model:
+            if not isinstance(self.perception_base_url,str) or not isinstance(self.perception_workspace_id,str):
+                raise ValueError('invalid perception provider configuration')
+            endpoint=urlsplit(self.perception_base_url)
+            host=endpoint.hostname or ''
+            if (self.perception_model!='qwen3.8-flash' or endpoint.scheme!='https'
+                    or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+                    or endpoint.port not in (None,443)
+                    or not (host in ('dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com') or host.endswith('.maas.aliyuncs.com'))
+                    or not isinstance(self.perception_api_key,str) or not self.perception_api_key.strip()
+                    or self.perception_api_key==self.worker_key
+                    or any(c in self.perception_api_key+self.perception_workspace_id for c in '\r\n')):
+                raise ValueError('invalid explicitly configured perception provider')
+        elif self.perception_base_url or self.perception_api_key or self.perception_workspace_id:
+            raise ValueError('perception model required for perception configuration')
+        if (type(self.perception_max_tokens) is not int or not 1<=self.perception_max_tokens<=1000
+                or isinstance(self.perception_timeout_seconds,bool) or not isinstance(self.perception_timeout_seconds,(int,float))
+                or not 0<self.perception_timeout_seconds<=25):
+            raise ValueError('invalid perception budget')
 
     @classmethod
     def load(cls, filename):

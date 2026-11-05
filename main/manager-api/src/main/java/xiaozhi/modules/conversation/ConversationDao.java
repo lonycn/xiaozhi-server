@@ -3,9 +3,12 @@ package xiaozhi.modules.conversation;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Repository;
 
 import lombok.RequiredArgsConstructor;
@@ -16,6 +19,9 @@ import xiaozhi.modules.conversation.ConversationModels.Conversation;
 @RequiredArgsConstructor
 public class ConversationDao {
     private final JdbcTemplate jdbc;
+    // A UTC database can still use a Beijing JDBC time zone for the legacy history.
+    @Value("${conversation.ledger-timestamps-utc:false}")
+    private boolean ledgerTimestampsUtc;
 
     public record StoredMessage(String id, String conversationId, long seq, String clientMessageId,
             String senderId, String partsJson, String requestHash, Instant createdAt,
@@ -39,7 +45,7 @@ public class ConversationDao {
                 FROM support_assignment a
                 JOIN support_request r ON r.id = a.request_id AND r.conversation_id = a.conversation_id
                 JOIN support_agent_profile p ON p.user_id = a.agent_user_id AND p.enabled = 1
-                    AND p.role IN ('support_agent', 'expert')
+                    AND JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(a.service_type))
                 JOIN sys_user u ON u.id = p.user_id AND u.status = 1
                 WHERE a.conversation_id = ? AND a.agent_user_id = ?
                     AND (a.released_at IS NOT NULL OR (r.status = 'active'
@@ -52,8 +58,10 @@ public class ConversationDao {
 
     public boolean currentAssignment(String id, long actor) {
         List<String> requests = jdbc.query("""
-                SELECT id FROM support_request WHERE conversation_id = ?
-                    AND status = 'active' AND assigned_agent_user_id = ? FOR UPDATE
+                SELECT r.id FROM support_request r JOIN support_agent_profile p ON p.user_id=r.assigned_agent_user_id AND p.enabled=1
+                    JOIN sys_user u ON u.id=p.user_id AND u.status=1
+                    WHERE r.conversation_id = ? AND r.status = 'active' AND r.assigned_agent_user_id = ?
+                    AND JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(r.service_type)) FOR UPDATE
                 """, (rs, row) -> rs.getString("id"), id, actor);
         if (requests.isEmpty()) return false;
         return !jdbc.query("""
@@ -74,9 +82,21 @@ public class ConversationDao {
         return accounts.isEmpty() ? null : roles.getFirst();
     }
 
+    /** Caller has locked profile/account and conversation before this current request read. */
+    public String currentServiceType(String id,long actor) {
+        var rows=jdbc.query("""
+                SELECT r.service_type FROM support_request r
+                JOIN support_agent_profile p ON p.user_id=r.assigned_agent_user_id AND p.enabled=1
+                JOIN sys_user u ON u.id=p.user_id AND u.status=1
+                WHERE r.conversation_id=? AND r.status='active' AND r.assigned_agent_user_id=?
+                AND JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(r.service_type)) FOR UPDATE
+                """,(rs,n)->rs.getString("service_type"),id,actor);
+        return rows.isEmpty()?null:rows.getFirst();
+    }
+
     public Conversation byId(String id, boolean lock) {
         List<Conversation> rows = jdbc.query("SELECT * FROM ai_conversation WHERE id = ?"
-                + (lock ? " FOR UPDATE" : ""), ConversationDao::conversation, id);
+                + (lock ? " FOR UPDATE" : ""), this::conversation, id);
         if (rows.isEmpty()) throw new ConversationProblem(404, "CONVERSATION_NOT_FOUND");
         return rows.getFirst();
     }
@@ -99,7 +119,7 @@ public class ConversationDao {
     public Conversation owned(String id, long userId, boolean lock) {
         List<Conversation> rows = jdbc.query("""
                 SELECT * FROM ai_conversation WHERE id = ? AND owner_user_id = ?
-                """ + (lock ? " FOR UPDATE" : ""), ConversationDao::conversation, id, userId);
+                """ + (lock ? " FOR UPDATE" : ""), this::conversation, id, userId);
         // Do not reveal whether an inaccessible conversation exists.
         if (rows.isEmpty()) {
             throw new ConversationProblem(404, "CONVERSATION_NOT_FOUND");
@@ -111,14 +131,19 @@ public class ConversationDao {
         return jdbc.query("""
                 SELECT * FROM ai_conversation
                 WHERE owner_user_id = ? AND list_sequence < ? ORDER BY list_sequence DESC LIMIT ?
-                """, ConversationDao::conversation, userId, before, limit);
+                """, this::conversation, userId, before, limit);
     }
 
     public StoredMessage duplicate(String conversationId, String clientMessageId) {
         List<StoredMessage> rows = jdbc.query("""
                 SELECT * FROM ai_message WHERE conversation_id = ? AND client_message_id = ?
-                """, ConversationDao::message, conversationId, clientMessageId);
+                """, this::message, conversationId, clientMessageId);
         return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    public StoredMessage messageById(String conversationId, String id) {
+        return jdbc.queryForObject("SELECT * FROM ai_message WHERE conversation_id=? AND id=?",
+                this::message, conversationId, id);
     }
 
     public void insertMessage(String id, String conversationId, long seq, String clientMessageId,
@@ -156,7 +181,7 @@ public class ConversationDao {
     public List<StoredMessage> messages(String id, long after, int limit, long cutoff) {
         return jdbc.query("""
                 SELECT * FROM ai_message WHERE conversation_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?
-                """, ConversationDao::message, id, after, cutoff, limit);
+                """, this::message, id, after, cutoff, limit);
     }
 
     public List<StoredEvent> events(String id, long after, int limit) {
@@ -168,19 +193,24 @@ public class ConversationDao {
                 SELECT * FROM ai_conversation_event WHERE conversation_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?
                 """, (rs, row) -> new StoredEvent(rs.getString("id"), rs.getString("conversation_id"),
                         rs.getLong("seq"), rs.getString("event_type"), rs.getString("data_json"),
-                        rs.getTimestamp("created_at").toInstant()), id, after, cutoff, limit);
+                        ledgerInstant(rs, "created_at")), id, after, cutoff, limit);
     }
 
-    private static Conversation conversation(ResultSet rs, int row) throws SQLException {
+    private Instant ledgerInstant(ResultSet rs, String column) throws SQLException {
+        return ledgerTimestampsUtc ? rs.getObject(column, LocalDateTime.class).toInstant(ZoneOffset.UTC)
+                : rs.getTimestamp(column).toInstant();
+    }
+
+    private Conversation conversation(ResultSet rs, int row) throws SQLException {
         return new Conversation(rs.getString("id"), rs.getLong("list_sequence"), rs.getString("agent_id"),
                 rs.getString("title"), rs.getString("state"), rs.getLong("last_seq"), rs.getLong("last_event_seq"),
-                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+                ledgerInstant(rs, "created_at"), ledgerInstant(rs, "updated_at"));
     }
 
-    private static StoredMessage message(ResultSet rs, int row) throws SQLException {
+    private StoredMessage message(ResultSet rs, int row) throws SQLException {
         return new StoredMessage(rs.getString("id"), rs.getString("conversation_id"), rs.getLong("seq"),
                 rs.getString("client_message_id"), rs.getString("sender_id"), rs.getString("parts_json"),
-                rs.getString("request_hash"), rs.getTimestamp("created_at").toInstant(),
+                rs.getString("request_hash"), ledgerInstant(rs, "created_at"),
                 rs.getString("sender_type"), rs.getString("status"));
     }
 }

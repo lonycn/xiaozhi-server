@@ -13,8 +13,9 @@ from PIL import Image
 import websockets
 from realtime_worker.config import Config, MODEL
 from realtime_worker.control import Manager
-from realtime_worker.provider import Provider
+from realtime_worker.provider import Provider, FixedOriginConnect
 from realtime_worker.server import Server
+from realtime_worker.control import Fault
 
 ORIGIN = 'http://127.0.0.1:18894'
 TICKET = 'opaque_short_ticket_' + 'a'*32
@@ -54,10 +55,12 @@ class Harness:
         self.response_number=0; self.provider_count=0; self.input_number=0; self.audio_open=False; self.current_audio_item=None; self.last_item=None; self.ack_mode='allocated'; self.old_ack=None; self.provider_closed=asyncio.Event()
         self.media_received=asyncio.Event(); self.hold_response=asyncio.Event()
         self.control_delay=0; self.provider_delay=0
+        self.connect_delay=0;self.ignore_connect_cancel=False;self.connect_canceled=False;self.connect_entered=asyncio.Event()
 
     async def start(self):
         app=web.Application()
         app.router.add_post('/xiaozhi/internal/realtime-worker/{tail:.*}',self.control)
+        if hasattr(self,'register_control_routes'):self.register_control_routes(app)
         self.control_runner=web.AppRunner(app,access_log=None)
         await self.control_runner.setup()
         control_site=web.TCPSite(self.control_runner,'127.0.0.1',0)
@@ -68,6 +71,12 @@ class Harness:
         provider_port=self.provider_server.sockets[0].getsockname()[1]
         async def connect(url, **kwargs):
             self.asserted_provider_url=url
+            self.connect_entered.set()
+            try:await asyncio.sleep(self.connect_delay)
+            except asyncio.CancelledError:
+                self.connect_canceled=True
+                if not self.ignore_connect_cancel:raise
+                await asyncio.sleep(.05)
             return await websockets.connect(f'ws://127.0.0.1:{provider_port}/realtime', **kwargs)
         self.server=Server(self.cfg,provider=Provider(self.cfg,connector=connect))
         self.runner=web.AppRunner(self.server.app,access_log=None)
@@ -327,7 +336,8 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         provider=next(iter(h.provider_clients))
         await h.emit(provider,'response.done',response=dict(id='response-1',status='cancelled'))
         await receive(ws,'response.canceled')
-        await asyncio.sleep(.05)
+        async with asyncio.timeout(3):
+            while not any(e['type']=='command.ack' for e in h.events):await asyncio.sleep(.01)
         self.assertFalse(any(e['type']=='response.cancel' for e in h.provider_sent))
         self.assertEqual(len([e for e in h.events if e['type']=='command.ack']),1)
 
@@ -655,7 +665,10 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         await receive(ws,'connected');await ws.send_json(audio())
         self.assertEqual((await receive(ws,'error'))['code'],'INPUT_LIMIT')
         self.assertFalse(any(e['type']=='input_audio_buffer.append' for e in h.provider_sent))
-        await asyncio.wait_for(h.provider_closed.wait(),2)
+        async with asyncio.timeout(2):
+            while h.server.connections or h.server.sessions or h.provider_clients:await asyncio.sleep(.01)
+        # Startup input can now cancel before a provider socket even opens.
+        self.assertFalse(h.provider_clients)
         other=await self.harness();other.task['limits']['max_session_seconds']=1
         second=await other.connect();error=await receive(second,'error')
         self.assertEqual(error['code'],'INPUT_LIMIT')
@@ -716,3 +729,65 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError): Config(**dict(values,host='0.0.0.0'))
             with self.assertRaises(ValueError): Config(**dict(values,provider_url='wss://evil.invalid/api-ws/v1/realtime'))
             self.assertNotIn('test-api-key',repr(Config(**values)))
+
+
+class ProviderOriginTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_redirect_is_not_followed_with_private_authorization(self):
+        requests=[]
+        async def handshake(connection,request):
+            requests.append(request)
+            response=connection.respond(307,'redirect denied')
+            response.headers['Location']='ws://127.0.0.1:'+str(server.sockets[0].getsockname()[1])+'/other'
+            return response
+        async def handler(socket):
+            self.fail('Redirect handshake must not establish a provider session')
+        server=await websockets.serve(handler,'127.0.0.1',0,process_request=handshake)
+        config=Config(manager_url='http://127.0.0.1:1/xiaozhi',worker_key='w'*48,
+            provider_url='wss://test.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime',api_key='fixture-provider-key')
+        async def connector(url,**kwargs):
+            return await FixedOriginConnect('ws://127.0.0.1:'+str(server.sockets[0].getsockname()[1]),**kwargs)
+        try:
+            self.assertIsInstance(Provider(config).connector, type)
+            self.assertIs(Provider(config).connector,FixedOriginConnect)
+            with self.assertRaises(Fault) as failure:await Provider(config,connector=connector).connect()
+            self.assertEqual(failure.exception.code,'PROVIDER_UNAVAILABLE')
+            self.assertEqual(len(requests),1)
+            self.assertEqual(requests[0].headers['Authorization'],'Bearer fixture-provider-key')
+        finally:
+            server.close();await server.wait_closed()
+
+
+class StartupTests(unittest.IsolatedAsyncioTestCase):
+    async def harness(self,**config):
+        h=await Harness(**config).start();self.addAsyncCleanup(h.close);return h
+
+    async def test_slow_seven_second_connect_keeps_busy_lease_and_does_not_publish_early_ready(self):
+        h=await self.harness(provider_timeout_seconds=9);h.connect_delay=6.2
+        ws=await h.connect(ready=False);await receive(ws,'connected')
+        await asyncio.sleep(2.2)
+        heartbeats=[body for path,body in h.bodies if path.endswith('/heartbeat')]
+        self.assertGreaterEqual(len(heartbeats),2);self.assertTrue(all(body['input_busy'] is True for body in heartbeats))
+        self.assertFalse(h.provider_sent);self.assertFalse(any(e['type']=='session.ready' for e in h.events))
+        await receive(ws,'ready',timeout=8)
+        self.assertEqual(sum(e['type']=='session.ready' for e in h.events),1)
+
+    async def test_startup_revocation_cancels_connect_and_closes_late_socket(self):
+        h=await self.harness(provider_timeout_seconds=9);h.connect_delay=7;h.ignore_connect_cancel=True
+        ws=await h.connect(ready=False);await receive(ws,'connected');await h.connect_entered.wait();h.active=False
+        await asyncio.wait_for(h.provider_closed.wait(),3)
+        self.assertTrue(h.connect_canceled);self.assertFalse(h.provider_sent)
+        self.assertFalse(any(e['type']=='session.ready' for e in h.events))
+
+    async def test_connect_timeout_is_explicit_and_late_socket_is_closed(self):
+        h=await self.harness(provider_timeout_seconds=.3);h.connect_delay=7;h.ignore_connect_cancel=True
+        ws=await h.connect(ready=False)
+        error=await receive(ws,'error')
+        self.assertEqual(error['code'],'PROVIDER_TIMEOUT')
+        await asyncio.wait_for(h.provider_closed.wait(),2)
+        self.assertTrue(h.connect_canceled);self.assertFalse(h.provider_sent)
+
+    async def test_downstream_close_during_startup_cancels_connect(self):
+        h=await self.harness(provider_timeout_seconds=9);h.connect_delay=7;h.ignore_connect_cancel=True
+        ws=await h.connect(ready=False);await receive(ws,'connected');await ws.close()
+        await asyncio.wait_for(h.provider_closed.wait(),2)
+        self.assertTrue(h.connect_canceled);self.assertFalse(h.provider_sent)

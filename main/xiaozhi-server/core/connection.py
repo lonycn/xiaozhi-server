@@ -1,3 +1,4 @@
+from core.esp32_protocol import MAX_AUDIO_QUEUE, MAX_TEXT_BYTES, valid_opus_frame
 import os
 import sys
 import copy
@@ -76,6 +77,13 @@ DIRECT_ANSWER_TOOL = {
 }
 
 
+def sanitized_connection_headers(headers):
+    """Expose only protocol metadata in logs, never mutate request headers."""
+    allowed = {"device-id", "client-id", "protocol-version"}
+    return {key: value if key.lower() in allowed else "[REDACTED]"
+            for key, value in headers.items()}
+
+
 class ConnectionHandler:
     def __init__(
             self,
@@ -89,6 +97,8 @@ class ConnectionHandler:
     ):
         self.common_config = config
         self.config = copy.deepcopy(config)
+        gateway_config = config.get("server", {}).get("esp32", {})
+        self.canonical_esp32 = gateway_config.get("enabled") is True and gateway_config.get("execution_mode", "ai_worker") == "ai_worker"
         self.session_id = str(uuid.uuid4())
         self.logger = setup_logging()
         self.server = server  # 保存server实例的引用
@@ -127,8 +137,8 @@ class ConnectionHandler:
         self.report_queue = queue.Queue()
         self.report_thread = None
         # 未来可以通过修改此处，调节asr的上报和tts的上报，目前默认都开启
-        self.report_asr_enable = self.read_config_from_api
-        self.report_tts_enable = self.read_config_from_api
+        self.report_asr_enable = self.read_config_from_api and not self.canonical_esp32
+        self.report_tts_enable = self.read_config_from_api and not self.canonical_esp32
 
         # 依赖的组件
         self.vad = None
@@ -136,9 +146,9 @@ class ConnectionHandler:
         self.tts = None
         self._asr = _asr
         self._vad = _vad
-        self.llm = _llm
-        self.memory = _memory
-        self.intent = _intent
+        self.llm = None if self.canonical_esp32 else _llm
+        self.memory = None if self.canonical_esp32 else _memory
+        self.intent = None if self.canonical_esp32 else _intent
 
         # 为每个连接单独管理声纹识别
         self.voiceprint_provider = None
@@ -157,7 +167,9 @@ class ConnectionHandler:
         # 因为实际部署时可能会用到公共的本地ASR，不能把变量暴露给公共ASR
         # 所以涉及到ASR的变量，需要在这里定义，属于connection的私有变量
         self.asr_audio = []  # 存储PCM帧列表，供VAD和ASR共享
-        self.asr_audio_queue = queue.Queue()
+        self.asr_audio_queue = queue.Queue(maxsize=MAX_AUDIO_QUEUE)
+        self.esp32_hello_complete = False
+        self.esp32_gateway = None
         self.current_speaker = None  # 存储当前说话人
         self.introduced_speakers = set()  # 已"首次引入"的说话人，控制只在首轮带名字
         self.system_introduced_speakers = set()  # 已在 system 注入过身份的说话人，控制 system 身份只首轮出现
@@ -215,7 +227,7 @@ class ConnectionHandler:
             else:
                 self.client_ip = ws.remote_address[0]
             self.logger.bind(tag=TAG).info(
-                f"{self.client_ip} conn - Headers: {self.headers}"
+                f"{self.client_ip} conn - Headers: {sanitized_connection_headers(self.headers)}"
             )
 
             self.device_id = self.headers.get("device-id", None)
@@ -366,8 +378,20 @@ class ConnectionHandler:
         # 不需要绑定，继续处理消息
 
         if isinstance(message, str):
+            if len(message.encode("utf-8")) > MAX_TEXT_BYTES:
+                await self.websocket.close(code=1009, reason="message too large")
+                return
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
+            if not self.esp32_hello_complete:
+                await self.websocket.close(code=1008, reason="hello required")
+                return
+            if not self.conn_from_mqtt_gateway and not valid_opus_frame(message):
+                await self.websocket.close(code=1009, reason="invalid audio frame")
+                return
+            if self.conn_from_mqtt_gateway and (len(message) <= 16 or len(message) > 16 + 1275):
+                await self.websocket.close(code=1009, reason="invalid audio frame")
+                return
             if self.vad is None or self.asr is None:
                 return
 
@@ -380,7 +404,10 @@ class ConnectionHandler:
             # 入口处直接解码PCM，避免VAD和ASR重复解码
             pcm_frame = self._decode_opus_packet(message)
             if pcm_frame:
-                self.asr_audio_queue.put(pcm_frame)
+                try:
+                    self.asr_audio_queue.put_nowait(pcm_frame)
+                except queue.Full:
+                    await self.websocket.close(code=1013, reason="audio queue full")
 
     async def _process_mqtt_audio_message(self, message):
         """
@@ -406,7 +433,10 @@ class ConnectionHandler:
             if timestamp > 0 and self.client_aec:
                 pcm_frame = self._apply_aec(timestamp, pcm_frame)
 
-            self.asr_audio_queue.put(pcm_frame)
+            try:
+                self.asr_audio_queue.put_nowait(pcm_frame)
+            except queue.Full:
+                await self.websocket.close(code=1013, reason="audio queue full")
             return True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"解析WebSocket音频包失败: {e}")
@@ -642,17 +672,17 @@ class ConnectionHandler:
                 self.asr.open_audio_channels(self), self.loop
             )
 
-            """加载记忆"""
-            self._initialize_memory()
-            """加载意图识别"""
-            self._initialize_intent()
-            """初始化上报线程"""
-            self._init_report_threads()
-            """更新系统提示词"""
-            self._init_prompt_enhancement()
-            """注入工具调用few-shot示例（仅function_call模式）"""
-            self._inject_tool_call_fewshot()
-
+            if not self.canonical_esp32:
+                """加载记忆"""
+                self._initialize_memory()
+                """加载意图识别"""
+                self._initialize_intent()
+                """初始化上报线程"""
+                self._init_report_threads()
+                """更新系统提示词"""
+                self._init_prompt_enhancement()
+                """注入工具调用few-shot示例（仅function_call模式）"""
+                self._inject_tool_call_fewshot()
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"实例化组件失败: {e}")
 
@@ -926,6 +956,8 @@ class ConnectionHandler:
                 "correct_words"
             ]
 
+        if self.canonical_esp32:
+            init_llm = init_memory = init_intent = False
         # 使用 run_in_executor 在线程池中执行 initialize_modules，避免阻塞主循环
         try:
             modules = await self.loop.run_in_executor(
@@ -1543,6 +1575,9 @@ class ConnectionHandler:
     async def close(self, ws=None):
         """资源清理方法"""
         try:
+            if self.esp32_gateway:
+                await self.esp32_gateway.close()
+                self.esp32_gateway = None
             # 清理 VAD 连接资源
             if (
                     hasattr(self, "vad")

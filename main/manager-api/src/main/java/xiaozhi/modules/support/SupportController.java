@@ -26,9 +26,12 @@ public class SupportController {
     @GetMapping("/support/assigned")
     @RequiresPermissions("support:queue:read")
     public Result<CursorPage<Request>> assigned(@RequestParam(defaultValue="0") long before,
-                                                @RequestParam(defaultValue="50") int limit) {
-        return ok(service.assigned(SecurityUser.getUserId(),before,limit));
+                                                @RequestParam(defaultValue="50") int limit, @RequestParam(name="service_type",required=false) String serviceType) {
+        return ok(serviceType == null ? service.assigned(SecurityUser.getUserId(),before,limit) : service.assigned(SecurityUser.getUserId(),before,limit,serviceType));
     }
+
+    @RequiresPermissions("support:queue:read")
+    public Result<CursorPage<Request>> assigned(long before,int limit) { return assigned(before,limit,null); }
 
     @GetMapping("/support/agents")
     @RequiresPermissions("support:agents:manage")
@@ -54,9 +57,12 @@ public class SupportController {
     @GetMapping("/support/queue")
     @RequiresPermissions("support:queue:read")
     public Result<CursorPage<Request>> queue(@RequestParam(defaultValue="0") long before,
-                                             @RequestParam(defaultValue="50") int limit) {
-        return ok(service.queue(SecurityUser.getUserId(),before,limit));
+                                             @RequestParam(defaultValue="50") int limit, @RequestParam(name="service_type",required=false) String serviceType) {
+        return ok(serviceType == null ? service.queue(SecurityUser.getUserId(),before,limit) : service.queue(SecurityUser.getUserId(),before,limit,serviceType));
     }
+    @RequiresPermissions("support:queue:read")
+    public Result<CursorPage<Request>> queue(long before,int limit) { return queue(before,limit,null); }
+
     @GetMapping("/support/requests/{id}")
     public Result<Request> get(@PathVariable String id) { return ok(service.get(SecurityUser.getUserId(),id)); }
     @PostMapping("/support/requests/{id}/claim")
@@ -69,6 +75,11 @@ public class SupportController {
     @RequiresPermissions("support:message:send")
     public Result<Message> send(@PathVariable String id, @RequestBody JsonNode body) {
         return ok(service.send(SecurityUser.getUserId(),id,conversations.request(body,SendMessage.class)));
+    }
+    @PostMapping("/support/requests/{id}/transfer")
+    @RequiresPermissions("support:request:resolve")
+    public Result<Request> transfer(@PathVariable String id,@RequestBody JsonNode body) {
+        return ok(service.transfer(SecurityUser.getUserId(),id,conversations.request(body,Transfer.class)));
     }
     @PostMapping("/support/requests/{id}/resolve")
     @RequiresPermissions("support:request:resolve")

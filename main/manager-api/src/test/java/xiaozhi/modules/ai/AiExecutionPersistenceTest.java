@@ -54,7 +54,7 @@ class AiExecutionPersistenceTest {
                 migration.update(new Contexts());migration.update(new Contexts());
             }
         }
-        assertEquals(4,jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
+        assertEquals(6,jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
     }
     @BeforeEach void services() {
         owner=ids.getAndAdd(3);staff=owner+1;outsider=owner+2;

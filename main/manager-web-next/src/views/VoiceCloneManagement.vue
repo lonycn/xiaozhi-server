@@ -400,7 +400,7 @@ export default {
 
 .page-title {
   font-weight: 500;
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
 }
 
@@ -457,7 +457,7 @@ export default {
   justify-content: center;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   font-weight: 500;
 }
 
@@ -581,7 +581,7 @@ export default {
 
 .info-title {
   min-width: 0;
-  font-size: 16px;
+  font-size: var(--admin-font-md);
   font-weight: 500;
   color: #303133;
 
@@ -604,7 +604,7 @@ export default {
 .info-row {
   display: flex;
   align-items: center;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   line-height: 1.5;
 }
 
@@ -650,14 +650,14 @@ export default {
   justify-content: center;
   padding: 60px 0;
   color: #909399;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 }
 </style>
 <style scoped>
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

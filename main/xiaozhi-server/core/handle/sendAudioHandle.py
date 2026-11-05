@@ -17,9 +17,32 @@ PRE_BUFFER_COUNT = 2  # 首段发送时不入队的帧数，避免流控延迟�
 
 
 async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text, sentence_id=None):
+    gateway = getattr(conn, "esp32_gateway", None)
+    if gateway and sentence_id is None:
+        return
     # 跳过旧句子残留音频
     if sentence_id is not None and sentence_id != conn.sentence_id:
         return
+
+    if gateway and gateway.mode == "ai_worker":
+        if gateway.playback_tags(sentence_id) is None:
+            return
+        if not gateway.playback_started:
+            # Cloud synthesis can take seconds. The device keeps listening until
+            # the first audio packet is ready, so it can hear an exit command.
+            if sentenceType == SentenceType.FIRST and text:
+                gateway.pending_playback_subtitle = text
+            subtitle = gateway.pending_playback_subtitle
+            if not audios and not (sentenceType == SentenceType.LAST and subtitle):
+                return
+            if not await send_tts_message(conn, "start", sentence_id=sentence_id):
+                return
+            if gateway.playback_tags(sentence_id) is None:
+                return
+            gateway.playback_started = True
+            gateway.pending_playback_subtitle = None
+            if sentenceType != SentenceType.FIRST and subtitle:
+                await send_tts_message(conn, "sentence_start", subtitle, sentence_id=sentence_id)
 
     if conn.tts.tts_audio_first_sentence:
         conn.logger.bind(tag=TAG).info(f"发送第一段语音: {text}")
@@ -34,13 +57,13 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
             == conn.sentence_id
         ):
             conn.audio_rate_controller.add_message(
-                lambda: send_tts_message(conn, "sentence_start", text)
+                lambda sid=sentence_id: send_tts_message(conn, "sentence_start", text, sentence_id=sid)
             )
         else:
             # 新句子或流控器未初始化，立即发送
-            await send_tts_message(conn, "sentence_start", text)
+            await send_tts_message(conn, "sentence_start", text, sentence_id=sentence_id)
 
-    await sendAudio(conn, audios)
+    await sendAudio(conn, audios, sentence_id=sentence_id)
     # 发送句子开始消息
     if sentenceType is not SentenceType.MIDDLE:
         conn.logger.bind(tag=TAG).info(f"发送音频消息: {sentenceType}, {text}")
@@ -48,7 +71,7 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
     # 发送结束消息（如果是最后一个文本）
     # 通话需要维持speaking状态
     if not conn.calling and sentenceType == SentenceType.LAST:
-        await send_tts_message(conn, "stop", None)
+        await send_tts_message(conn, "stop", None, sentence_id=sentence_id)
         if conn.close_after_chat:
             await conn.close()
 
@@ -115,7 +138,7 @@ async def _send_to_mqtt_gateway(
 
 
 async def sendAudio(
-    conn: "ConnectionHandler", audios, frame_duration=AUDIO_FRAME_DURATION
+    conn: "ConnectionHandler", audios, frame_duration=AUDIO_FRAME_DURATION, sentence_id=None
 ):
     """
     发送音频包，使用 AudioRateController 进行精确的流量控制
@@ -126,6 +149,8 @@ async def sendAudio(
         frame_duration: 帧时长（毫秒），默认使用全局常量AUDIO_FRAME_DURATION
     """
     if audios is None or len(audios) == 0:
+        return
+    if getattr(conn, "esp32_gateway", None) and (not sentence_id or sentence_id != conn.sentence_id):
         return
 
     send_delay_ms = conn.config.get("tts_audio_send_delay", 0)
@@ -262,6 +287,9 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
     """
     执行实际的音频发送
     """
+    gateway = getattr(conn, "esp32_gateway", None)
+    if gateway and not await gateway.authorize_playback(flow_control.get("sentence_id")):
+        return
     packet_index = flow_control.get("packet_count", 0)
     sequence = flow_control.get("sequence", 0)
 
@@ -279,11 +307,22 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
     flow_control["sequence"] = sequence + 1
 
 
-async def send_tts_message(conn: "ConnectionHandler", state, text=None):
+async def send_tts_message(conn: "ConnectionHandler", state, text=None, sentence_id=None):
     """发送 TTS 状态消息"""
     if text is None and state == "sentence_start":
         return
+    gateway = getattr(conn, "esp32_gateway", None)
+    if gateway and state in ("start", "sentence_start"):
+        if not await gateway.authorize_playback(sentence_id):
+            return
+    if gateway and state == "stop" and sentence_id is not None and sentence_id != conn.sentence_id:
+        return
     message = {"type": "tts", "state": state, "session_id": conn.session_id}
+    if gateway and getattr(gateway, "mode", None) == "ai_worker" and state in ("start", "stop", "sentence_start"):
+        tags = gateway.playback_tags(sentence_id)
+        if tags is None:
+            return False
+        message.update(tags)
     if text is not None:
         message["text"] = textUtils.check_emoji(text)
 
@@ -313,6 +352,11 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
 
     # 发送消息到客户端
     await conn.websocket.send(json.dumps(message))
+    if gateway and state == "start" and (
+        getattr(gateway, "mode", None) != "ai_worker" or gateway.playback_tags(sentence_id) is not None
+    ):
+        conn.client_is_speaking = True
+    return True
 
 
 async def send_stt_message(conn: "ConnectionHandler", text):
@@ -341,9 +385,10 @@ async def send_stt_message(conn: "ConnectionHandler", text):
     await conn.websocket.send(
         json.dumps({"type": "stt", "text": stt_text, "session_id": conn.session_id})
     )
-    await send_tts_message(conn, "start")
-    # 发送start消息后客户端状态会处于说话中状态，同步服务端状态
-    conn.client_is_speaking = True
+    if not getattr(conn, "esp32_gateway", None):
+        await send_tts_message(conn, "start")
+        # 发送start消息后客户端状态会处于说话中状态，同步服务端状态
+        conn.client_is_speaking = True
 
 
 async def send_display_message(conn: "ConnectionHandler", text):

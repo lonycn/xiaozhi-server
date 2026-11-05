@@ -73,7 +73,7 @@
             <el-form-item v-for="field in currentFunction.fieldsMeta" :key="field.key" :label="field.label"
               class="param-item" :class="{ 'textarea-field': field.type === 'array' || field.type === 'json' }">
               <template #label>
-                <span style="font-size: 16px; margin-right: 6px;">{{ field.label }}</span>
+                <span style="font-size: var(--admin-font-md); margin-right: 6px;">{{ field.label }}</span>
                 <el-tooltip effect="dark" :content="fieldRemark(field)" placement="top">
                   <img src="@/assets/home/info.png" alt="" class="info-icon">
                 </el-tooltip>
@@ -490,7 +490,7 @@ export default {
   }
 
   .bold-title {
-    font-size: 18px;
+    font-size: var(--admin-font-lg);
     font-weight: bold;
     margin: 0;
   }
@@ -498,7 +498,7 @@ export default {
   .select-all-btn {
     padding: 0;
     height: auto;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
   }
 }
 
@@ -593,7 +593,7 @@ export default {
 
 .param-form {
   .param-item {
-    font-size: 16px;
+    font-size: var(--admin-font-md);
 
     &.textarea-field {
       :deep(.el-form-item__content) {
@@ -620,7 +620,7 @@ export default {
     margin-bottom: 12px;
 
     .el-form-item__label {
-      font-size: 14px !important;
+      font-size: var(--admin-font-base) !important;
       color: #606266;
       text-align: left;
       padding-right: 10px;
@@ -681,7 +681,7 @@ export default {
   border-radius: 50%;
   border: 2px solid #cfcfcf;
   background: none;
-  font-size: 30px;
+  font-size: var(--admin-font-illustration);
   font-weight: lighter;
   color: #cfcfcf;
   cursor: pointer;
@@ -711,7 +711,7 @@ export default {
 
 .mcp-header {
   .bold-title {
-    font-size: 18px;
+    font-size: var(--admin-font-lg);
     font-weight: bold;
     margin: 5px 0 30px 0;
   }
@@ -735,14 +735,14 @@ export default {
 
   h4 {
     margin: 0 0 15px 0;
-    font-size: 16px;
+    font-size: var(--admin-font-md);
     font-weight: normal;
   }
 
   .address-desc {
     display: flex;
     align-items: center;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     margin-bottom: 12px;
 
     .doc-link {
@@ -759,7 +759,7 @@ export default {
 
 .url-input {
   border-radius: 4px 0 0 4px;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   height: 36px;
   box-sizing: border-box;
 
@@ -788,7 +788,7 @@ export default {
 .mcp-right {
   h4 {
     margin: 0 0 10px 0;
-    font-size: 16px;
+    font-size: var(--admin-font-md);
     font-weight: normal;
     color: black;
   }
@@ -823,7 +823,7 @@ export default {
   }
 
   .status-text {
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     margin-right: 10px;
   }
 
@@ -836,7 +836,7 @@ export default {
     border: 1px solid #DCDFE6;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     transition: all 0.3s;
 
     &:hover {
@@ -847,7 +847,7 @@ export default {
 
     .refresh-icon {
       margin-right: 6px;
-      font-size: 14px;
+      font-size: var(--admin-font-base);
     }
   }
 }
@@ -880,7 +880,7 @@ export default {
     border-color: #1677ff;
     color: #1677ff;
     background-color: white;
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
 
     &:hover {
       background-color: #1677ff;
@@ -892,7 +892,7 @@ export default {
   .no-tools {
     text-align: center;
     color: #909399;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     padding: 10px 0;
   }
 }

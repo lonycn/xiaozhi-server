@@ -72,6 +72,8 @@ public class SupportSummaryService {
             var assignments=jdbc.query("""
                     SELECT a.id,a.released_at,a.read_through_seq FROM support_assignment a
                     JOIN support_request r ON r.id=a.request_id AND r.conversation_id=a.conversation_id
+                    JOIN support_agent_profile p ON p.user_id=a.agent_user_id AND p.enabled=1
+                    AND JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(a.service_type))
                     WHERE a.conversation_id=? AND a.agent_user_id=? AND (a.released_at IS NOT NULL
                       OR (r.status='active' AND r.assigned_agent_user_id=a.agent_user_id)) FOR UPDATE
                     """,(rs,n)->new AssignmentGrant(rs.getString("id"),rs.getTimestamp("released_at")==null,rs.getLong("read_through_seq")),conversation,user);

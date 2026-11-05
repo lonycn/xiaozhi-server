@@ -17,8 +17,9 @@ from .tool_contract import require_disabled, reject_tool_event
 
 
 class TerminalReceipt(Exception):
-    def __init__(self, status):
+    def __init__(self, status, code=None):
         self.status = status
+        self.code = code
         super().__init__('Realtime session ended')
 
 
@@ -99,9 +100,15 @@ def validate_task(task, config):
 
 
 class Session:
-    def __init__(self, config, manager, provider, browser, task):
+    def __init__(self, config, manager, provider, browser, task, capture_protocol=None):
         self.config, self.manager, self.provider_factory, self.browser = config, manager, provider, browser
         self.task = validate_task(task, config)
+        self.capture=None
+        if capture_protocol is not None:
+            from .capture import Capture,PROTOCOL
+            if capture_protocol!=PROTOCOL or task.get('material_policy') is None:
+                raise Fault('MATERIAL_CAPTURE_PROTOCOL_REQUIRED')
+            self.capture=Capture()
         self.limits = task['limits']
         self.auto = task.get("turn_detection_mode", "manual") == "server_vad"
         self.listening = False
@@ -126,6 +133,7 @@ class Session:
         self.waiting_response = False
         self.pending_since = None
         self.turn_audio = self.input_audio = self.output_audio = self.frame_bytes = 0
+        self.turn_has_frame = False
         self.last_frame = -10000
         self.response = None
         self.responses = set()
@@ -142,10 +150,13 @@ class Session:
         self.early = []
         self.early_since = None
         self.tasks = []
+        self.tool_loop = None
+        self.material_flow = None
 
     def busy(self):
         return bool(not self.ready or self.listening or self.clearing_input or self.turn_audio or self.waiting_commit or self.waiting_response
-                    or self.response or self.pending_injection)
+                    or self.response or self.pending_injection or self.tool_loop and self.tool_loop.busy()
+                    or self.material_flow and self.material_flow.busy())
 
     def enqueue(self, kind, value):
         try:
@@ -191,6 +202,54 @@ class Session:
             # Ticks don't consume space needed for provider/client error handling.
             if not self.queue.full(): self.enqueue('tick', None)
 
+    async def startup_authorize(self):
+        # Startup is always busy: renew/fence authority, but don't deliver queued
+        # materials, injections or commands to an absent provider socket.
+        await self.manager.heartbeat(self.task,True)
+        self.last_authorized=time.monotonic()
+
+    async def connect_provider(self):
+        await self.startup_authorize()
+        browser=asyncio.create_task(self.browser_read());self.tasks.append(browser)
+        connect=asyncio.create_task(self.provider_factory.connect())
+        async def renew():
+            while True:
+                await asyncio.sleep(self.limits['heartbeat_seconds'])
+                await self.startup_authorize()
+        renewal=asyncio.create_task(renew());success=False
+        deadline=time.monotonic()+self.config.provider_timeout_seconds
+        async def close_late(socket):
+            try:await asyncio.wait_for(socket.close(),.5)
+            except Exception:pass
+        def abandoned(future):
+            if future.cancelled():return
+            try:socket=future.result()
+            except Exception:return
+            # An uncooperative connector can return after cancellation. Never
+            # publish or use that socket, even if its handshake succeeded.
+            asyncio.create_task(close_late(socket))
+        try:
+            while True:
+                done,_=await asyncio.wait((connect,renewal,browser),timeout=.1,return_when=asyncio.FIRST_COMPLETED)
+                if renewal in done:
+                    await renewal
+                    raise AuthorityLost()
+                if browser in done:
+                    kind,value=await self.queue.get()
+                    raise value if kind=='fault' else Fault('CLIENT_DISCONNECTED')
+                if self.failure:raise self.failure
+                if time.monotonic()>deadline:raise Fault('PROVIDER_TIMEOUT')
+                if connect in done:
+                    self.provider=await connect
+                    await self.startup_authorize()  # loss wins over a simultaneous connect
+                    success=True;return
+        finally:
+            renewal.cancel();await asyncio.gather(renewal,return_exceptions=True)
+            if not success:
+                if self.provider is None:connect.add_done_callback(abandoned)
+                if not connect.done():connect.cancel()
+                await asyncio.wait((connect,),timeout=.6)
+
     async def send_provider(self, event):
         if self.closed: raise AuthorityLost()
         if self.failure: raise self.failure
@@ -205,6 +264,11 @@ class Session:
         if self.closed: raise AuthorityLost()
         state = await self.manager.heartbeat(self.task, self.busy() or force_busy)
         self.last_authorized = time.monotonic()
+        if self.tool_loop: self.tool_loop.synchronize(state.get('turn_generation'))
+        if self.material_flow:
+            self.material_flow.synchronize(state.get('turn_generation'))
+            await self.material_flow.control(state.get('input_control'))
+            self.material_flow.dispatch(state.get('material'))
         commands, injections = state.get('commands', []), state.get('injections', [])
         if not isinstance(commands, list) or not isinstance(injections, list) or len(commands) > 1 or len(injections) > 1:
             raise Fault('WORKER_ERROR')
@@ -239,13 +303,17 @@ class Session:
                 'content':[{'type':'input_text','text':injection['text']}]}})
 
     async def canonical(self, source, kind, **payload):
+        if self.tool_loop and kind.startswith('response.') and 'turn_generation' not in payload:
+            response = self.response or {}
+            payload['turn_generation'] = response.get('generation', self.tool_loop.generation)
         seed = json.dumps([source.get('event_id', source), kind], sort_keys=True, separators=(',', ':'))
         event_id = 'bridge_' + hashlib.sha256(seed.encode()).hexdigest()
         result = await self.manager.event(self.task, self.sequence + 1, event_id, kind, **payload)
         self.sequence += 1
+        if self.tool_loop: self.tool_loop.synchronize(result.get('turn_generation'))
         state = result.get('session')
         if isinstance(state, dict) and state.get('status') in ('ended','failed','expired','canceled') and kind != 'session.error':
-            raise TerminalReceipt(state['status'])
+            raise TerminalReceipt(state['status'], state.get('error_code') if self.tool_loop else None)
         return result
 
     async def send_browser(self, kind, authorize=True, terminal=False, **payload):
@@ -274,7 +342,26 @@ class Session:
             await self.canonical(source, 'session.ready', provider_session_id=self.provider_session_id)
             self.ready = True
             self.pending_since = None
-            await self.send_browser('ready', heartbeat_seconds=2, heartbeat_timeout_seconds=6)
+            await self.send_browser('ready', heartbeat_seconds=2, heartbeat_timeout_seconds=6,
+                                    **(self.capture.metadata() if self.capture else {}))
+
+    def capture_tail_size(self,event):
+        if event['type']=='audio.append':
+            data=decoded(event['audio'],self.limits['max_audio_chunk_bytes'])
+            if not self.task['consent']['microphone'] or len(data)%2:raise Fault('INPUT_LIMIT')
+            return len(data)
+        if event['type']=='frame.append':
+            if not self.task['consent']['camera'] or event['mime_type']!='image/jpeg':raise Fault('INPUT_LIMIT')
+            data=decoded(event['image'],self.limits['max_frame_bytes'])
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter('error',Image.DecompressionBombWarning)
+                    with Image.open(io.BytesIO(data)) as image:
+                        if image.format!='JPEG' or image.width<1 or image.height<1 or image.width*image.height>self.limits['max_frame_pixels']:raise ValueError()
+                        image.load()
+            except Exception:raise Fault('INPUT_LIMIT') from None
+            return len(data)
+        return 0
 
     def matching_echo(self, event, expected, role):
         """The live provider may allocate its own ID: prove content, role and predecessor."""
@@ -329,9 +416,12 @@ class Session:
         elif (item.get('type') == 'message' and
                 (item.get('role') == 'assistant' and self.response is not None
                  or item.get('role') == 'user' and (self.waiting_commit or self.turn_audio > 0
-                        or self.auto and (self.listening or item_id in self.audio_items))
+                        or item_id in self.audio_items or self.auto and self.listening)
                     and isinstance(item.get('content'),list) and item['content']
-                    and all(isinstance(part,dict) and part.get('type') == 'input_audio' for part in item['content']))):
+                    and any(isinstance(part,dict) and part.get('type') == 'input_audio' for part in item['content'])
+                    and all(isinstance(part,dict) and (part.get('type') == 'input_audio'
+                        or part.get('type') == 'input_image' and self.task['consent']['camera']
+                            and (self.turn_has_frame or self.audio_items.get(item_id) is True)) for part in item['content']))):
             self.remember_item(item_id,fingerprint)
         else:
             raise Fault('PROVIDER_ERROR')
@@ -342,12 +432,25 @@ class Session:
         allowed = {'audio.append': {'type','audio'}, 'audio.commit': {'type'},
                    'frame.append': {'type','image','mime_type'},
                    'listening.start': {'type'}, 'listening.stop': {'type'}, 'ping': {'type', 'id'}}
+        if self.capture and kind in allowed and kind!='ping':allowed[kind]=allowed[kind]|{'capture_token'}
         if kind not in allowed or set(event) != allowed[kind]: raise Fault('INPUT_LIMIT')
         await self.authorize(force_busy=True)
         if kind == 'ping':
             if type(event['id']) is not int or not 1 <= event['id'] <= 2**31-1:
                 raise Fault('INPUT_LIMIT')
             await self.send_browser('pong', authorize=False, id=event['id'])
+            return
+        if self.capture and self.capture.stale(event['capture_token']):
+            self.material_flow.discard_capture_tail(self.capture_tail_size(event))
+            return
+        if self.material_flow and (self.material_flow.paused or self.material_flow.awaiting_reply):
+            if kind=='audio.append':
+                self.material_flow.discard_capture_tail(self.capture_tail_size(event))
+                return
+            if kind=='frame.append':
+                self.material_flow.discard_capture_tail(self.capture_tail_size(event))
+                return
+            await self.send_browser('error',authorize=False,code='INPUT_PAUSED')
             return
         if kind in ('listening.start', 'listening.stop'):
             if not self.auto: raise Fault('INPUT_LIMIT')
@@ -371,6 +474,8 @@ class Session:
         if kind == 'audio.append':
             data = decoded(event['audio'], self.limits['max_audio_chunk_bytes'])
             if len(data) % 2: raise Fault('INPUT_LIMIT')
+            if self.tool_loop and not self.auto and not self.turn_audio:
+                await self.tool_loop.input_started({'event_id':'manual_input_'+str(self.sequence+1)})
             # In continuous mode silence is streamed, never accumulated as a 60s utterance.
             if not self.auto or self.speech_active: self.turn_audio += len(data)
             self.input_audio += len(data)
@@ -400,6 +505,7 @@ class Session:
             self.frame_bytes += len(data)
             if self.frame_bytes > self.config.max_frame_total_bytes: raise Fault('INPUT_LIMIT')
             self.last_frame = now
+            self.turn_has_frame = True
             await self.send_provider({'type':'input_image_buffer.append','image':event['image']})
 
     async def provider_event(self, event):
@@ -418,11 +524,17 @@ class Session:
             self.seen[event_id] = digest
             if len(self.seen) > 2048: self.seen.popitem(last=False)
         await self.authorize(force_busy=True)
-        reject_tool_event(event)
+        if self.material_flow and await self.material_flow.provider_event(event):return
+        if self.tool_loop:
+            if await self.tool_loop.provider_event(event): return
+        else:
+            reject_tool_event(event)
         if kind == 'session.created':
             if self.created: raise Fault('PROVIDER_ERROR')
             self.created = True
-            await self.send_provider(self.provider_factory.session_update(self.task.get("turn_detection_mode", "manual")))
+            update = (self.provider_factory.session_update(self.task.get('turn_detection_mode', 'manual'), tools=self.tool_loop.tools)
+                      if self.tool_loop else self.provider_factory.session_update(self.task.get('turn_detection_mode', 'manual')))
+            await self.send_provider(update)
         elif kind == 'session.updated':
             if not self.created or self.updated: raise Fault('PROVIDER_ERROR')
             if self.auto and (not isinstance(event.get('session', {}).get('turn_detection'), dict)
@@ -436,9 +548,11 @@ class Session:
         elif kind == 'input_audio_buffer.speech_started':
             if not self.auto or not (self.listening or self.clearing_input) or self.speech_active:
                 raise Fault('PROVIDER_ERROR')
+            if self.tool_loop: await self.tool_loop.input_started(event)
             self.speech_active = True
             self.speech_started = time.monotonic()
             self.turn_audio = 0
+            self.turn_has_frame = False
             if self.waiting_response: self.suppress_next_response = True
             if self.response:
                 # Qwen VAD itself cancels the response. Do not race that with an
@@ -466,10 +580,11 @@ class Session:
         elif kind == 'input_audio_buffer.committed':
             if not self.waiting_commit: raise Fault('PROVIDER_ERROR')
             item_id = safe_id(event.get('item_id'))
-            self.audio_items[item_id] = True
+            self.audio_items[item_id] = self.turn_has_frame
             if len(self.audio_items) > 256: self.audio_items.popitem(last=False)
             await self.canonical(event, 'input.committed', provider_item_id=safe_id(event.get('item_id')))
             self.waiting_commit = False; self.turn_audio = 0
+            self.turn_has_frame = False
             self.waiting_response = True
             self.pending_since = time.monotonic()
             if not self.auto: await self.send_provider({'type':'response.create'})
@@ -490,12 +605,15 @@ class Session:
                 self.suppress_next_response = False
             self.waiting_response = False
             self.pending_since = time.monotonic()
-            receipt = await self.canonical(event, 'response.started', response_id=rid)
+            extra = self.tool_loop.response_started(self.response) if self.tool_loop else {}
+            receipt = await self.canonical(event, 'response.started', response_id=rid, **extra)
             self.response['message_id'] = receipt.get('message_id')
             await self.send_browser('response.started', response_id=rid)
             early, self.early = self.early, []
             self.early_since = None
-            for pending in early: await self.response_event(pending)
+            for pending in early:
+                if self.tool_loop and await self.tool_loop.provider_event(pending): continue
+                await self.response_event(pending)
         elif kind.startswith('response.function_call') or kind.startswith('response.mcp'):
             raise Fault('UNSUPPORTED_TOOL')
         elif kind in ('response.audio.delta','response.text.delta','response.audio_transcript.delta',
@@ -535,6 +653,7 @@ class Session:
             text = event.get('delta')
             if not isinstance(text, str) or text_units(text) > self.limits['max_event_text_chars']: raise Fault('INPUT_LIMIT')
             if not text: return
+            if self.tool_loop: self.tool_loop.text_delta(text)
             self.response['text'] += text
             if text_units(self.response['text']) > self.limits['max_output_chars']: raise Fault('INPUT_LIMIT')
             try:
@@ -557,8 +676,14 @@ class Session:
         elif kind == 'response.done':
             response = event['response']
             status = response.get('status')
-            if any(item.get('type') in ('function_call','mcp_call','mcp_approval_request') for item in response.get('output', []) if isinstance(item, dict)):
+            if self.tool_loop and await self.tool_loop.finish_step(event): return
+            if not self.tool_loop and any(item.get('type') in ('function_call','mcp_call','mcp_approval_request') for item in response.get('output', []) if isinstance(item, dict)):
                 raise Fault('UNSUPPORTED_TOOL')
+            if self.tool_loop:
+                try: self.tool_loop.usage(actual_usage(response.get('usage')))
+                except Fault:
+                    await self.canonical(event, 'response.canceled', response_id=rid, usage=actual_usage(response.get('usage')))
+                    raise
             if self.interrupt or self.response.get('suppressed') or status in ('cancelled', 'canceled'):
                 usage = actual_usage(response.get('usage'))
                 await self.canonical(event, 'response.canceled', response_id=rid, usage=usage)
@@ -575,6 +700,7 @@ class Session:
                     final_parts = [part[key] for part in parts if isinstance(part.get(key), str)]
                     text = ''.join(final_parts) if final_parts else self.response['text']
                 if text_units(text) > self.limits['max_output_chars']: raise Fault('INPUT_LIMIT')
+                if self.tool_loop: self.tool_loop.final_text(text)
                 details = response.get('status_details') or {}
                 reason = details.get('reason')
                 finish = 'stop' if status=='completed' else {'max_output_tokens':'length','content_filter':'content_filter'}.get(reason,'unknown')
@@ -584,9 +710,12 @@ class Session:
                 if receipt.get('message_status') == 'canceled':
                     await self.send_browser('response.canceled', response_id=rid, status='canceled', clear_audio=True, usage=usage)
                 else:
-                    await self.send_browser('response.completed', response_id=rid, text=text, finish_reason=finish, usage=usage)
+                    visible_text = self.tool_loop.prefix+text if self.tool_loop else text
+                    visible_usage = self.tool_loop.logical_usage() if self.tool_loop else usage
+                    await self.send_browser('response.completed', response_id=rid, text=visible_text, finish_reason=finish, usage=visible_usage)
             else:
                 raise Fault(provider_error(response.get('status_details') or {}))
+            if self.material_flow:self.material_flow.response_done(self.response.get('generation'))
             self.response = None; self.interrupt = None
             if not (self.waiting_commit or self.waiting_response or self.clearing_input): self.pending_since = None
 
@@ -597,18 +726,27 @@ class Session:
         if not self.ready and now > self.setup_deadline: raise Fault('PROVIDER_TIMEOUT')
         if self.early_since and now-self.early_since > 2: raise Fault('PROVIDER_ERROR')
         if self.pending_since and now-self.pending_since > self.config.ack_timeout_seconds:
+            if self.material_flow and self.material_flow.context:raise Fault('MATERIAL_CONTEXT_UNCONFIRMED')
             raise Fault('PROVIDER_TIMEOUT')
         # Independent of a saturated event queue: stop if authority hasn't been checked in time.
         if now-self.last_authorized > 5.5: raise AuthorityLost()
+        if self.tool_loop: self.tool_loop.check_deadlines()
 
     async def run(self):
         try:
             await self.send_browser('connected', authorize=False)
             # A future manager must not silently enable declarations that this
             # worker cannot execute under realtime-session authority.
-            require_disabled(self.task.get('tools'))
-            self.provider = await self.provider_factory.connect()
-            self.tasks = [asyncio.create_task(self.browser_read()), asyncio.create_task(self.provider_read()), asyncio.create_task(self.pulse())]
+            if self.task.get('tools'):
+                from .tools import RealtimeTools
+                self.tool_loop = RealtimeTools(self)
+            else:
+                require_disabled(self.task.get('tools'))
+            if self.task.get('material_policy') is not None:
+                from .materials import Materials
+                self.material_flow=Materials(self)
+            await self.connect_provider()
+            self.tasks.extend([asyncio.create_task(self.provider_read()),asyncio.create_task(self.pulse())])
             while True:
                 self.check_deadlines()
                 if self.failure: raise self.failure
@@ -618,8 +756,14 @@ class Session:
                 if kind == 'tick': await self.authorize()
                 elif kind == 'client': await self.client_event(value)
                 elif kind == 'provider': await self.provider_event(value)
+                elif kind == 'tool_result': await self.tool_loop.result(*value)
+                elif kind == 'material_result': await self.material_flow.result(*value)
         except TerminalReceipt as terminal:
-            try: await self.send_browser('ended', authorize=False, terminal=True, status=terminal.status, clear_audio=True)
+            try:
+                if terminal.code:
+                    await self.send_browser('error', authorize=False, terminal=True, code=terminal.code, clear_audio=True)
+                else:
+                    await self.send_browser('ended', authorize=False, terminal=True, status=terminal.status, clear_audio=True)
             except Fault: pass
         except AuthorityLost:
             # No callback or late playback after lease loss, even if delivery is uncertain.
@@ -634,6 +778,8 @@ class Session:
             self.closed = True
             for task in self.tasks: task.cancel()
             await asyncio.gather(*self.tasks, return_exceptions=True)
+            if self.tool_loop: await self.tool_loop.close()
+            if self.material_flow: await self.material_flow.close()
             if self.provider is not None:
                 try: await asyncio.wait_for(self.provider.close(), .5)
                 except Exception: pass

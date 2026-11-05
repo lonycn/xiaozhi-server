@@ -44,7 +44,7 @@ class AnnotationPersistenceTest {
         db.execute("CREATE TABLE sys_user(id BIGINT PRIMARY KEY,status TINYINT NOT NULL)");db.update("INSERT INTO sys_user VALUES(7,1),(8,1),(71,1),(72,1)");
         db.execute("CREATE TABLE ai_agent(id VARCHAR(32) PRIMARY KEY,user_id BIGINT)");db.execute("CREATE TABLE ai_agent_chat_history(id BIGINT PRIMARY KEY,content VARCHAR(100))");db.update("INSERT INTO ai_agent_chat_history VALUES(1,'keep-original-evidence')");
         for(String changelog:List.of("conversation","support","attachments","annotations"))try(var connection=source.getConnection();var migration=new Liquibase("db/changelog/"+changelog+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){migration.update(new Contexts());migration.update(new Contexts());}
-        assertEquals(4,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
+        assertEquals(6,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
         var dao=new ConversationDao(db);var manager=new DataSourceTransactionManager(source);transactions=manager;root=Files.createTempDirectory("b4-annotation-private-fixture-");
         media=new AttachmentService(db,dao,JSON,manager,new MockEnvironment().withProperty("media.ticket-key",KEY),new PrivateObjectStore.Filesystem(root));
         annotations=new AnnotationService(db,media,new ConversationAccessService(dao),JSON,manager);media.setGeneratedSupportForTests(annotations);

@@ -1,0 +1,31 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611020101-ai-context
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE ai_context_snapshot (
+                id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                conversation_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                through_seq BIGINT NOT NULL,
+                source_hash CHAR(64) NOT NULL,
+                summary_json LONGTEXT NOT NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                UNIQUE KEY uk_ai_context_source(conversation_id,through_seq,source_hash),
+                CONSTRAINT fk_ai_context_conversation FOREIGN KEY(conversation_id) REFERENCES ai_conversation(id),
+                CHECK(JSON_VALID(summary_json))
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE ai_context_run_snapshot (
+                run_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                snapshot_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                message_cutoff BIGINT NOT NULL,
+                history_parts_json LONGTEXT NOT NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                CONSTRAINT fk_ai_context_run FOREIGN KEY(run_id) REFERENCES ai_run(id),
+                CONSTRAINT fk_ai_context_snapshot FOREIGN KEY(snapshot_id) REFERENCES ai_context_snapshot(id),
+                CHECK(JSON_VALID(history_parts_json))
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              INSERT INTO agent_tool_definition(name,version,adapter,input_schema_json,output_schema_json) VALUES
+                ('read_conversation_history',1,'conversation_evidence','{"type":"object","additionalProperties":false,"properties":{"before_seq":{"type":"string","pattern":"^[0-9]{1,19}$"},"limit":{"type":"integer","minimum":1,"maximum":20}},"required":[]}','{"type":"object"}'),
+                ('read_conversation_evidence',1,'conversation_evidence','{"type":"object","additionalProperties":false,"properties":{"attachment_id":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"max_chars":{"type":"integer","minimum":1,"maximum":12000}},"required":["attachment_id"]}','{"type":"object"}');

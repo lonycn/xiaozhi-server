@@ -42,6 +42,8 @@ TAG = __name__
 class WebSocketServer:
     def __init__(self, config: dict):
         self.config = config
+        gateway_config = config.get("server", {}).get("esp32", {})
+        canonical = gateway_config.get("enabled") is True and gateway_config.get("execution_mode", "ai_worker") == "ai_worker"
         self.logger = setup_logging(config)
         self.config_lock = asyncio.Lock()
         modules = initialize_modules(
@@ -49,10 +51,10 @@ class WebSocketServer:
             self.config,
             "VAD" in self.config["selected_module"],
             "ASR" in self.config["selected_module"],
-            "LLM" in self.config["selected_module"],
+            "LLM" in self.config["selected_module"] and not canonical,
             False,
-            "Memory" in self.config["selected_module"],
-            "Intent" in self.config["selected_module"],
+            "Memory" in self.config["selected_module"] and not canonical,
+            "Intent" in self.config["selected_module"] and not canonical,
         )
         self._vad = modules["vad"] if "vad" in modules else None
         self._asr = modules["asr"] if "asr" in modules else None
@@ -79,6 +81,8 @@ class WebSocketServer:
             port,
             process_request=self._http_response,
             ping_interval=None,
+            max_size=65536,
+            max_queue=16,
         ):
             await asyncio.Future()
 
@@ -117,6 +121,12 @@ class WebSocketServer:
             await websocket.send("认证失败")
             await websocket.close()
             return
+        # Firmware chooses its binary envelope from this header before hello.
+        if not websocket.request.path.endswith("?from=mqtt_gateway"):
+            version = websocket.request.headers.get("protocol-version", "1")
+            if version != "1":
+                await websocket.close(code=1008, reason="unsupported WebSocket protocol version")
+                return
         # 创建ConnectionHandler时传入当前server实例
         handler = ConnectionHandler(
             self.config,
@@ -178,16 +188,20 @@ class WebSocketServer:
                 )
                 # 更新配置
                 self.config = new_config
+                # Existing connections keep their fixed executor; only new config
+                # determines which modules may be prepared for future connections.
+                gateway_config = new_config.get("server", {}).get("esp32", {})
+                canonical = gateway_config.get("enabled") is True and gateway_config.get("execution_mode", "ai_worker") == "ai_worker"
                 # 重新初始化组件
                 modules = initialize_modules(
                     self.logger,
                     new_config,
                     update_vad,
                     update_asr,
-                    "LLM" in new_config["selected_module"],
+                    "LLM" in new_config["selected_module"] and not canonical,
                     False,
-                    "Memory" in new_config["selected_module"],
-                    "Intent" in new_config["selected_module"],
+                    "Memory" in new_config["selected_module"] and not canonical,
+                    "Intent" in new_config["selected_module"] and not canonical,
                 )
 
                 # 更新组件实例

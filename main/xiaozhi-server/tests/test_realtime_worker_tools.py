@@ -24,6 +24,7 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(state['error_code'], 'UNSUPPORTED_TOOL')
         state['worker_function_calling'] = 'enabled'
         self.assertEqual(capability()['worker_function_calling'], 'disabled')
+        self.assertEqual(Provider.tool_capability(authorized=True)['worker_function_calling'],'enabled_for_authorized_task')
 
     def test_default_manual_and_vad_wire_unchanged_empty_tools_only(self):
         for mode in ('manual', 'server_vad'):
@@ -33,7 +34,8 @@ class CapabilityTests(unittest.TestCase):
             self.assertFalse(original['session']['enable_search'])
             self.assertEqual(original['session']['audio']['input']['format']['sample_rate'], 16000)
             self.assertEqual(original['session']['audio']['output']['format']['sample_rate'], 24000)
-            for tools in ([DECLARATION], {}, False, 'get_device', ()):  # No implicit enable by malformed declarations.
+            self.assertEqual(Provider.session_update(mode, tools=[DECLARATION])['session']['tools'], [DECLARATION])
+            for tools in ({}, False, 'get_device', ()):  # No implicit enable by malformed declarations.
                 with self.subTest(mode=mode, tools=tools), self.assertRaises(Fault) as error:
                     Provider.session_update(mode, tools=tools)
                 self.assertEqual(error.exception.code, 'UNSUPPORTED_TOOL')

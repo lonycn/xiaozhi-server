@@ -1,0 +1,61 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611020900-esp32-ai
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE esp32_ai_run_binding (
+                run_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                device_id VARCHAR(32) NOT NULL,
+                owner_id BIGINT NOT NULL,
+                agent_id VARCHAR(32) NOT NULL,
+                binding_version VARCHAR(64) NOT NULL,
+                connection_id VARCHAR(36) NOT NULL,
+                generation BIGINT NOT NULL,
+                gateway_id VARCHAR(64) NOT NULL,
+                turn_id VARCHAR(32) NOT NULL UNIQUE,
+                session_id VARCHAR(32) NOT NULL,
+                control_version BIGINT NOT NULL,
+                turn_seq BIGINT NOT NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                KEY ix_esp32_ai_device(device_id,created_at)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE esp32_ai_tool_call (
+                id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                run_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                run_attempt INT NOT NULL,
+                control_epoch BIGINT NOT NULL,
+                lease_hash VARCHAR(64) NOT NULL,
+                provider_call_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                tool_name VARCHAR(64) NOT NULL,
+                round_number INT NOT NULL,
+                arguments_json TEXT NOT NULL,
+                arguments_hash VARCHAR(64) NOT NULL,
+                command_id VARCHAR(36) NULL,
+                state VARCHAR(20) NOT NULL,
+                output_json TEXT NULL,
+                error_code VARCHAR(64) NULL,
+                deadline BIGINT NOT NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                UNIQUE KEY uq_esp32_ai_call(run_id,run_attempt,provider_call_id),
+                KEY ix_esp32_ai_pending(run_id,state)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE esp32_ai_tool_audit (
+                id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                call_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                event VARCHAR(24) NOT NULL,
+                error_code VARCHAR(64) NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                KEY ix_esp32_ai_tool_audit(call_id,created_at)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  - changeSet:
+      id: 202611031535-esp32-device-role-prompt
+      author: codex
+      changes:
+        - addColumn:
+            tableName: esp32_ai_run_binding
+            columns:
+              - column:
+                  name: role_prompt
+                  type: TEXT

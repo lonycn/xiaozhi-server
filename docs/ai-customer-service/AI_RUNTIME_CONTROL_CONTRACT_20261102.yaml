@@ -1,0 +1,207 @@
+openapi: 3.0.3
+info:
+  title: Xiaozhi AI runtime admission and diagnostic API
+  version: '1.0'
+  description: Default off. Read-only current actor diagnostic; see AI_RUNTIME_CONTROL_CONTRACT_20261102.md. Fields
+    use camelCase; Java long values serialize as exact decimal strings. Known usage reflects reported ledger rows
+    in the rolling hour, not a total monetary cost cap; unknown report counts exclude missing reports. Existing
+    external bearer/source authorization remains in force. No query parameters are accepted. The service-wide counts
+    are visible only to super_admin.
+security:
+- bearerAuth: []
+paths:
+  /api/v1/ai/runtime-control:
+    get:
+      summary: Read current actor runtime admission and usage snapshot
+      responses:
+        '200':
+          description: Current actor snapshot. Service counters are present only for super_admin.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: private, no-store
+            X-Content-Type-Options:
+              schema:
+                type: string
+              description: nosniff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: 'INVALID_RUNTIME_CONTROL_QUERY: query parameters are not accepted.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 'AUTHENTICATION_REQUIRED: valid current actor required.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Current external source or bearer access denied by existing security policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: AI_RUNTIME_CONTROL_DISABLED, or route unavailable when conversation support is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: AI_RUNTIME_OBSERVER_UNAVAILABLE or AI_RUNTIME_OBSERVER_UNSUPPORTED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Count:
+      type: string
+      pattern: ^[0-9]+$
+      description: Exact decimal text serialized from Java long; do not coerce to an unsafe floating point number.
+    Limits:
+      type: object
+      additionalProperties: false
+      required:
+      - userMaxActive
+      - serviceMaxActive
+      - userHourlyRequests
+      - serviceHourlyRequests
+      properties:
+        userMaxActive:
+          $ref: '#/components/schemas/Count'
+        serviceMaxActive:
+          $ref: '#/components/schemas/Count'
+        userHourlyRequests:
+          $ref: '#/components/schemas/Count'
+        serviceHourlyRequests:
+          $ref: '#/components/schemas/Count'
+    Scope:
+      type: object
+      additionalProperties: false
+      required:
+      - active
+      - hourlyRequests
+      - remainingActive
+      - remainingHourlyRequests
+      properties:
+        active:
+          $ref: '#/components/schemas/Count'
+        hourlyRequests:
+          $ref: '#/components/schemas/Count'
+        remainingActive:
+          $ref: '#/components/schemas/Count'
+        remainingHourlyRequests:
+          $ref: '#/components/schemas/Count'
+    Usage:
+      type: object
+      additionalProperties: false
+      required:
+      - knownTokens
+      - tokenReports
+      - unknownTokenReports
+      - knownSpeechCharacters
+      - speechReports
+      - unknownSpeechReports
+      properties:
+        knownTokens:
+          type: string
+          pattern: ^[0-9]+$
+          description: Known token total for current actor; null when no known value. Lower bound only.
+          nullable: true
+        tokenReports:
+          $ref: '#/components/schemas/Count'
+        unknownTokenReports:
+          type: string
+          pattern: ^[0-9]+$
+          description: Reported null values only; excludes completely missing reports.
+        knownSpeechCharacters:
+          type: string
+          pattern: ^[0-9]+$
+          description: Known provider TTS characters for current actor, separate from tokens; null when unknown.
+          nullable: true
+        speechReports:
+          $ref: '#/components/schemas/Count'
+        unknownSpeechReports:
+          type: string
+          pattern: ^[0-9]+$
+          description: Reported null values only; excludes completely missing reports.
+    Snapshot:
+      type: object
+      additionalProperties: false
+      required:
+      - enabled
+      - windowSeconds
+      - limits
+      - user
+      - service
+      - usage
+      - serviceLimited
+      - guarantee
+      properties:
+        enabled:
+          type: boolean
+          enum:
+          - true
+        windowSeconds:
+          type: string
+          pattern: ^[0-9]+$
+          description: Exact decimal text serialized from Java long; do not coerce to an unsafe floating point number.
+          example: '3600'
+        limits:
+          $ref: '#/components/schemas/Limits'
+        user:
+          $ref: '#/components/schemas/Scope'
+        service:
+          type: object
+          nullable: true
+          description: Actual service-wide counts are visible only to super_admin.
+          allOf:
+          - $ref: '#/components/schemas/Scope'
+        usage:
+          $ref: '#/components/schemas/Usage'
+        serviceLimited:
+          type: boolean
+          description: True if a service-wide concurrency or request threshold is reached.
+        guarantee:
+          type: string
+          enum:
+          - concurrency_and_request_admission_not_total_cost
+    Envelope:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          type: integer
+          enum:
+          - 0
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/Snapshot'
+    Error:
+      type: object
+      required:
+      - code
+      - msg
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          nullable: true

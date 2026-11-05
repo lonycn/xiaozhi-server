@@ -41,7 +41,7 @@ class AttachmentPersistenceTest {
         db.execute("CREATE TABLE ai_agent(id VARCHAR(32) PRIMARY KEY,user_id BIGINT)");
         db.execute("CREATE TABLE ai_agent_chat_history(id BIGINT PRIMARY KEY,content VARCHAR(100))");db.update("INSERT INTO ai_agent_chat_history VALUES(1,'preserve-legacy-evidence')");
         for(String changelog:List.of("conversation","support","attachments"))try(var connection=source.getConnection();var migration=new Liquibase("db/changelog/"+changelog+".changelog.yaml",new ClassLoaderResourceAccessor(),new JdbcConnection(connection))){migration.update(new Contexts());migration.update(new Contexts());}
-        assertEquals(3,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
+        assertEquals(5,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
         var manager=new DataSourceTransactionManager(source);var dao=new ConversationDao(db);root=Files.createTempDirectory("b3-persistence-private-");
         media=new AttachmentService(db,dao,JSON,manager,new MockEnvironment().withProperty("media.ticket-key",AttachmentRulesTest.KEY),new PrivateObjectStore.Filesystem(root));
         conversations=new ConversationService(dao,JSON,manager);conversations.setAttachments(media);

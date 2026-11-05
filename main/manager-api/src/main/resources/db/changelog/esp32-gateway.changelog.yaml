@@ -1,0 +1,186 @@
+# First changeSet already applied to retained Dev on 2026-11-02; keep its SQL immutable.
+# Subsequent fixes belong in the additive changeSets below.
+databaseChangeLog:
+  - changeSet:
+      id: 202611020700-esp32-gateway
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE IF NOT EXISTS esp32_authorization (
+                device_id VARCHAR(32) PRIMARY KEY,
+                fingerprint VARCHAR(64) NOT NULL,
+                credential_fingerprint VARCHAR(64) NULL,
+                token_not_before BIGINT NOT NULL DEFAULT 0,
+                revision BIGINT NOT NULL
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE IF NOT EXISTS esp32_connection (
+                device_id VARCHAR(32) PRIMARY KEY,
+                connection_id VARCHAR(36) NOT NULL,
+                generation BIGINT NOT NULL,
+                gateway_id VARCHAR(64) NOT NULL,
+                binding_version VARCHAR(64) NOT NULL,
+                lease_until BIGINT NOT NULL,
+                state VARCHAR(16) NOT NULL,
+                capabilities TEXT NOT NULL
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE IF NOT EXISTS esp32_command (
+                id VARCHAR(36) PRIMARY KEY,
+                device_id VARCHAR(32) NOT NULL,
+                owner_id BIGINT NOT NULL,
+                agent_id VARCHAR(32) NOT NULL,
+                binding_version VARCHAR(64) NOT NULL,
+                connection_id VARCHAR(36) NOT NULL,
+                generation BIGINT NOT NULL,
+                gateway_id VARCHAR(64) NOT NULL,
+                idempotency_key VARCHAR(128) NOT NULL,
+                fingerprint VARCHAR(64) NOT NULL,
+                tool VARCHAR(100) NOT NULL,
+                arguments TEXT NOT NULL,
+                state VARCHAR(20) NOT NULL,
+                result_json TEXT NULL,
+                deadline BIGINT NOT NULL,
+                created_at BIGINT NOT NULL,
+                UNIQUE KEY uq_esp32_command_key(device_id,owner_id,idempotency_key),
+                KEY ix_esp32_dispatch(device_id,state,created_at)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+              CREATE TABLE IF NOT EXISTS esp32_gateway_audit (
+                id VARCHAR(36) PRIMARY KEY,
+                device_id VARCHAR(32) NOT NULL,
+                command_id VARCHAR(36) NULL,
+                event VARCHAR(32) NOT NULL,
+                created_at BIGINT NOT NULL,
+                KEY ix_esp32_audit(device_id,created_at)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_device_update AFTER UPDATE ON ai_device FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT NEW.id,'revoked',1,UNIX_TIMESTAMP()+1 WHERE NOT (OLD.user_id <=> NEW.user_id) OR NOT (OLD.agent_id <=> NEW.agent_id) OR NOT (OLD.mac_address <=> NEW.mac_address)
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+1);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_agent_update AFTER UPDATE ON ai_agent FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT id,'revoked',1,UNIX_TIMESTAMP()+1 FROM ai_device WHERE agent_id=NEW.id AND NOT (OLD.user_id <=> NEW.user_id)
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+1);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_user_update AFTER UPDATE ON sys_user FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT id,'revoked',1,UNIX_TIMESTAMP()+1 FROM ai_device WHERE user_id=NEW.id AND NOT (OLD.status <=> NEW.status)
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+1);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_device_delete AFTER DELETE ON ai_device FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT OLD.id,'revoked',1,UNIX_TIMESTAMP()+1
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+1);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_agent_delete AFTER DELETE ON ai_agent FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT id,'revoked',1,UNIX_TIMESTAMP()+1 FROM ai_device WHERE agent_id=OLD.id
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+1);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_user_delete AFTER DELETE ON sys_user FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT id,'revoked',1,UNIX_TIMESTAMP()+1 FROM ai_device WHERE user_id=OLD.id
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+1);
+  - changeSet:
+      id: 202611021100-esp32-gateway-token-cutoff-column
+      author: codex
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            columnExists:
+              tableName: esp32_authorization
+              columnName: token_not_before
+      changes:
+        - addColumn:
+            tableName: esp32_authorization
+            columns:
+              - column:
+                  name: token_not_before
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+  - changeSet:
+      id: 202611021101-esp32-gateway-credential-fingerprint-column
+      author: codex
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            columnExists:
+              tableName: esp32_authorization
+              columnName: credential_fingerprint
+      changes:
+        - addColumn:
+            tableName: esp32_authorization
+            columns:
+              - column:
+                  name: credential_fingerprint
+                  type: VARCHAR(64)
+  - changeSet:
+      id: 202611021102-esp32-gateway-strict-revocation
+      author: codex
+      changes:
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_device_update_v2 AFTER UPDATE ON ai_device FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT NEW.id,'revoked',1,UNIX_TIMESTAMP()+31 WHERE NOT (OLD.user_id <=> NEW.user_id) OR NOT (OLD.agent_id <=> NEW.agent_id) OR NOT (OLD.mac_address <=> NEW.mac_address)
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+31);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_agent_update_v2 AFTER UPDATE ON ai_agent FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT id,'revoked',1,UNIX_TIMESTAMP()+31 FROM ai_device WHERE agent_id=NEW.id AND NOT (OLD.user_id <=> NEW.user_id)
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+31);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_user_update_v2 AFTER UPDATE ON sys_user FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT id,'revoked',1,UNIX_TIMESTAMP()+31 FROM ai_device WHERE user_id=NEW.id AND NOT (OLD.status <=> NEW.status)
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+31);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_device_delete_v2 AFTER DELETE ON ai_device FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT OLD.id,'revoked',1,UNIX_TIMESTAMP()+31
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+31);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_agent_delete_v2 AFTER DELETE ON ai_agent FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT id,'revoked',1,UNIX_TIMESTAMP()+31 FROM ai_device WHERE agent_id=OLD.id
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+31);
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TRIGGER esp32_auth_user_delete_v2 AFTER DELETE ON sys_user FOR EACH ROW
+              INSERT INTO esp32_authorization(device_id,fingerprint,revision,token_not_before)
+              SELECT id,'revoked',1,UNIX_TIMESTAMP()+31 FROM ai_device WHERE user_id=OLD.id
+              ON DUPLICATE KEY UPDATE revision=revision+1,token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+31);
+        - sql:
+            sql: |
+              DROP TRIGGER IF EXISTS esp32_auth_device_update;
+              DROP TRIGGER IF EXISTS esp32_auth_agent_update;
+              DROP TRIGGER IF EXISTS esp32_auth_user_update;
+              DROP TRIGGER IF EXISTS esp32_auth_device_delete;
+              DROP TRIGGER IF EXISTS esp32_auth_agent_delete;
+              DROP TRIGGER IF EXISTS esp32_auth_user_delete;
+              UPDATE esp32_authorization SET token_not_before=GREATEST(token_not_before,UNIX_TIMESTAMP()+31);

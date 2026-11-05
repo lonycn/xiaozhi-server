@@ -87,6 +87,7 @@ public class ExternalIdentityService {
         long sourceExpiry=integer(input.get("source_expires_at"));long now=clock.instant().getEpochSecond();
         if(sourceExpiry<=now || sourceExpiry>now+86400)throw problem(400,"INVALID_SOURCE_EXPIRY");
         Tenant tenant=tenant(input.get("tenant"));Scope scope=scope(input.get("scope"));
+        validateAccount(subject,tenant,scope);
         return tx.execute(status->{
             nonce(signed);Map<String,Object> origin=lockSource(signed.issuer(),subject,source,Instant.ofEpochSecond(sourceExpiry));
             sourceActive(origin);
@@ -148,6 +149,7 @@ public class ExternalIdentityService {
         long requested=integer(input.get("requested_lifetime_seconds"));
         if(requested<30 || requested>maximum)throw problem(400,"INVALID_RENEWAL_LIFETIME");
         Tenant tenant=tenant(input.get("tenant"));Scope scope=scope(input.get("scope"));
+        validateAccount(subject,tenant,scope);
         return tx.execute(status->{
             reverifyRenewal(signed,path,raw,headers);nonce(signed);
             // Same source->token lock order as source revocation. Missing sources never create tombstones here.
@@ -171,7 +173,7 @@ public class ExternalIdentityService {
             if(!expiry.equals(existing) && db.update("UPDATE external_access_token SET expires_at=? WHERE id=? AND revoked_at IS NULL AND expires_at>?",ts(expiry),tokenId,ts(now))!=1)
                 throw problem(401,"EXTERNAL_TOKEN_REVOKED_OR_EXPIRED");
             return Map.<String,Object>of("token_id",reference,"expires_at",expiry,
-                "expires_in",Math.max(0,Duration.between(now,expiry).getSeconds()));
+                "expires_in",Math.toIntExact(Math.max(0,Duration.between(now,expiry).getSeconds())));
         });
     }
     private void reverifyRenewal(Verified signed,String path,byte[] raw,Map<String,List<String>> headers) {
@@ -235,9 +237,15 @@ public class ExternalIdentityService {
     }
     private Tenant tenant(JsonNode node) {
         exact(node,Set.of("type","id"));String type=text(node,"type",16),id=text(node,"id",19);
-        if(!Set.of("customer","company").contains(type) || !id.matches("[1-9][0-9]{0,18}"))throw problem(400,"INVALID_TENANT");
+        if(!Set.of("customer","company","account").contains(type) || !id.matches("[1-9][0-9]{0,18}"))throw problem(400,"INVALID_TENANT");
         try {if(Long.parseLong(id)<1)throw new NumberFormatException();}catch(NumberFormatException ignored){throw problem(400,"INVALID_TENANT");}
         return new Tenant(type,id);
+    }
+    /** Account AI principals never borrow a business tenant or its resource grants. */
+    static void validateAccount(String subject,Tenant tenant,Scope scope) {
+        if (!"account".equals(tenant.type())) return;
+        if (!tenant.id().equals(subject)) throw problem(400,"ACCOUNT_SUBJECT_MISMATCH");
+        if (!scope.projectIds().isEmpty() || !scope.deviceIds().isEmpty()) throw problem(400,"INVALID_ACCOUNT_SCOPE");
     }
     private Scope scope(JsonNode node) {exact(node,Set.of("project_ids","device_ids"));return new Scope(ids(node.get("project_ids")),ids(node.get("device_ids")));}
     private List<String> ids(JsonNode node) {

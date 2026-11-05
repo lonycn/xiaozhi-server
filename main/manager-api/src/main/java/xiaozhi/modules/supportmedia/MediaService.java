@@ -31,11 +31,18 @@ public class MediaService implements SupportMediaHooks {
     private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.annotation.AnnotationService> annotationProvider;
     @org.springframework.beans.factory.annotation.Autowired
     public void setAnnotationProvider(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.annotation.AnnotationService> provider){annotationProvider=provider;}
+    private CallPresenceService callPresence;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setCallPresence(CallPresenceService value){callPresence=value;}
+    public CallPresenceService.Availability callAvailability(Long user,String request){
+        if(callPresence==null)throw problem(503,"CALL_PRESENCE_UNAVAILABLE");
+        return callPresence.availability(user,request);
+    }
     private static final Set<String> LIVE=Set.of("connecting","active","reconnecting");
     private static final Set<String> TERMINAL=Set.of("ended","rejected","canceled","expired","failed");
     public MediaService(MediaStore store,MediaPolicy policy,LiveKitAdapter livekit,ConversationDao conversations,ObjectMapper json,Environment environment){
         this.store=store;this.policy=policy;this.livekit=livekit;this.conversations=conversations;this.json=json;this.environment=environment;
-        inviteSeconds=bound(environment,"support-media.invitation-seconds",45,10,120);transferSeconds=bound(environment,"support-media.transfer-seconds",60,20,180);readySeconds=bound(environment,"support-media.ready-seconds",15,5,30);reconnectSeconds=bound(environment,"support-media.reconnect-seconds",60,15,300);roomPrefix=environment.getProperty("support-media.livekit.room-prefix","xz-support-b5-");
+        inviteSeconds=bound(environment,"support-media.invitation-seconds",30,10,120);transferSeconds=bound(environment,"support-media.transfer-seconds",60,20,180);readySeconds=bound(environment,"support-media.ready-seconds",15,5,30);reconnectSeconds=bound(environment,"support-media.reconnect-seconds",60,15,300);roomPrefix=environment.getProperty("support-media.livekit.room-prefix","xz-support-b5-");
     }
     boolean enabled(){return environment.getProperty("features.support-media-enabled",Boolean.class,false);}
     private void publishingEnabled(){if(!enabled())throw problem(404,"SUPPORT_MEDIA_DISABLED");}
@@ -70,18 +77,77 @@ public class MediaService implements SupportMediaHooks {
         String key=kind+":"+r.get("id")+(identity==null?"":":"+identity)+(t==null?"":":"+t.get("id"));
         store.jdbc().update("INSERT INTO support_media_outbox(id,session_id,room_id,transfer_id,kind,identity,intent_key,control_epoch) VALUES(?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE status=IF(? AND status IN ('done','obsolete'),'queued',status),available_at=IF(? AND status IN ('done','obsolete'),CURRENT_TIMESTAMP(3),available_at),control_epoch=IF(status='queued',VALUES(control_epoch),control_epoch)",next(),s.get("id"),r.get("id"),t==null?null:t.get("id"),kind,identity,key,s.get("control_epoch"),repeat,repeat);
     }
+    /** 离线和占线是拨号结果，使用成功信封避免原生网络桥丢弃非 2xx 响应体。 */
+    public DialResult dial(Long user,Create body){
+        try{return new DialResult("invited",create(user,body));}
+        catch(ConversationProblem error){
+            String status=switch(error.getMessage()){
+                case "MEDIA_AGENT_OFFLINE","MEDIA_AGENT_UNAVAILABLE"->"offline";
+                case "MEDIA_AGENT_BUSY","AGENT_AT_CAPACITY","MEDIA_CAPACITY_OR_CLIENT_CONFLICT"->"busy";
+                case "MEDIA_CUSTOMER_BUSY"->"self_busy";
+                default->null;
+            };
+            if(error.status()!=409 || status==null)throw error;
+            return new DialResult(status,null);
+        }
+    }
     public Session create(Long user,Create body){
         publishingEnabled();long actor=actor(user);if(body==null || body.requestId()==null || !body.requestId().matches("[a-f0-9]{32}") || body.mode()==null || !Set.of("audio","video").contains(body.mode()))throw problem(400,"INVALID_MEDIA_REQUEST");client(body.clientSessionId());consent(body.consent(),body.mode());if(!livekit.configured())throw problem(503,"MEDIA_NOT_CONFIGURED");
         String digest=hash(encode(List.of(body.requestId(),body.mode(),body.consent().microphone(),body.consent().camera(),Boolean.TRUE.equals(body.consent().allowSnapshots()))));
-        var hint=store.rows("SELECT r.*,c.owner_user_id FROM support_request r JOIN ai_conversation c ON c.id=r.conversation_id WHERE r.id=?",body.requestId());if(hint.isEmpty() || hint.getFirst().get("assigned_agent_user_id")==null)throw problem(404,"SUPPORT_REQUEST_NOT_FOUND");
+        var hint=store.rows("SELECT r.*,c.owner_user_id FROM support_request r JOIN ai_conversation c ON c.id=r.conversation_id WHERE r.id=?",body.requestId());if(hint.isEmpty())throw problem(404,"SUPPORT_REQUEST_NOT_FOUND");
         return conflict(()->{
-            var h=hint.getFirst();long customer=number(h,"owner_user_id"),agent=number(h,"assigned_agent_user_id");policy.lockUsers(List.of(customer,agent));conversations.byId(string(h,"conversation_id"),true);
-            var q=store.one("SELECT * FROM support_request WHERE id=? FOR UPDATE",body.requestId());if(!"active".equals(string(q,"status")) || number(q,"assigned_agent_user_id")!=agent)throw problem(409,"MEDIA_ASSIGNMENT_CHANGED");policy.account(customer);policy.profile(agent,false);if(actor!=customer && actor!=agent)throw problem(404,"MEDIA_NOT_FOUND");
+            var h=hint.getFirst();long customer=number(h,"owner_user_id"),agent=number(h,h.get("assigned_agent_user_id")==null?"target_agent_user_id":"assigned_agent_user_id");if(agent<=0)throw problem(409,"MEDIA_ASSIGNMENT_CHANGED");policy.lockUsers(List.of(customer,agent));conversations.byId(string(h,"conversation_id"),true);
+            var q=store.one("SELECT * FROM support_request WHERE id=? FOR UPDATE",body.requestId());
+            policy.account(customer);policy.profile(agent,false);if(actor!=customer && actor!=agent)throw problem(404,"MEDIA_NOT_FOUND");
+            boolean queued="queued".equals(string(q,"status")) && actor==customer && number(q,"target_agent_user_id")==agent;
+            if(!queued && (!"active".equals(string(q,"status")) || number(q,"assigned_agent_user_id")!=agent))throw problem(409,"MEDIA_ASSIGNMENT_CHANGED");
             var prior=store.rows("SELECT * FROM support_media_session WHERE inviter_user_id=? AND client_session_id=? FOR UPDATE",actor,body.clientSessionId());if(!prior.isEmpty()){var s=prior.getFirst();if(!digest.equals(string(s,"request_hash")))throw problem(409,"CLIENT_MEDIA_ID_REUSED");policy.actor(s,actor,false);return view(s);}
-            var assignments=store.rows("SELECT id FROM support_assignment WHERE request_id=? AND agent_user_id=? AND released_at IS NULL FOR UPDATE",body.requestId(),agent);if(assignments.size()!=1)throw problem(409,"MEDIA_ASSIGNMENT_CHANGED");
+            if(actor==customer){
+                agentAvailable(agent,string(q,"service_type"));
+                if(queued){
+                    policy.textCapacity(agent,string(q,"service_type"));
+                    // 明确拨号为选中的在线专家保留接待名额；拒接/挂断只结束媒体，文字咨询继续。
+                    store.jdbc().update("INSERT INTO support_assignment(id,request_id,conversation_id,agent_user_id,service_type) VALUES(?,?,?,?,?)",uid(),q.get("id"),q.get("conversation_id"),agent,q.get("service_type"));
+                    store.jdbc().update("UPDATE support_request SET status='active',assigned_agent_user_id=?,assigned_at=CURRENT_TIMESTAMP(3) WHERE id=?",agent,q.get("id"));
+                    store.jdbc().update("UPDATE ai_conversation SET state='HUMAN_ACTIVE',updated_at=CURRENT_TIMESTAMP(3) WHERE id=?",q.get("conversation_id"));
+                    var conv=conversations.byId(string(q,"conversation_id"),true);long sequence=conv.lastEventSeq()+1;
+                    conversations.insertEvent(uid(),conv.id(),sequence,"support.taken_over",encode(Map.of("request_id",q.get("id"),"conversation_id",conv.id())));
+                    conversations.advance(conv.id(),conv.lastSeq(),sequence);
+                }
+            }
+            var assignments=store.rows("SELECT a.id FROM support_assignment a JOIN support_agent_profile p ON p.user_id=a.agent_user_id AND p.enabled=1 WHERE a.request_id=? AND a.agent_user_id=? AND a.released_at IS NULL AND JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(?)) FOR UPDATE",body.requestId(),agent,q.get("service_type"));if(assignments.size()!=1)throw problem(409,"MEDIA_ASSIGNMENT_CHANGED");
+            customerAvailable(customer,null);
+            CallPresenceCache.Lease ready=null;
+            if(actor==agent){
+                if(!store.rows("SELECT id FROM support_media_member WHERE user_id=? AND media_busy_slot=1 LIMIT 1 FOR UPDATE",agent).isEmpty())throw problem(409,"MEDIA_AGENT_BUSY");
+                if(callPresence==null)throw problem(503,"CALL_PRESENCE_UNAVAILABLE");
+                ready=callPresence.requireReady(customer,string(q,"conversation_id"),body.mode());
+            }
             long session=next();store.jdbc().update("INSERT INTO support_media_session(id,conversation_id,request_id,assignment_id,customer_user_id,agent_user_id,inviter_user_id,invitee_user_id,client_session_id,request_hash,mode,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",session,q.get("conversation_id"),q.get("id"),assignments.getFirst().get("id"),customer,agent,actor,actor==customer?agent:customer,body.clientSessionId(),digest,body.mode(),time(Instant.now().plusSeconds(inviteSeconds)));
+            if(ready!=null)store.jdbc().update("UPDATE support_media_session SET external_source_id=?,external_token_id=? WHERE id=?",ready.sourceId(),ready.tokenId(),session);
             var r=newRoom(session,1);newMember(r,customer,"customer");newMember(r,agent,"agent");acceptMember(member(number(r,"id"),actor),body.consent(),body.mode());var s=store.session(session,true);policy.bindCustomer(s,actor);event(s,"media.invited",Map.of());return view(s);
         });
+    }
+    private void agentAvailable(long agent,String serviceType){
+        if(!Set.of("expert","support_agent").contains(serviceType))throw problem(400,"INVALID_SERVICE_TYPE");
+        String prefix="expert".equals(serviceType)?"expert_":"";
+        if(store.rows("SELECT user_id FROM support_agent_profile WHERE user_id=? AND enabled=1 AND JSON_CONTAINS(COALESCE(roles_json,JSON_ARRAY(role)),JSON_QUOTE(?)) AND "+prefix+"accepting=1 AND "+prefix+"presence_expires_at>CURRENT_TIMESTAMP(3) FOR UPDATE",agent,serviceType).isEmpty())throw problem(409,"MEDIA_AGENT_OFFLINE");
+        if(!store.rows("SELECT id FROM support_media_member WHERE user_id=? AND media_busy_slot=1 LIMIT 1 FOR UPDATE",agent).isEmpty())throw problem(409,"MEDIA_AGENT_BUSY");
+    }
+    private void customerAvailable(long customer,Long acceptingSession){
+        // The caller holds the customer account lock across conversations.
+        // Drive the query through the owner index, then the conversation's unique active slot.
+        var busy=store.rows("""
+            SELECT media.id
+            FROM ai_conversation c STRAIGHT_JOIN support_media_session media
+              ON media.conversation_id=c.id AND media.active_slot=1
+            WHERE c.owner_user_id=? AND media.customer_user_id=?
+              AND (media.status IN ('connecting','active','reconnecting','ending')
+                   OR (? IS NULL AND media.status='invited' AND media.expires_at>CURRENT_TIMESTAMP(3)))
+              AND (? IS NULL OR media.id<>?)
+            LIMIT 1 FOR UPDATE OF media
+            """,customer,customer,acceptingSession,acceptingSession,acceptingSession);
+        if(!busy.isEmpty())throw problem(409,"MEDIA_CUSTOMER_BUSY");
     }
     Session view(Map<String,Object> s){
         var t=store.pending(number(s,"id"),true);List<Member> people=new ArrayList<>();var rooms=store.rows("SELECT * FROM support_media_room WHERE session_id=? AND (generation=? OR generation=?) ORDER BY generation FOR UPDATE",s.get("id"),s.get("current_generation"),t==null?-1:t.get("target_generation"));
@@ -93,8 +159,74 @@ public class MediaService implements SupportMediaHooks {
     public Session current(Long user,String conversation){long actor=actor(user);if(conversation==null || !conversation.matches("[a-f0-9]{32}"))throw problem(404,"CONVERSATION_NOT_FOUND");
         var rows=store.rows("SELECT id FROM support_media_session WHERE conversation_id=? AND active_slot=1",conversation);if(rows.isEmpty()){policy.account(actor);new xiaozhi.modules.conversation.ConversationAccessService(conversations).detail(actor,conversation,false);return null;}return get(user,Long.toString(number(rows.getFirst(),"id")));
     }
-    public Session accept(Long user,String session,Accept body){long actor=actor(user);if(body==null)throw problem(400,"INVALID_REQUEST");return mutate(id(session),actor,body.expectedEpoch(),false,true,s->{policy.currentRequired(s);if(actor!=number(s,"invitee_user_id"))throw problem(404,"MEDIA_NOT_FOUND");if(!string(s,"status").equals("invited")){if(LIVE.contains(string(s,"status"))){acceptMember(member(number(room(number(s,"id"),1),"id"),actor),body.consent(),string(s,"mode"));return view(s);}throw problem(409,"MEDIA_INVITATION_INACTIVE");}if(!instant(s,"expires_at").isAfter(Instant.now()))throw problem(409,"MEDIA_INVITATION_EXPIRED");var r=room(number(s,"id"),1);acceptMember(member(number(r,"id"),actor),body.consent(),string(s,"mode"));store.jdbc().update("UPDATE support_media_session SET status='connecting',control_epoch=control_epoch+1 WHERE id=?",s.get("id"));s=store.session(number(s,"id"),true);queue(s,r,null,"create_room",null,false);event(s,"media.accepted",Map.of());return view(s);});}
-    public Session reject(Long user,String session,Epoch body){long actor=actor(user);if(body==null)throw problem(400,"INVALID_REQUEST");return mutate(id(session),actor,body.expectedEpoch(),false,s->{if(actor!=number(s,"invitee_user_id"))throw problem(404,"MEDIA_NOT_FOUND");if(string(s,"status").equals("rejected"))return view(s);if(!string(s,"status").equals("invited"))throw problem(409,"MEDIA_INVITATION_INACTIVE");finish(s,"rejected","INVITATION_REJECTED");return view(store.session(number(s,"id"),true));});}
+    public Session accept(Long user,String session,Accept body){
+        long actor=actor(user);
+        if(body==null)throw problem(400,"INVALID_REQUEST");
+        publishingEnabled();
+        return conflict(()->{
+            var s=policy.lock(id(session),null);
+            policy.bindCustomer(s,actor);
+            policy.actor(s,actor,false);
+            policy.currentRequired(s);
+            if(actor!=number(s,"invitee_user_id"))throw problem(404,"MEDIA_NOT_FOUND");
+            String status=string(s,"status");
+            // A lost accept response can be retried against the original invitation epoch.
+            boolean acceptedRetry=LIVE.contains(status) && number(s,"control_epoch")==2
+                    && Long.valueOf(1).equals(body.expectedEpoch());
+            if(!acceptedRetry)epoch(s,body.expectedEpoch());
+            var r=room(number(s,"id"),1);
+            if(LIVE.contains(status)){
+                acceptMember(member(number(r,"id"),actor),body.consent(),string(s,"mode"));
+                return view(s);
+            }
+            if(!"invited".equals(status))throw problem(409,"MEDIA_INVITATION_INACTIVE");
+            if(!instant(s,"expires_at").isAfter(Instant.now()))throw problem(409,"MEDIA_INVITATION_EXPIRED");
+            customerAvailable(number(s,"customer_user_id"),number(s,"id"));
+            acceptMember(member(number(r,"id"),actor),body.consent(),string(s,"mode"));
+            store.jdbc().update("UPDATE support_media_session SET status='connecting',control_epoch=control_epoch+1 WHERE id=?",s.get("id"));
+            s=store.session(number(s,"id"),true);
+            queue(s,r,null,"create_room",null,false);
+            event(s,"media.accepted",Map.of());
+            return view(s);
+        });
+    }
+    public Session reject(Long user,String session,Epoch body){
+        long actor=actor(user);
+        if(body==null)throw problem(400,"INVALID_REQUEST");
+        publishingEnabled();
+        return conflict(()->{
+            var s=policy.lock(id(session),null);
+            policy.bindCustomer(s,actor);
+            policy.actor(s,actor,false);
+            if(actor!=number(s,"invitee_user_id"))throw problem(404,"MEDIA_NOT_FOUND");
+            if("rejected".equals(string(s,"status")) && body.expectedEpoch()!=null
+                    && body.expectedEpoch()==number(s,"control_epoch")-1)return view(s);
+            epoch(s,body.expectedEpoch());
+            if("rejected".equals(string(s,"status")))return view(s);
+            if(!"invited".equals(string(s,"status")))throw problem(409,"MEDIA_INVITATION_INACTIVE");
+            if(!instant(s,"expires_at").isAfter(Instant.now()))throw problem(409,"MEDIA_INVITATION_EXPIRED");
+            finish(s,"rejected","INVITATION_REJECTED");
+            return view(store.session(number(s,"id"),true));
+        });
+    }
+    public Session cancel(Long user,String session,Epoch body){
+        long actor=actor(user);
+        if(body==null)throw problem(400,"INVALID_REQUEST");
+        publishingEnabled();
+        return conflict(()->{
+            var s=policy.lock(id(session),null);
+            policy.actor(s,actor,false);
+            if(actor!=number(s,"inviter_user_id"))throw problem(404,"MEDIA_NOT_FOUND");
+            if("canceled".equals(string(s,"status")) && body.expectedEpoch()!=null
+                    && body.expectedEpoch()==number(s,"control_epoch")-1)return view(s);
+            epoch(s,body.expectedEpoch());
+            if("canceled".equals(string(s,"status")))return view(s);
+            if(!"invited".equals(string(s,"status")))throw problem(409,"MEDIA_INVITATION_INACTIVE");
+            if(!instant(s,"expires_at").isAfter(Instant.now()))throw problem(409,"MEDIA_INVITATION_EXPIRED");
+            finish(s,"canceled",null);
+            return view(store.session(number(s,"id"),true));
+        });
+    }
     public Session end(Long user,String session,End body){long actor=actor(user);if(body==null || body.reason()!=null && body.reason().length()>200)throw problem(400,"INVALID_REQUEST");return mutate(id(session),actor,body.expectedEpoch(),false,s->{if(TERMINAL.contains(string(s,"status")))return view(s);finish(s,string(s,"status").equals("invited")?"canceled":"ending",null);return view(store.session(number(s,"id"),true));});}
     void finish(Map<String,Object> s,String state,String error){
         long session=number(s,"id");var t=store.pending(session,true);if(t!=null)abortTransfer(s,t,"canceled","MEDIA_ENDED",false);
@@ -107,7 +239,10 @@ public class MediaService implements SupportMediaHooks {
         long actor=actor(user);if(body==null || body.roomGeneration()==null || body.roomGeneration()<1)throw problem(400,"INVALID_REQUEST");
         TokenPlan plan=mutate(id(session),actor,body.expectedEpoch(),true,s->{policy.currentRequired(s);if(!LIVE.contains(string(s,"status")))throw problem(409,"MEDIA_NOT_CONNECTING");var r=room(number(s,"id"),body.roomGeneration());if(!Set.of("ready","active").contains(string(r,"status")))throw problem(409,"MEDIA_ROOM_PREPARING");var m=member(number(r,"id"),actor);if(!policy.allowed(owned(r),Operation.TOKEN,string(m,"identity")))throw problem(403,"MEDIA_TOKEN_DENIED");return new TokenPlan(new HashMap<>(s),new HashMap<>(r),new HashMap<>(m));});
         JoinToken token=livekit.issueToken(owned(plan.room()),string(plan.member(),"identity"),yes(plan.member(),"consent_microphone"),yes(plan.member(),"consent_camera"),policy.sourceExpiry(plan.session()));
-        return store.tx(()->{var s=policy.lock(id(session),null);policy.actor(s,actor,true);epoch(s,body.expectedEpoch());if(!policy.allowed(owned(plan.room()),Operation.TOKEN,string(plan.member(),"identity")))throw problem(403,"MEDIA_TOKEN_DENIED");List<String> sources=new ArrayList<>();if(yes(plan.member(),"consent_microphone"))sources.add("microphone");if(yes(plan.member(),"consent_camera"))sources.add("camera");return new Token(token.serverUrl(),token.token(),token.expiresAt(),session,number(s,"control_epoch"),body.roomGeneration(),string(plan.member(),"identity"),sources);});
+        return store.tx(()->{var s=policy.lock(id(session),null);policy.actor(s,actor,true);epoch(s,body.expectedEpoch());if(!policy.allowed(owned(plan.room()),Operation.TOKEN,string(plan.member(),"identity")))throw problem(403,"MEDIA_TOKEN_DENIED");List<String> sources=new ArrayList<>();if(yes(plan.member(),"consent_microphone"))sources.add("microphone");if(yes(plan.member(),"consent_camera"))sources.add("camera");return new Token(token.serverUrl(),token.token(),token.expiresAt(),session,number(s,"control_epoch"),body.roomGeneration(),string(plan.member(),"identity"),sources,
+                string(plan.room(),"room_name"),members(number(plan.room(),"id")).stream()
+                        .filter(peer->number(peer,"user_id")!=actor).findFirst().map(peer->string(peer,"identity"))
+                        .orElseThrow(()->problem(409,"MEDIA_PARTICIPANTS_NOT_READY")));});
     }
     static OwnedRoom owned(Map<String,Object> r){return new OwnedRoom(Long.toString(number(r,"session_id")),number(r,"generation"),string(r,"room_name"));}
     public Session ready(Long user,String session,Ready body){
@@ -136,7 +271,7 @@ public class MediaService implements SupportMediaHooks {
         publishingEnabled();long actor=actor(user);if(body==null || body.targetAgentUserId()==null || body.targetAgentUserId()<=0)throw problem(400,"INVALID_TRANSFER_REQUEST");client(body.clientTransferId());
         return conflict(()->{var s=policy.lock(id(session),body.targetAgentUserId());policy.actor(s,actor,false);policy.currentRequired(s);long target=body.targetAgentUserId();if(target==number(s,"customer_user_id") || target==number(s,"agent_user_id"))throw problem(400,"INVALID_TRANSFER_TARGET");String digest=hash(encode(List.of(session,target)));
             var prior=store.rows("SELECT * FROM support_media_transfer WHERE requester_user_id=? AND client_transfer_id=? FOR UPDATE",actor,body.clientTransferId());if(!prior.isEmpty()){var t=prior.getFirst();if(!digest.equals(string(t,"request_hash")))throw problem(409,"CLIENT_TRANSFER_ID_REUSED");return transferView(s,t);}
-            epoch(s,body.expectedEpoch());if(!"active".equals(string(s,"status")))throw problem(409,"MEDIA_NOT_ACTIVE");if(store.pending(number(s,"id"),true)!=null)throw problem(409,"MEDIA_TRANSFER_ACTIVE");policy.textCapacity(target);long transfer=next();int generation=(int)number(s,"next_generation");store.jdbc().update("UPDATE support_media_session SET control_epoch=control_epoch+1,next_generation=next_generation+1 WHERE id=?",s.get("id"));s=store.session(number(s,"id"),true);
+            epoch(s,body.expectedEpoch());if(!"active".equals(string(s,"status")))throw problem(409,"MEDIA_NOT_ACTIVE");if(store.pending(number(s,"id"),true)!=null)throw problem(409,"MEDIA_TRANSFER_ACTIVE");policy.textCapacity(target,string(store.one("SELECT service_type FROM support_request WHERE id=?",s.get("request_id")),"service_type"));long transfer=next();int generation=(int)number(s,"next_generation");store.jdbc().update("UPDATE support_media_session SET control_epoch=control_epoch+1,next_generation=next_generation+1 WHERE id=?",s.get("id"));s=store.session(number(s,"id"),true);
             store.jdbc().update("INSERT INTO support_media_transfer(id,session_id,requester_user_id,source_assignment_id,source_generation,target_generation,target_agent_user_id,client_transfer_id,request_hash,control_epoch,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",transfer,s.get("id"),actor,s.get("assignment_id"),s.get("current_generation"),generation,target,body.clientTransferId(),digest,s.get("control_epoch"),time(Instant.now().plusSeconds(transferSeconds)));
             var r=newRoom(number(s,"id"),generation);newMember(r,number(s,"customer_user_id"),"customer");newMember(r,target,"agent");event(s,"media.transfer.invited",Map.of("transfer_id",Long.toString(transfer)));return transferView(s,store.transfer(transfer,true));});
     }
@@ -152,11 +287,15 @@ public class MediaService implements SupportMediaHooks {
         store.jdbc().update("UPDATE support_media_room SET status='cleanup_pending',retired_at=COALESCE(retired_at,CURRENT_TIMESTAMP(3)) WHERE id=?",r.get("id"));store.jdbc().update("UPDATE support_media_member SET status='revoked',reservation_status='cleanup_pending',revoked_at=COALESCE(revoked_at,CURRENT_TIMESTAMP(3)),ready_at=NULL WHERE room_id=?",r.get("id"));queue(s,r,t,"delete_room",null,true);event(s,"media.transfer."+status,Map.of("transfer_id",Long.toString(number(t,"id"))));
     }
     public CursorPage<Invitation> invitations(Long user,long after,int limit){long actor=actor(user);policy.account(actor);if(after<0 || limit<1 || limit>100)throw problem(400,"INVALID_CURSOR_OR_LIMIT");
-        var rows=store.rows("SELECT s.id,'session' AS invitation_type,s.id AS session_id,s.conversation_id,s.inviter_user_id AS from_user_id,s.invitee_user_id AS to_user_id,s.status,s.expires_at FROM support_media_session s WHERE s.invitee_user_id=? AND s.status='invited' AND s.expires_at>CURRENT_TIMESTAMP(3) AND s.id>? UNION ALL SELECT t.id,'transfer',t.session_id,s.conversation_id,t.requester_user_id,t.target_agent_user_id,t.status,t.expires_at FROM support_media_transfer t JOIN support_media_session s ON s.id=t.session_id WHERE t.target_agent_user_id=? AND t.status IN ('invited','preparing','ready') AND t.expires_at>CURRENT_TIMESTAMP(3) AND t.id>? ORDER BY id LIMIT ?",actor,after,actor,after,limit+1);
-        var items=rows.stream().limit(limit).map(r->new Invitation(Long.toString(number(r,"id")),string(r,"invitation_type"),Long.toString(number(r,"session_id")),string(r,"conversation_id"),Long.toString(number(r,"from_user_id")),Long.toString(number(r,"to_user_id")),string(r,"status"),instant(r,"expires_at"))).toList();return new CursorPage<>(items,items.isEmpty()?after:Long.parseLong(items.getLast().id()),rows.size()>limit);
+        var rows=store.rows("SELECT s.id,'session' AS invitation_type,s.id AS session_id,s.conversation_id,s.inviter_user_id AS from_user_id,s.invitee_user_id AS to_user_id,s.status,s.expires_at,s.request_id,r.service_type,s.mode,1 AS requires_response FROM support_media_session s JOIN support_request r ON r.id=s.request_id WHERE s.invitee_user_id=? AND s.status='invited' AND s.expires_at>CURRENT_TIMESTAMP(3) AND s.id>? UNION ALL SELECT t.id,'transfer',t.session_id,s.conversation_id,t.requester_user_id,t.target_agent_user_id,t.status,t.expires_at,s.request_id,r.service_type,s.mode,(t.target_accepted_at IS NULL) AS requires_response FROM support_media_transfer t JOIN support_media_session s ON s.id=t.session_id JOIN support_request r ON r.id=s.request_id WHERE t.target_agent_user_id=? AND t.status IN ('invited','preparing','ready') AND t.expires_at>CURRENT_TIMESTAMP(3) AND t.id>? ORDER BY id LIMIT ?",actor,after,actor,after,limit+1);
+        var items=rows.stream().limit(limit).map(r->new Invitation(Long.toString(number(r,"id")),string(r,"invitation_type"),Long.toString(number(r,"session_id")),string(r,"conversation_id"),Long.toString(number(r,"from_user_id")),Long.toString(number(r,"to_user_id")),string(r,"status"),instant(r,"expires_at"),string(r,"request_id"),string(r,"service_type"),string(r,"mode"),yes(r,"requires_response"))).toList();return new CursorPage<>(items,items.isEmpty()?after:Long.parseLong(items.getLast().id()),rows.size()>limit);
     }
-    public CursorPage<Map<String,Object>> experts(Long user,long after,int limit){long actor=actor(user);policy.account(actor);if(after<0 || limit<1 || limit>100)throw problem(400,"INVALID_CURSOR_OR_LIMIT");
-        var rows=store.rows("SELECT p.user_id,u.username,p.role,(p.accepting=1 AND p.presence_expires_at>CURRENT_TIMESTAMP(3) AND NOT EXISTS(SELECT 1 FROM support_media_member m WHERE m.user_id=p.user_id AND m.media_busy_slot=1) AND (SELECT COUNT(*) FROM support_assignment a WHERE a.agent_user_id=p.user_id AND a.released_at IS NULL)+(SELECT COUNT(*) FROM support_media_transfer t WHERE t.target_agent_user_id=p.user_id AND t.active_slot=1)<p.capacity_text) AS available FROM support_agent_profile p JOIN sys_user u ON u.id=p.user_id AND u.status=1 WHERE p.enabled=1 AND p.role IN ('support_agent','expert') AND p.user_id>? ORDER BY p.user_id LIMIT ?",after,limit+1);
+    public CursorPage<Map<String,Object>> experts(Long user,long after,int limit){return experts(user,after,limit,null);}
+    public CursorPage<Map<String,Object>> experts(Long user,long after,int limit,String serviceType){long actor=actor(user);policy.account(actor);if(after<0 || limit<1 || limit>100)throw problem(400,"INVALID_CURSOR_OR_LIMIT");
+        if(serviceType!=null && !Set.of("support_agent","expert").contains(serviceType))throw problem(400,"INVALID_SERVICE_TYPE");
+        String accepting=serviceType==null?"IF(p.role='expert',p.expert_accepting,p.accepting)":"expert".equals(serviceType)?"p.expert_accepting":"p.accepting";
+        String expires=serviceType==null?"IF(p.role='expert',p.expert_presence_expires_at,p.presence_expires_at)":"expert".equals(serviceType)?"p.expert_presence_expires_at":"p.presence_expires_at";
+        var rows=store.rows("SELECT p.user_id,u.username,p.role,("+accepting+"=1 AND "+expires+">CURRENT_TIMESTAMP(3) AND NOT EXISTS(SELECT 1 FROM support_media_member m WHERE m.user_id=p.user_id AND m.media_busy_slot=1) AND (SELECT COUNT(*) FROM support_assignment a WHERE a.agent_user_id=p.user_id AND a.released_at IS NULL)+(SELECT COUNT(*) FROM support_media_transfer t WHERE t.target_agent_user_id=p.user_id AND t.active_slot=1)<p.capacity_text) AS available FROM support_agent_profile p JOIN sys_user u ON u.id=p.user_id AND u.status=1 WHERE p.enabled=1 AND p.role IN ('support_agent','expert') AND (? IS NULL OR JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(?))) AND p.user_id>? ORDER BY p.user_id LIMIT ?",serviceType,serviceType,after,limit+1);
         List<Map<String,Object>> items=rows.stream().limit(limit).map(r->{Map<String,Object> out=new LinkedHashMap<>();out.put("user_id",Long.toString(number(r,"user_id")));String name=string(r,"username");out.put("display_name",name==null || name.matches("[+0-9 ()-]{6,}") || name.contains("@")?"专家 "+number(r,"user_id"):name);out.put("role",string(r,"role"));out.put("available",yes(r,"available"));return out;}).toList();return new CursorPage<>(items,items.isEmpty()?after:Long.parseLong((String)items.getLast().get("user_id")),rows.size()>limit);
     }
     @Override public int reservedTextSlots(long actor){return store.rows("SELECT id FROM support_media_transfer WHERE target_agent_user_id=? AND active_slot=1 FOR UPDATE",actor).size();}
@@ -164,8 +303,8 @@ public class MediaService implements SupportMediaHooks {
         for(var hint:store.rows("SELECT id FROM support_media_session WHERE request_id=? AND active_slot=1",request)){var s=store.session(number(hint,"id"),true);if(!TERMINAL.contains(string(s,"status")))finish(s,"ending","RESPONSIBILITY_ENDED");}
     }
     @Override public void accountChanged(long actor){
-        boolean enabled=Boolean.TRUE.equals(store.jdbc().queryForObject("SELECT EXISTS(SELECT 1 FROM sys_user WHERE id=? AND status=1)",Boolean.class,actor));var profiles=store.rows("SELECT enabled FROM support_agent_profile WHERE user_id=?",actor);enabled=enabled && (profiles.isEmpty() || yes(profiles.getFirst(),"enabled"));if(enabled)return;
-        for(var hint:store.rows("SELECT DISTINCT s.id,s.conversation_id FROM support_media_session s LEFT JOIN support_media_transfer t ON t.session_id=s.id AND t.active_slot=1 WHERE s.active_slot=1 AND (s.customer_user_id=? OR s.agent_user_id=? OR t.target_agent_user_id=?) ORDER BY s.id",actor,actor,actor)){conversations.byId(string(hint,"conversation_id"),true);var s=store.session(number(hint,"id"),true);if(actor==number(s,"customer_user_id") || actor==number(s,"agent_user_id"))finish(s,"ending","ACCOUNT_REVOKED");else{var t=store.pending(number(s,"id"),true);if(t!=null)abortTransfer(s,t,"failed","TARGET_REVOKED",true);}}
+        boolean enabled=Boolean.TRUE.equals(store.jdbc().queryForObject("SELECT EXISTS(SELECT 1 FROM sys_user WHERE id=? AND status=1)",Boolean.class,actor));var profiles=store.rows("SELECT enabled FROM support_agent_profile WHERE user_id=?",actor);enabled=enabled && (profiles.isEmpty() || yes(profiles.getFirst(),"enabled"));
+        for(var hint:store.rows("SELECT DISTINCT s.id,s.conversation_id FROM support_media_session s LEFT JOIN support_media_transfer t ON t.session_id=s.id AND t.active_slot=1 WHERE s.active_slot=1 AND (s.customer_user_id=? OR s.agent_user_id=? OR t.target_agent_user_id=?) ORDER BY s.id",actor,actor,actor)){conversations.byId(string(hint,"conversation_id"),true);var s=store.session(number(hint,"id"),true);boolean roleAllowed=actor!=number(s,"agent_user_id") || Boolean.TRUE.equals(store.jdbc().queryForObject("SELECT EXISTS(SELECT 1 FROM support_request r JOIN support_agent_profile p ON p.user_id=? AND p.enabled=1 WHERE r.id=? AND JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(r.service_type)))",Boolean.class,actor,s.get("request_id")));if(enabled && roleAllowed)continue;if(actor==number(s,"customer_user_id") || actor==number(s,"agent_user_id"))finish(s,"ending","ACCOUNT_REVOKED");else{var t=store.pending(number(s,"id"),true);if(t!=null)abortTransfer(s,t,"failed","TARGET_REVOKED",true);}}
     }
     public xiaozhi.modules.annotation.AnnotationModels.Frame capture(Long user,String session,Capture body) {
         long actor=actor(user);if(body==null || body.roomGeneration()==null || body.capturedAt()==null || body.capturedAt().isBefore(Instant.now().minusSeconds(300)) || body.capturedAt().isAfter(Instant.now().plusSeconds(5)))throw problem(400,"INVALID_LIVE_CAPTURE");

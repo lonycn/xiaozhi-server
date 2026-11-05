@@ -1,0 +1,554 @@
+openapi: 3.0.3
+info:
+  title: Xiaozhi answer speech and read-only skills public API
+  version: '1.0'
+  description: Additive A6 public API. Features default off. With conversations enabled and a feature disabled, its service
+    returns HTTP 404. See ANSWER_SPEECH_SKILLS_CONTRACT_20261102.md. All routes reject query strings; JSON POST bodies
+    are limited to 16384 raw bytes and reject duplicate or unknown fields, trailing content and scalar numeric coercion.
+    All JSON successes use {code:0,msg,data}; actual errors use HTTP status. External identity must satisfy current conversation
+    owner, exact source and token binding and revocation checks. Speech configuration, provider credentials, worker authority
+    and audio storage remain private. A completed authorized job grants at most five seconds; download with Bearer, fetch
+    fresh metadata before play, renew every two seconds, and stop on denial, expiry, background or identity/source changes.
+    Skill selection affects future ordinary AI runs only, not realtime or existing runs.
+security:
+- bearerAuth: []
+paths:
+  /api/v1/ai/conversations/{conversation_id}/messages/{message_id}/speech:
+    post:
+      summary: Create or recover an idempotent answer-speech job
+      parameters:
+      - $ref: '#/components/parameters/conversation_id'
+      - $ref: '#/components/parameters/message_id'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '413':
+          $ref: '#/components/responses/E413'
+        '415':
+          $ref: '#/components/responses/E415'
+        '429':
+          $ref: '#/components/responses/E429'
+        '503':
+          $ref: '#/components/responses/E503'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSpeech'
+  /api/v1/ai/conversations/{conversation_id}/speech/{job_id}:
+    get:
+      summary: Read job metadata and fresh authorization
+      parameters:
+      - $ref: '#/components/parameters/conversation_id'
+      - $ref: '#/components/parameters/job_id'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '503':
+          $ref: '#/components/responses/E503'
+  /api/v1/ai/conversations/{conversation_id}/speech/{job_id}/cancel:
+    post:
+      summary: Cancel an active job
+      parameters:
+      - $ref: '#/components/parameters/conversation_id'
+      - $ref: '#/components/parameters/job_id'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '413':
+          $ref: '#/components/responses/E413'
+        '415':
+          $ref: '#/components/responses/E415'
+        '429':
+          $ref: '#/components/responses/E429'
+        '503':
+          $ref: '#/components/responses/E503'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyObject'
+  /api/v1/ai/conversations/{conversation_id}/speech/{job_id}/audio:
+    get:
+      summary: Read private complete WAV
+      parameters:
+      - $ref: '#/components/parameters/conversation_id'
+      - $ref: '#/components/parameters/job_id'
+      responses:
+        '200':
+          description: Authorized WAV
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '503':
+          $ref: '#/components/responses/E503'
+      description: Authorization is checked again during streaming; no query or token in URL. Maximum 5 MiB and 120 seconds.
+  /api/v1/ai/skills:
+    get:
+      summary: List the fixed read-only skills
+      parameters: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCatalogEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '503':
+          $ref: '#/components/responses/E503'
+  /api/v1/ai/conversations/{conversation_id}/skill:
+    get:
+      summary: Read the current conversation selection
+      parameters:
+      - $ref: '#/components/parameters/conversation_id'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelectionEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '503':
+          $ref: '#/components/responses/E503'
+    post:
+      summary: Select or clear a fixed skill for future ordinary runs
+      parameters:
+      - $ref: '#/components/parameters/conversation_id'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelectionEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '413':
+          $ref: '#/components/responses/E413'
+        '415':
+          $ref: '#/components/responses/E415'
+        '429':
+          $ref: '#/components/responses/E429'
+        '503':
+          $ref: '#/components/responses/E503'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectSkill'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    conversation_id:
+      name: conversation_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    message_id:
+      name: message_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    job_id:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+  responses:
+    E400:
+      description: Invalid ID, query, strict JSON or selection.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    E401:
+      description: Authentication expired or account disabled.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    E403:
+      description: Current owner, source or token binding denied.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    E404:
+      description: Feature disabled or resource unavailable/hidden.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    E409:
+      description: State, source, message version, idempotency or active-job conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    E413:
+      description: Request body, message text, audio size or duration limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    E415:
+      description: Unsupported content type; POST requires application/json.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    E429:
+      description: Speech quota exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    E503:
+      description: Storage, provider configuration or database unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Id:
+      type: string
+      pattern: ^[a-f0-9]{32}$
+    Hash:
+      type: string
+      pattern: ^[a-f0-9]{64}$
+    ClientRequestId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[A-Za-z0-9_.:-]{1,64}$
+    CreateSpeech:
+      type: object
+      additionalProperties: false
+      required:
+      - client_request_id
+      properties:
+        client_request_id:
+          $ref: '#/components/schemas/ClientRequestId'
+    EmptyObject:
+      type: object
+      additionalProperties: false
+      maxProperties: 0
+    Job:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - conversation_id
+      - message_id
+      - message_version
+      - text_sha256
+      - status
+      - error_code
+      - audio_mime
+      - audio_bytes
+      - duration_ms
+      - result_access
+      - playback_authorized_until
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        conversation_id:
+          $ref: '#/components/schemas/Id'
+        message_id:
+          $ref: '#/components/schemas/Id'
+        message_version:
+          $ref: '#/components/schemas/Hash'
+          description: SHA-256 of message ID, LF and exact stored parts_json; opaque, do not reconstruct from reserialized
+            JSON.
+        text_sha256:
+          $ref: '#/components/schemas/Hash'
+          description: SHA-256 of exact UTF-8 synthesis text; distinct from message_version.
+        status:
+          type: string
+          enum:
+          - queued
+          - synthesizing
+          - completed
+          - failed
+          - canceled
+        error_code:
+          type: string
+          nullable: true
+        audio_mime:
+          type: string
+          nullable: true
+          enum:
+          - audio/wav
+          - null
+        audio_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          maximum: 5242880
+        duration_ms:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 120000
+        result_access:
+          type: string
+          enum:
+          - available
+          - restricted
+        playback_authorized_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: At most five seconds from issue, bounded by external token expiry; null for restricted or non-completed.
+        created_at:
+          type: string
+          format: date-time
+    SkillDefinition:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - version
+      - title
+      - description
+      - allowed_tools
+      - source_policy
+      properties:
+        id:
+          type: string
+          enum:
+          - materials_guidance
+          - evidence_summary
+        version:
+          type: integer
+          enum:
+          - 1
+        title:
+          type: string
+        description:
+          type: string
+        allowed_tools:
+          type: array
+          items:
+            type: string
+            enum:
+            - read_conversation_history
+            - read_conversation_evidence
+        source_policy:
+          type: string
+          enum:
+          - distinguish_user_material_tool_and_inference
+    SkillCatalog:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillDefinition'
+    Selection:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - version
+      properties:
+        id:
+          type: string
+          enum:
+          - materials_guidance
+          - evidence_summary
+        version:
+          type: integer
+          enum:
+          - 1
+    SelectionView:
+      type: object
+      additionalProperties: false
+      required:
+      - selection
+      properties:
+        selection:
+          type: object
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/Selection'
+    SelectSkill:
+      type: object
+      additionalProperties: false
+      required:
+      - client_request_id
+      description: Provide a registered skill_id and version 1, or both null/omitted to clear. Scalar coercion is rejected;
+        same client_request_id with different selection returns 409.
+      properties:
+        client_request_id:
+          $ref: '#/components/schemas/ClientRequestId'
+        skill_id:
+          type: string
+          nullable: true
+          enum:
+          - materials_guidance
+          - evidence_summary
+          - null
+        version:
+          type: integer
+          nullable: true
+          enum:
+          - 1
+          - null
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - msg
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          nullable: true
+    JobEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          type: integer
+          enum:
+          - 0
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/Job'
+    SkillCatalogEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          type: integer
+          enum:
+          - 0
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/SkillCatalog'
+    SelectionEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          type: integer
+          enum:
+          - 0
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/SelectionView'

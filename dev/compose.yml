@@ -35,6 +35,9 @@ services:
     command: ["java", "-Xms64m", "-Xmx384m", "-Djava.awt.headless=true", "-jar", "/app/manager.jar", "--spring.config.additional-location=file:/app/application-dev.properties"]
     environment:
       TZ: Asia/Shanghai
+    env_file:
+      - path: ./.runtime/xiaozhi-app.env
+        required: false
     depends_on:
       mysql: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -45,6 +48,7 @@ services:
       - ./.runtime/application-dev.properties:/app/application-dev.properties:ro
       - ./.runtime/uploadfile:/uploadfile
       - ./.runtime/attachments:/app/attachments
+      - ./.runtime/esp32-firmware:/app/esp32-firmware
       - ./.runtime/logs:/app/logs
       - ../main/manager-web/public/generator/static/fonts:/usr/share/fonts/truetype/xiaozhi:ro
 volumes:

@@ -29,6 +29,35 @@ CANDIDATE_URL = "http://127.0.0.1:18894"
 API = ROOT / "main/manager-api"
 WEB_URL = "http://127.0.0.1:18892"
 API_URL = "http://127.0.0.1:18893/xiaozhi"
+SPEECH_DEFAULT_PROFILE = ("cosyvoice-v3.5-flash", "longantai_v3")
+SPEECH_PROFILES = (SPEECH_DEFAULT_PROFILE, ("cosyvoice-v2", "longxiaochun_v2"))
+
+
+def speech_worker_profile():
+    """Keep a provisioned worker and manager on the same model during rollout."""
+    path = RUNTIME / "answer-speech-worker.json"
+    if not path.exists():
+        return SPEECH_DEFAULT_PROFILE
+    try:
+        if not path.is_file() or path.stat().st_mode & 0o077:
+            raise ValueError()
+        worker = json.loads(path.read_text())
+        profile = (worker["model"], worker["voice"])
+        if profile not in SPEECH_PROFILES:
+            raise ValueError()
+        return profile
+    except (OSError, ValueError, TypeError, KeyError):
+        raise RuntimeError("Invalid private answer speech profile") from None
+
+
+def esp32_intents_enabled():
+    path = RUNTIME / "esp32-intents-settings.json"
+    if not path.exists():
+        return False
+    settings = json.loads(path.read_text())
+    if not isinstance(settings, dict) or not isinstance(settings.get("enabled"), bool):
+        raise RuntimeError("Invalid ESP32 keyword settings")
+    return settings["enabled"]
 
 
 def configure():
@@ -49,12 +78,18 @@ def configure():
         "spring.datasource.druid.initial-size": 2,
         "spring.datasource.druid.min-idle": 2,
         "spring.datasource.druid.max-active": 12,
+        # Validate pooled Dev connections before use; never replay a failed write.
+        "spring.datasource.druid.test-on-borrow": "true",
+        "spring.datasource.druid.validation-query": "SELECT 1",
+        "spring.datasource.druid.validation-query-timeout": 2,
+        "spring.datasource.druid.max-wait": 3000,
         "spring.data.redis.host": "redis",
         "spring.data.redis.port": 6379,
         "features.conversation-enabled": "true",
         "features.support-handoff-enabled": "true",
         "logging.level.xiaozhi": "INFO",
         "logging.level.liquibase": "WARN",
+        "model-test.audio-dir": "/app/attachments/model-tests",
     }
     settings = ai_settings()
     if settings.get("enabled") is True:
@@ -70,10 +105,45 @@ def configure():
                 raise RuntimeError("Unsupported Omni model")
             properties["ai.execution.omni-model"] = omni
     tools = agent_tools_settings()
+    first = ai_first_settings()
+    first_active = first.get("enabled") is True and tools.get("enabled") is True and settings.get("enabled") is True
     if tools.get("enabled") is True and settings.get("enabled") is True:
         properties["features.agent-tools-enabled"] = "true"
-        if tools.get("technical_local") is True:
+        if tools.get("technical_local") is True or first_active and first.get("technical_local") is True:
             properties["agent-tools.technical-local-enabled"] = "true"
+    if first_active:
+        properties.update({"features.ai-context-enabled": "true", "features.agent-tool-results-enabled": "true"})
+        models = ai_first_models()
+        if models:
+            properties["ai.execution.multimodal-tools-enabled"] = "true"
+            properties["ai.execution.multimodal-tools-models"] = ",".join(models)
+        if first.get("realtime_tools") is True and realtime_settings().get("enabled") is True:
+            properties["features.realtime-tools-enabled"] = "true"
+        if first.get("materials_enabled") is True and realtime_settings().get("enabled") is True:
+            prepared = ai_first_materials_worker_config()
+            current = json.loads((RUNTIME / "realtime-worker.json").read_text())
+            if any(current.get(key) != prepared[key] for key in ("perception_model", "perception_base_url", "perception_api_key", "perception_workspace_id")):
+                raise RuntimeError("Realtime materials configuration changed; rerun ai-first-enable --materials")
+            properties["features.realtime-materials-enabled"] = "true"
+            properties["realtime.materials.perception-model"] = prepared["perception_model"]
+    if first.get("enabled") is True and first.get("runtime_control_enabled") is True:
+        properties["ai.runtime-control.enabled"] = "true"
+    if first_active and first.get("skills_enabled") is True:
+        properties["features.ai-skills-enabled"] = "true"
+    if first.get("enabled") is True and first.get("speech_enabled") is True:
+        key_path = RUNTIME / "answer-speech-worker-key"
+        try:
+            if key_path.stat().st_mode & 0o077:
+                raise ValueError()
+            speech_key = key_path.read_text().strip()
+            if not re.fullmatch(r"[a-f0-9]{64}", speech_key):
+                raise ValueError()
+        except (OSError, ValueError):
+            raise RuntimeError("Answer speech requires its private dedicated worker key") from None
+        speech_model, speech_voice = speech_worker_profile()
+        properties.update({"features.answer-speech-enabled": "true", "answer-speech.worker.key": speech_key,
+                           "answer-speech.storage-root": "/app/attachments/answer-speech",
+                           "answer-speech.model": speech_model, "answer-speech.voice": speech_voice})
     if summary_settings().get("enabled") is True and settings.get("enabled") is True:
         properties["features.support-summary-assistance-enabled"] = "true"
     media = media_settings()
@@ -116,6 +186,26 @@ def configure():
                            "realtime.worker.public-url": realtime["public_url"]})
         if realtime.get("server_vad_enabled") is True:
             properties["features.realtime-server-vad-enabled"] = "true"
+    if esp32_intents_enabled():
+        properties["features.esp32-intents-enabled"] = "true"
+    device_settings = RUNTIME / "esp32-device-settings.json"
+    if device_settings.exists():
+        if device_settings.stat().st_mode & 0o077:
+            raise RuntimeError("ESP32 device settings must be private")
+        device = json.loads(device_settings.read_text())
+        if device.get("enabled") is True:
+            for name in ("gateway_key", "download_key"):
+                if not isinstance(device.get(name), str) or len(device[name]) < 32 or any(c in device[name] for c in "\r\n"):
+                    raise RuntimeError("Invalid ESP32 service key")
+            properties.update({
+                "features.esp32-enabled": "true", "features.esp32-ota-enabled": "true",
+                "esp32.gateway.key": device["gateway_key"],
+                "esp32.ota.download-key": device["download_key"],
+                "esp32.ota.directory": "/app/esp32-firmware",
+                "esp32.ota.public-base-url": device["public_base_url"],
+                "esp32.ota.allow-lan-http": "true", "esp32.ota.development-only": "true",
+                "esp32.ota.usb-bootstrap-enabled": "true",
+            })
     (RUNTIME / "application-dev.properties").write_text("\n".join(f"{key}={value}" for key, value in properties.items()) + "\n")
     for name in ("credentials.json", "compose.env", "application-dev.properties"):
         (RUNTIME / name).chmod(0o600)
@@ -177,6 +267,217 @@ def prepare_agent_tools(technical_local=False):
     if not config.is_file() or config.stat().st_mode & 0o077:
         raise RuntimeError("Agent tools require a private AI worker configuration")
     private_json("agent-tools-settings.json", {"enabled": True, "technical_local": technical_local})
+
+
+def ai_first_settings():
+    path = RUNTIME / "ai-first-settings.json"
+    if not path.exists():
+        return {"enabled": False, "technical_local": False, "realtime_tools": False, "materials_enabled": False, "speech_enabled": False, "skills_enabled": False, "runtime_control_enabled": False}
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or any(type(data.get(key)) is not bool for key in ("enabled", "technical_local", "realtime_tools")):
+        raise RuntimeError("Invalid AI-first settings")
+    if any(type(data.get(key, False)) is not bool for key in ("materials_enabled", "speech_enabled", "skills_enabled", "runtime_control_enabled")):
+        raise RuntimeError("Invalid AI-first settings")
+    return {**data, **{key: data.get(key, False) for key in ("materials_enabled", "speech_enabled", "skills_enabled", "runtime_control_enabled")}}
+
+
+def ai_first_models():
+    media = media_settings()
+    vision = media.get("vision_model", "") if media.get("enabled") is True else ""
+    omni = ai_settings().get("omni_model", "")
+    if vision not in ("", "qwen3.8-flash", "qwen3-vl-plus", "qwen3-vl-flash"):
+        raise RuntimeError("Configured vision model is not approved for multimodal tools")
+    if omni not in ("", "qwen3.8-omni-flash"):
+        raise RuntimeError("Configured audio model is not approved for multimodal tools")
+    return list(dict.fromkeys(model for model in (vision, omni) if model))
+
+
+def ai_first_jar_check():
+    markers = {"BOOT-INF/classes/xiaozhi/modules/agenttool/AgentToolExecutionCore.class",
+               "BOOT-INF/classes/xiaozhi/modules/agenttool/PublicToolResultStore.class",
+               "BOOT-INF/classes/xiaozhi/modules/aicontext/ConversationEvidenceService.class",
+               "BOOT-INF/classes/xiaozhi/modules/realtimetool/RealtimeToolService.class",
+               "BOOT-INF/classes/db/changelog/agent-tools.changelog.yaml",
+               "BOOT-INF/classes/db/changelog/ai-context.changelog.yaml",
+               "BOOT-INF/classes/db/changelog/ai-public-results.changelog.yaml",
+               "BOOT-INF/classes/db/changelog/realtime-tools.changelog.yaml"}
+    try:
+        with zipfile.ZipFile(API / "target/xiaozhi-esp32-api.jar") as archive:
+            if not markers.issubset(set(archive.namelist())):
+                raise RuntimeError("AI-first requires a freshly built API")
+    except (OSError, zipfile.BadZipFile):
+        raise RuntimeError("AI-first requires a freshly built API") from None
+
+
+def ai_first_gateway_preflight():
+    """Read this Dev database before an API upgrade that includes gateway triggers."""
+    jar = API / "target/xiaozhi-esp32-api.jar"
+    migration = "BOOT-INF/classes/db/changelog/esp32-gateway.changelog.yaml"
+    master = "BOOT-INF/classes/db/changelog/db.changelog-master.yaml"
+    try:
+        with zipfile.ZipFile(jar) as archive:
+            if migration not in archive.namelist():
+                return
+            # Only an included migration can run during this upgrade.
+            if master not in archive.namelist():
+                raise RuntimeError("AI-first preflight cannot verify the API migration manifest")
+            if not re.search(rb"(?m)^\s*file:\s*esp32-gateway\.changelog\.yaml\s*$", archive.read(master)):
+                return
+            strict_id = "202611021102-esp32-gateway-strict-revocation"
+            strict_present = bool(re.search(
+                rb"(?m)^\s*id:\s*202611021102-esp32-gateway-strict-revocation\s*$",
+                archive.read(migration),
+            ))
+    except (OSError, zipfile.BadZipFile, KeyError):
+        raise RuntimeError("AI-first preflight cannot read the API migration manifest") from None
+    if not (RUNTIME / "compose.env").is_file():
+        raise RuntimeError("AI-first preflight requires the existing Dev stack and database; start Dev first")
+    migrations = ["202611020700-esp32-gateway"]
+    if strict_present:
+        migrations.append(strict_id)
+    counts = ["(SELECT COUNT(*) FROM DATABASECHANGELOG WHERE ID='" + migration_id +
+              "' AND AUTHOR='codex' AND EXECTYPE IN ('EXECUTED','RERAN','MARK_RAN'))"
+              for migration_id in migrations]
+    sql = "SELECT @@GLOBAL.log_bin, @@GLOBAL.log_bin_trust_function_creators, " + ", ".join(counts)
+    try:
+        result = compose("exec", "-T", "mysql", "sh", "-c",
+                         'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot --batch --raw --skip-column-names xiaozhi_esp32_server -e "$1"',
+                         "--", sql, capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("AI-first preflight cannot read the existing Dev database or migration history; verify the dedicated Dev MySQL is running and initialized") from None
+    fields = result.stdout.strip().split("\t")
+    if len(fields) != 2 + len(migrations) or any(not re.fullmatch(r"[0-9]+", field) for field in fields) or fields[0] not in ("0", "1") or fields[1] not in ("0", "1"):
+        raise RuntimeError("AI-first preflight received an invalid Dev MySQL migration status")
+    binlog, trust, *applied = map(int, fields)
+    if any(not count for count in applied) and binlog and not trust:
+        raise RuntimeError("AI-first cannot apply the pending esp32-gateway trigger migration: Dev MySQL binary logging is enabled and log_bin_trust_function_creators is disabled. Arrange a reviewed, temporary Dev-only migration operation with the database administrator; no services or AI-first settings were changed.")
+
+
+def ai_first_optional_jar_check(feature):
+    definitions = {
+        "speech": ("answerspeech", ("AnswerSpeechService", "AnswerSpeechController", "AnswerSpeechWorkerController", "AnswerSpeechWorkerKeyFilter"), "answer-speech.changelog.yaml"),
+        "skills": ("aiskill", ("AiSkillService", "AiSkillController"), "ai-skills.changelog.yaml"),
+        "runtime-control": ("airuntime", ("AiRuntimeControl", "AiRuntimeControlController"), "ai-runtime-control.changelog.yaml"),
+    }
+    module, classes, migration = definitions[feature]
+    root = "BOOT-INF/classes/"
+    markers = {root + "xiaozhi/modules/" + module + "/" + name + ".class" for name in classes}
+    markers.add(root + "db/changelog/" + migration)
+    master = root + "db/changelog/db.changelog-master.yaml"
+    try:
+        with zipfile.ZipFile(API / "target/xiaozhi-esp32-api.jar") as archive:
+            if not markers.issubset(set(archive.namelist())) or master not in archive.namelist():
+                raise ValueError()
+            pattern = rb"(?m)^\s*file:\s*" + re.escape(migration.encode()) + rb"\s*$"
+            if not re.search(pattern, archive.read(master)):
+                raise ValueError()
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError):
+        raise RuntimeError("AI-first " + feature + " requires a freshly built API with its migration") from None
+
+
+def ai_first_materials_jar_check():
+    root = "BOOT-INF/classes/"
+    markers = {root + "xiaozhi/modules/realtimeinput/" + name + ".class" for name in
+               ("RealtimeInputService", "RealtimeInputController", "RealtimeInputWorkerController", "RealtimeInputModels")}
+    markers.add(root + "db/changelog/realtime-inputs.changelog.yaml")
+    master = root + "db/changelog/db.changelog-master.yaml"
+    try:
+        with zipfile.ZipFile(API / "target/xiaozhi-esp32-api.jar") as archive:
+            if not markers.issubset(set(archive.namelist())) or master not in archive.namelist():
+                raise ValueError()
+            if not re.search(rb"(?m)^\s*file:\s*realtime-inputs\.changelog\.yaml\s*$", archive.read(master)):
+                raise ValueError()
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError):
+        raise RuntimeError("Realtime materials require a freshly built API with the realtime input migration") from None
+
+
+def ai_first_materials_worker_config():
+    """Prepare an in-memory private worker copy; never write during preflight."""
+    try:
+        source_path = RUNTIME / "ai-worker.json"
+        target_path = RUNTIME / "realtime-worker.json"
+        if source_path.stat().st_mode & 0o077 or target_path.stat().st_mode & 0o077:
+            raise ValueError()
+        source, target = json.loads(source_path.read_text()), json.loads(target_path.read_text())
+        if not isinstance(source, dict) or not isinstance(target, dict):
+            raise ValueError()
+        model = source["vision_model"]
+        base = source.get("vision_base_url") or source["base_url"]
+        key = source.get("vision_api_key") or source["api_key"]
+        workspace = source.get("vision_workspace_id") or source.get("workspace_id", "")
+        if model != "qwen3.8-flash" or not isinstance(base, str) or not isinstance(key, str) or not key.strip() or not isinstance(workspace, str):
+            raise ValueError()
+        if any(ord(c) < 32 or ord(c) == 127 for c in key + workspace):
+            raise ValueError()
+        url = urlsplit(base)
+        host = url.hostname or ""
+        if (url.scheme != "https" or url.username or url.password or url.query or url.fragment or url.port not in (None, 443)
+                or not (host in ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com")
+                        or re.fullmatch(r"[a-z0-9-]+\.(cn-beijing|ap-southeast-1)\.maas\.aliyuncs\.com", host))):
+            raise ValueError()
+        if workspace and not re.fullmatch(r"[a-zA-Z0-9-]{1,80}", workspace):
+            raise ValueError()
+        if host.endswith(".maas.aliyuncs.com") and workspace and workspace.lower() != host.split(".", 1)[0]:
+            raise ValueError()
+        return {**target, "perception_model": model, "perception_base_url": base,
+                "perception_api_key": key, "perception_workspace_id": workspace}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        raise RuntimeError("Realtime materials require private AI vision credentials for an approved Bailian model and HTTPS endpoint") from None
+
+
+def prepare_ai_first(technical_local=False, materials=False, speech=False, skills=False, runtime_control=False):
+    if type(runtime_control) is not bool:
+        raise RuntimeError("Invalid AI-first runtime control setting")
+    if type(speech) is not bool or type(skills) is not bool:
+        raise RuntimeError("Invalid AI-first speech or skills setting")
+    if type(materials) is not bool:
+        raise RuntimeError("Invalid realtime materials setting")
+    if type(technical_local) is not bool:
+        raise RuntimeError("Invalid technical tool setting")
+    ai_first_jar_check()
+    if materials:
+        ai_first_materials_jar_check()
+    if speech:
+        ai_first_optional_jar_check("speech")
+    if skills:
+        ai_first_optional_jar_check("skills")
+    if runtime_control:
+        ai_first_optional_jar_check("runtime-control")
+    ai_first_models()
+    if ai_settings().get("enabled") is not True or agent_tools_settings().get("enabled") is not True:
+        raise RuntimeError("AI-first requires enabled AI and agent tools")
+    path = RUNTIME / "ai-worker.json"
+    if not path.is_file() or path.stat().st_mode & 0o077:
+        raise RuntimeError("AI-first requires a private AI worker configuration")
+    try:
+        worker = json.loads(path.read_text())
+        media = media_settings()
+        vision = media.get("vision_model", "") if media.get("enabled") is True else ""
+        omni = ai_settings().get("omni_model", "")
+        if (not isinstance(worker, dict) or vision and worker.get("vision_model") != vision
+                or omni and worker.get("omni_model") != omni):
+            raise ValueError()
+    except (OSError, ValueError, TypeError):
+        raise RuntimeError("AI-first model configuration does not match the private worker") from None
+    python = os.environ.get("XIAOZHI_AI_WORKER_PYTHON", str(ROOT.parent / ".venv/bin/python"))
+    try:
+        subprocess.run([python, "-c", "import openai, httpx, ai_worker.tools"], cwd=ROOT / "main/xiaozhi-server", check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("AI-first requires the updated AI worker environment") from None
+    realtime = realtime_settings().get("enabled") is True
+    if materials and not realtime:
+        raise RuntimeError("Realtime materials require enabled realtime")
+    if realtime:
+        validate_realtime_settings(realtime_settings())
+        realtime_interpreter = realtime_python()
+        try:
+            subprocess.run([realtime_interpreter, "-c", "import realtime_worker.session, realtime_worker.tool_contract"],
+                           cwd=ROOT / "main/xiaozhi-server", check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError("AI-first requires the updated realtime worker environment") from None
+        validate_realtime_worker_file(realtime_settings())
+    return {"enabled": True, "technical_local": technical_local, "realtime_tools": realtime, "materials_enabled": materials, "speech_enabled": speech, "skills_enabled": skills, "runtime_control_enabled": runtime_control}
 
 
 def summary_settings():
@@ -506,13 +807,7 @@ def realtime_python():
     return python
 
 
-def start_realtime_worker():
-    if realtime_process(): return
-    settings = realtime_settings()
-    if settings.get("enabled") is not True:
-        raise RuntimeError("Realtime is not enabled")
-    validate_realtime_settings(settings)
-    python = realtime_python()
+def validate_realtime_worker_file(settings):
     try:
         path = RUNTIME / "realtime-worker.json"
         if path.stat().st_mode & 0o077:
@@ -526,6 +821,15 @@ def start_realtime_worker():
             raise ValueError()
     except (OSError, ValueError, TypeError, AttributeError):
         raise RuntimeError("Invalid private realtime worker configuration") from None
+
+def start_realtime_worker():
+    if realtime_process(): return
+    settings = realtime_settings()
+    if settings.get("enabled") is not True:
+        raise RuntimeError("Realtime is not enabled")
+    validate_realtime_settings(settings)
+    python = realtime_python()
+    validate_realtime_worker_file(settings)
     with (RUNTIME / "realtime-worker.log").open("a") as log:
         process = subprocess.Popen([python, "-m", "realtime_worker", "--config", str(RUNTIME / "realtime-worker.json")],
                                    cwd=ROOT / "main/xiaozhi-server", stdout=log, stderr=subprocess.STDOUT,
@@ -561,6 +865,184 @@ def stop_realtime_worker():
             return
         time.sleep(.1)
     raise RuntimeError("Realtime worker did not stop; feature remains enabled")
+
+
+def prepare_speech_worker():
+    """Read only the specifically authorized Dev TTS record; return private data in memory."""
+    query = "SELECT config_json FROM ai_model_config WHERE model_type='TTS' AND model_code='TTS_BailianCosyVoice' AND is_default=1 AND is_enabled=1"
+    try:
+        result = compose("exec", "-T", "mysql", "sh", "-c",
+                         'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot --batch --raw --skip-column-names xiaozhi_esp32_server -e "$1"',
+                         "sh", query, capture_output=True, text=True)
+        rows = result.stdout.strip().splitlines()
+        if len(rows) != 1:
+            raise ValueError()
+        source = json.loads(rows[0])
+        if not isinstance(source, dict):
+            raise ValueError()
+        provider, key = source["ws_url"], source["api_key"]
+        model, voice = source["model"], source.get("private_voice") or source["voice"]
+        workspace = source.get("workspace_id") or ""
+        if not all(isinstance(x, str) for x in (provider, key, model, voice, workspace)):
+            raise ValueError()
+        url = urlsplit(provider)
+        host = url.hostname or ""
+        if (url.scheme != "wss" or url.username or url.password or url.query or url.fragment
+                or url.port not in (None, 443) or url.path.rstrip("/") != "/api-ws/v1/inference"
+                or not (host in ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com")
+                        or re.fullmatch(r"[a-z0-9][a-z0-9.-]*\.maas\.aliyuncs\.com", host))
+                or (model, voice) not in SPEECH_PROFILES
+                or not key.strip() or any(ord(c) < 32 or ord(c) == 127 for c in key + workspace)
+                or len(workspace) > 100):
+            raise ValueError()
+        target_config = RUNTIME / "answer-speech-worker.json"
+        if target_config.exists() and (not target_config.is_file() or target_config.stat().st_mode & 0o077):
+            raise ValueError()
+        path = RUNTIME / "answer-speech-worker-key"
+        if path.exists():
+            if path.stat().st_mode & 0o077:
+                raise ValueError()
+            worker_key = path.read_text().strip()
+            if not re.fullmatch(r"[a-f0-9]{64}", worker_key):
+                raise ValueError()
+        else:
+            worker_key = secrets.token_hex(32)
+        if worker_key == key:
+            raise ValueError()
+        for other in ("ai-worker-key", "media-worker-key", "realtime-worker.json"):
+            other_path = RUNTIME / other
+            if other_path.is_file():
+                value = other_path.read_text().strip()
+                if other.endswith(".json"):
+                    value = json.loads(value).get("worker_key", "")
+                if worker_key == value:
+                    raise ValueError()
+        worker = {"enabled": True, "manager_url": API_URL, "worker_key": worker_key,
+                  "worker_id": "answer-speech-dev", "provider_url": provider, "api_key": key,
+                  "model": model, "voice": voice, "workspace_id": workspace}
+        python = speech_worker_python()
+        subprocess.run([python, "-c", "import json,sys; from answer_speech_worker.config import Config; Config(**json.load(sys.stdin))"],
+                       cwd=ROOT / "main/xiaozhi-server", input=json.dumps(worker), text=True, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return worker
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, AttributeError):
+        raise RuntimeError("Answer speech requires exactly one enabled default trusted Bailian CosyVoice configuration and a prepared private worker") from None
+
+
+def write_speech_key(value):
+    path = RUNTIME / "answer-speech-worker-key"
+    if path.exists():
+        if path.stat().st_mode & 0o077 or path.read_text().strip() != value:
+            raise RuntimeError("Answer speech worker key changed during preflight")
+        return
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as output:
+        output.write(value)
+
+
+def speech_worker_python():
+    python = os.environ.get("XIAOZHI_ANSWER_SPEECH_PYTHON", str(DEV / ".venv-answer-speech/bin/python"))
+    try:
+        subprocess.run([python, "-c", "import httpx, websockets, answer_speech_worker.config"],
+                       cwd=ROOT / "main/xiaozhi-server", check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Answer speech requires its prepared independent Python environment") from None
+    return python
+
+
+def speech_worker_process():
+    path = RUNTIME / "answer-speech-worker-process.json"
+    if not path.exists():
+        return None
+    try:
+        info = json.loads(path.read_text()); pid = info["pid"]
+        if type(pid) is not int or pid <= 1 or not info["identity"] or process_identity(pid) != info["identity"]:
+            return None
+        command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        args = shlex.split(command)
+        if not any(args[i:i + 2] == ["-m", "answer_speech_worker"] for i in range(len(args) - 1)):
+            return None
+        if not any(args[i:i + 2] == ["--config", str(RUNTIME / "answer-speech-worker.json")] for i in range(len(args) - 1)):
+            return None
+        return info
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def speech_worker_status():
+    """Distinguish a missing process from a record that cannot safely identify one."""
+    path = RUNTIME / "answer-speech-worker-process.json"
+    if not path.exists():
+        return "stopped (no process record)"
+    try:
+        record = json.loads(path.read_text())
+        pid = record["pid"]
+        if type(pid) is not int or pid <= 1 or not isinstance(record.get("identity"), str) or not record["identity"]:
+            raise ValueError()
+        if speech_worker_process():
+            return "running (identity verified)"
+        identity = process_identity(pid)
+        return "unverified (process record stale)" if not identity else "unverified (process identity or command mismatch)"
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return "unverified (invalid or unreadable process record)"
+
+
+def stop_speech_worker():
+    path = RUNTIME / "answer-speech-worker-process.json"
+    info = speech_worker_process()
+    if not info:
+        if path.exists():
+            try:
+                pid = json.loads(path.read_text())["pid"]
+                if type(pid) is not int or pid <= 1:
+                    raise ValueError()
+                if process_identity(pid):
+                    raise RuntimeError("Answer speech process identity mismatch; refusing to stop or disable")
+                path.unlink()
+            except (OSError, ValueError, KeyError, TypeError):
+                raise RuntimeError("Invalid answer speech process record; refusing to stop or disable") from None
+        return
+    os.killpg(info["pid"], signal.SIGTERM)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if not speech_worker_process():
+            path.unlink(missing_ok=True)
+            return
+        time.sleep(.1)
+    raise RuntimeError("Answer speech worker did not stop; feature remains enabled")
+
+
+def start_speech_worker():
+    if speech_worker_process():
+        return
+    if not ai_first_settings().get("enabled") or not ai_first_settings().get("speech_enabled"):
+        raise RuntimeError("Answer speech is not enabled")
+    config = RUNTIME / "answer-speech-worker.json"
+    if not config.is_file() or config.stat().st_mode & 0o077:
+        raise RuntimeError("Answer speech worker configuration is missing or not private")
+    try:
+        worker = json.loads(config.read_text())
+        key_path = RUNTIME / "answer-speech-worker-key"
+        if (key_path.stat().st_mode & 0o077 or worker.get("worker_key") != key_path.read_text().strip()
+                or worker.get("manager_url") != API_URL or worker.get("enabled") is not True
+                or (worker.get("model"), worker.get("voice")) not in SPEECH_PROFILES):
+            raise ValueError()
+        python = speech_worker_python()
+        subprocess.run([python, "-c", "import json,sys; from answer_speech_worker.config import Config; Config(**json.load(sys.stdin))"],
+                       cwd=ROOT / "main/xiaozhi-server", input=json.dumps(worker), text=True, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
+        raise RuntimeError("Invalid private answer speech worker configuration") from None
+    with (RUNTIME / "answer-speech-worker.log").open("a") as log:
+        process = subprocess.Popen([python, "-m", "answer_speech_worker", "--config", str(config)],
+                                   cwd=ROOT / "main/xiaozhi-server", stdout=log, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+    identity = process_identity(process.pid)
+    if not identity:
+        raise RuntimeError("Answer speech worker exited; inspect its private log")
+    private_json("answer-speech-worker-process.json", {"pid": process.pid, "identity": identity})
+    if not speech_worker_process():
+        raise RuntimeError("Answer speech worker identity verification failed")
 
 
 def set_annotations_enabled(enabled):
@@ -891,6 +1373,8 @@ def start_candidate():
     env = {**os.environ, "VITE_API_BASE_URL": "/xiaozhi",
            "VITE_API_PROXY_TARGET": "http://127.0.0.1:18893",
            "VITE_CONVERSATION_ENABLED": "true", "VITE_ENV_LABEL": "Dev Vue 3"}
+    if esp32_intents_enabled():
+        env["VITE_ESP32_INTENTS_ENABLED"] = "true"
     with (RUNTIME / "candidate.log").open("a") as log:
         process = subprocess.Popen(["npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", "18894", "--strictPort"],
                                    cwd=CANDIDATE, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -922,7 +1406,7 @@ def stop_process(find_process, filename):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status", "summary-enable", "summary-disable", "summary-status", "agent-tools-enable", "agent-tools-disable", "agent-tools-status"])
+    parser.add_argument("action", choices=["up", "stop", "status", "candidate-up", "candidate-status", "candidate-stop", "legacy-up", "legacy-status", "legacy-stop", "ai-enable", "ai-disable", "ai-status", "media-enable", "media-disable", "media-status", "annotations-enable", "annotations-disable", "annotations-status", "rtc-enable", "rtc-disable", "rtc-status", "realtime-enable", "realtime-disable", "realtime-status", "summary-enable", "summary-disable", "summary-status", "agent-tools-enable", "agent-tools-disable", "agent-tools-status", "ai-first-enable", "ai-first-disable", "ai-first-status"])
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--seed-local-console", action="store_true")
     parser.add_argument("--storage", choices=["filesystem", "s3"])
@@ -935,11 +1419,63 @@ def main():
     parser.add_argument("--server-vad", action=argparse.BooleanOptionalAction, default=None,
                         help="Enable/disable automatic realtime speech detection; omitted preserves current setting")
     parser.add_argument("--technical-local", action="store_true", help="Explicitly allow technical-only local acceptance tools")
+    parser.add_argument("--materials", action="store_true", help="Explicitly enable realtime uploaded materials for AI-first")
+    parser.add_argument("--speech", action="store_true", help="Explicitly enable ordinary answer speech")
+    parser.add_argument("--skills", action="store_true", help="Explicitly enable fixed readonly skills")
+    parser.add_argument("--runtime-control", action="store_true", help="Explicitly enable AI runtime admission control")
     args = parser.parse_args()
-    if args.technical_local and args.action != "agent-tools-enable":
-        parser.error("--technical-local is only valid with agent-tools-enable")
-    configure()
-    if args.action == "agent-tools-enable":
+    if args.runtime_control and args.action != "ai-first-enable":
+        parser.error("--runtime-control is only valid with ai-first-enable")
+    if (args.speech or args.skills) and args.action != "ai-first-enable":
+        parser.error("--speech and --skills are only valid with ai-first-enable")
+    if args.materials and args.action != "ai-first-enable":
+        parser.error("--materials is only valid with ai-first-enable")
+    if args.technical_local and args.action not in ("agent-tools-enable", "ai-first-enable"):
+        parser.error("--technical-local is only valid with agent-tools-enable or ai-first-enable")
+    if args.action not in ("ai-first-enable", "ai-first-disable", "ai-first-status"):
+        configure()
+    if args.action == "ai-first-enable":
+        if not RUNTIME.is_dir():
+            raise RuntimeError("AI-first requires the existing Dev stack; start Dev first")
+        if args.build: build()
+        first_settings = prepare_ai_first(args.technical_local, args.materials, args.speech, args.skills, args.runtime_control)
+        materials_worker = ai_first_materials_worker_config() if args.materials else None
+        speech_worker = prepare_speech_worker() if args.speech else None
+        ai_first_gateway_preflight()
+        stop_speech_worker()
+        stop_realtime_worker()
+        stop_process(ai_process, "ai-worker-process.json")
+        if materials_worker is not None:
+            private_json("realtime-worker.json", materials_worker)
+        if speech_worker is not None:
+            write_speech_key(speech_worker["worker_key"])
+            private_json("answer-speech-worker.json", speech_worker)
+        private_json("ai-first-settings.json", first_settings)
+        configure(); recreate_api(); start_ai_worker()
+        if realtime_settings().get("enabled") is True: start_realtime_worker()
+        if args.speech: start_speech_worker()
+        print("AI-first enabled; technical local tools:", args.technical_local)
+    elif args.action == "ai-first-disable":
+        stop_speech_worker()
+        stop_realtime_worker()
+        stop_process(ai_process, "ai-worker-process.json")
+        private_json("ai-first-settings.json", {"enabled": False, "technical_local": False, "realtime_tools": False, "materials_enabled": False, "speech_enabled": False, "skills_enabled": False, "runtime_control_enabled": False})
+        configure(); recreate_api()
+        if ai_settings().get("enabled") is True: start_ai_worker()
+        if realtime_settings().get("enabled") is True: start_realtime_worker()
+        print("AI-first disabled; histories, base features and private configuration retained")
+    elif args.action == "ai-first-status":
+        first = ai_first_settings()
+        active = first.get("enabled") is True and ai_settings().get("enabled") is True and agent_tools_settings().get("enabled") is True
+        print("AI-first enabled:", active)
+        print("AI-first technical local tools:", active and first.get("technical_local") is True)
+        print("AI-first realtime tools:", active and first.get("realtime_tools") is True and realtime_settings().get("enabled") is True)
+        print("AI-first realtime materials:", active and first.get("materials_enabled") is True and realtime_settings().get("enabled") is True)
+        print("AI-first answer speech:", first.get("enabled") is True and first.get("speech_enabled") is True, "worker:", speech_worker_status())
+        print("AI-first readonly skills:", active and first.get("skills_enabled") is True)
+        print("AI-first runtime control:", first.get("enabled") is True and first.get("runtime_control_enabled") is True)
+        print("These are configuration and process identity only; API deployment, provider and job health are not checked.")
+    elif args.action == "agent-tools-enable":
         if args.build:
             build()
         prepare_agent_tools(args.technical_local)
@@ -1108,6 +1644,12 @@ def main():
             realtime_jar_check(realtime_settings().get("server_vad_enabled") is True)
         if summary_settings().get("enabled") is True and ai_settings().get("enabled") is True:
             summary_jar_check()
+        if ai_first_settings().get("enabled") is True and ai_first_settings().get("speech_enabled") is True:
+            ai_first_optional_jar_check("speech"); speech_worker_python()
+        if ai_first_settings().get("enabled") is True and ai_first_settings().get("skills_enabled") is True:
+            ai_first_optional_jar_check("skills")
+        if ai_first_settings().get("enabled") is True and ai_first_settings().get("runtime_control_enabled") is True:
+            ai_first_optional_jar_check("runtime-control")
         stage_api_jar()
         compose("up", "-d", "--force-recreate", "api")
         print("Waiting for Dev API…", flush=True)
@@ -1120,11 +1662,18 @@ def main():
                 start_summary_worker()
         if realtime_settings().get("enabled") is True:
             start_realtime_worker()
+        if ai_first_settings().get("enabled") is True and ai_first_settings().get("speech_enabled") is True:
+            start_speech_worker()
+        if (RUNTIME / "esp32-device-settings.json").exists():
+            subprocess.run([str(ROOT.parent / ".venv/bin/python"), str(DEV / "esp32_services.py"), "start"], check=True)
         start_candidate()
         print("Waiting for Dev frontend…", flush=True)
         wait_http(CANDIDATE_URL)
         print(CANDIDATE_URL + "/#/conversations", flush=True)
     elif args.action == "stop":
+        if (RUNTIME / "esp32-device-settings.json").exists():
+            subprocess.run([str(ROOT.parent / ".venv/bin/python"), str(DEV / "esp32_services.py"), "stop"], check=True)
+        stop_speech_worker()
         stop_summary_worker()
         stop_realtime_worker()
         stop_process(media_process, "media-worker-process.json")

@@ -26,17 +26,27 @@ public class AgentToolService {
     private final JdbcTemplate db;private final ObjectMapper json;private final TransactionTemplate tx;
     private final ConversationAccessService access;
     private boolean enabled,technicalEnabled;
+    private xiaozhi.modules.aiskill.AiSkillService skills;
+    @Autowired(required=false) public void setSkills(xiaozhi.modules.aiskill.AiSkillService value){skills=value;}
+    private void skillTool(String run,String name){if(skills!=null)skills.requireTool(run,name);}
+    private ObjectProvider<xiaozhi.modules.esp32ai.Esp32DeviceToolService> esp32Tools;
+    @Autowired public void setEsp32Tools(ObjectProvider<xiaozhi.modules.esp32ai.Esp32DeviceToolService> value){esp32Tools=value;}
+    private xiaozhi.modules.esp32ai.Esp32DeviceToolService deviceTools(){return esp32Tools==null?null:esp32Tools.getIfAvailable();}
+    private boolean deviceRun(String runId){return deviceTools()!=null && deviceTools().bound(runId);}
+
     private ExternalIdentityService identity;private ExternalBusinessSettings settings;
     private ObjectProvider<ExternalBusinessAdapter> adapters;
+    @Autowired(required=false) private PublicToolResultStore publicResults;
     public AgentToolService(JdbcTemplate db,ObjectMapper json,PlatformTransactionManager manager) {
         this.db=db;this.json=json;tx=new TransactionTemplate(manager);
         access=new ConversationAccessService(new ConversationDao(db));
     }
     @Value("${features.agent-tools-enabled:false}") public void setEnabled(boolean value){enabled=value;}
     public boolean isEnabled(){return enabled;}
-    public boolean hasBinding(String runId){return db.queryForObject("SELECT COUNT(*) FROM agent_tool_run_binding WHERE run_id=?",Long.class,runId)==1;}
+    public boolean hasBinding(String runId){return deviceRun(runId) || db.queryForObject("SELECT COUNT(*) FROM agent_tool_run_binding WHERE run_id=?",Long.class,runId)==1;}
     /** Caller owns the run transaction. Persisted delegation remains guarded after a feature-off restart. */
     public void validateBinding(String runId){
+        if(deviceRun(runId))return;
         var rows=db.queryForList("SELECT * FROM agent_tool_run_binding WHERE run_id=?",runId);
         if(rows.isEmpty()) {if(enabled)throw problem(409,"TOOL_CONTEXT_MISSING");return;}
         revalidate(rows.getFirst());
@@ -65,27 +75,24 @@ public class AgentToolService {
                 runId,conversationId,ownerId,principalJson,config,technicalEnabled?1:0);
     }
     public Catalog taskTools(String runId,int attempt,String leaseToken,long controlEpoch) {
+        if(deviceRun(runId))return enabled?deviceTools().taskTools(runId,attempt,leaseToken,controlEpoch):new Catalog(List.of(),0,0);
         if(!enabled)return new Catalog(List.of(),0,0);
         return tx.execute(status->{
             var r=fence(runId,attempt,leaseToken,controlEpoch);var binding=binding(runId);Principal principal=revalidate(binding);
-            List<JsonNode> tools=new ArrayList<>();
-            for(String name:new TreeSet<>(NAMES)) {
-                if(!registered(name))continue;
-                if(local(name)) {if(technicalEnabled && n(binding,"local_tools_allowed")==1)tools.add(declaration(name));}
-                else if(principal!=null && binding.get("source_config_hash")!=null && adapter()!=null
-                        && (!name.equals("get_device") || !principal.scope().deviceIds().isEmpty())
-                        && (!name.equals("get_work_order") || !principal.scope().projectIds().isEmpty()))tools.add(declaration(name));
-            }
+            List<JsonNode> tools=core().catalog(executionContext(binding,principal));
+            if(skills!=null)tools=skills.filterTools(runId,tools);
             return new Catalog(List.copyOf(tools),MAX_ROUNDS,MAX_CALLS);
         });
     }
     /** Invoked before model text publication and every continuation, including a replayed cached result. */
     public void validatePublish(String runId,int attempt,String leaseToken,long controlEpoch) {
+        if(deviceRun(runId)){deviceTools().validatePublish(runId,attempt,leaseToken,controlEpoch);return;}
         if(!enabled && db.queryForObject("SELECT COUNT(*) FROM agent_tool_run_binding WHERE run_id=?",Long.class,runId)==0)return;
         tx.executeWithoutResult(status->{fence(runId,attempt,leaseToken,controlEpoch);validateBinding(runId);});
     }
     /** Terminal run hook; caller already holds the conversation/run transaction locks. */
     public void cancelPending(String runId) {
+        if(deviceRun(runId)){deviceTools().cancelPending(runId);return;}
         var run=lockRun(runId);
         for(var call:db.queryForList("SELECT * FROM agent_tool_call WHERE run_id=? AND status='running' FOR UPDATE",runId)) {
             db.update("UPDATE agent_tool_call SET status='discarded',error_code='TOOL_RUN_CANCELED',result_json=NULL WHERE id=?",call.get("id"));
@@ -94,6 +101,7 @@ public class AgentToolService {
     }
     private record Reserved(Map<String,Object> row,boolean execute) { }
     public BatchResult submitCalls(String runId,Proposal proposal) {
+        if(deviceRun(runId)){requireEnabled();return deviceTools().submitCalls(runId,proposal);}
         requireEnabled();validateProposal(proposal);
         List<Reserved> reserved=tx.execute(status->{
             var run=fence(runId,proposal.attempt(),proposal.leaseToken(),proposal.controlEpoch());
@@ -101,6 +109,7 @@ public class AgentToolService {
             long previousRound=db.queryForObject("SELECT COALESCE(MAX(round_number),0) FROM agent_tool_call WHERE run_id=? AND run_attempt=?",Long.class,runId,proposal.attempt());
             List<Reserved> result=new ArrayList<>();int newCalls=0;
             for(Call call:proposal.calls()) {
+                skillTool(runId,call.name());
                 if(!registered(call.name()) || local(call.name()) && (!technicalEnabled || n(sourceBinding,"local_tools_allowed")!=1))
                     throw problem(403,"TOOL_NOT_ALLOWED");
                 var existing=db.queryForList("SELECT * FROM agent_tool_call WHERE run_id=? AND provider_call_id=? FOR UPDATE",runId,call.providerCallId());
@@ -140,6 +149,7 @@ public class AgentToolService {
             try {
                 // Dispatch guard is separate from reservation: revocation/cancellation may occur between calls.
                 Principal principal=tx.execute(status->{fence(runId,proposal.attempt(),proposal.leaseToken(),proposal.controlEpoch());
+                    skillTool(runId,(String)item.row().get("tool_name"));
                     if(elapsed(runId)>MAX_ELAPSED_SECONDS*1000L)throw problem(409,"TOOL_TIME_BUDGET_EXCEEDED");return revalidate(binding(runId));});
                 output=execute((String)item.row().get("tool_name"),decode((String)item.row().get("arguments_json")),principal,binding(runId));
                 if(encode(output).getBytes(StandardCharsets.UTF_8).length>MAX_OUTPUT_BYTES)throw problem(502,"TOOL_RESULT_SIZE_LIMIT");
@@ -169,38 +179,21 @@ public class AgentToolService {
         int remaining=MAX_CALLS-db.queryForObject("SELECT COUNT(*) FROM agent_tool_call WHERE run_id=?",Integer.class,runId);
         return new BatchResult(List.copyOf(results),remaining);
     }
+    @Autowired(required=false) private AgentToolExecutionCore executionCore;
+    private AgentToolExecutionCore core() {
+        if(executionCore!=null)return executionCore;
+        var value=new AgentToolExecutionCore(db,json);value.setEnabled(enabled);value.setTechnicalEnabled(technicalEnabled);
+        value.setIdentity(identity);value.setSettings(settings);value.setAdapters(adapters);return value;
+    }
+    private AgentToolExecutionCore.Context executionContext(Map<String,Object> binding,Principal principal) {
+        long cutoff=db.queryForObject("SELECT m.seq FROM ai_run r JOIN ai_message m ON m.id=r.input_message_id WHERE r.id=?",Long.class,binding.get("run_id"));
+        return new AgentToolExecutionCore.Context((String)binding.get("conversation_id"),n(binding,"owner_user_id"),principal,
+                (String)binding.get("source_config_hash"),n(binding,"local_tools_allowed")==1,cutoff);
+    }
     private JsonNode execute(String name,JsonNode arguments,Principal principal,Map<String,Object> binding) {
-        requireEnabled();
-        if(!registered(name))throw problem(403,"TOOL_NOT_ALLOWED");
-        if(local(name)) {
-            if(!technicalEnabled || n(binding,"local_tools_allowed")!=1)throw problem(403,"TOOL_NOT_ALLOWED");
-            return json.createObjectNode().put("protocol_version",1).put("read_only",true).put("technical_acceptance_only",true)
-                    .put("business_records_included",false).put("message","This tool reports fixed server protocol capabilities only.");
-        }
-        if(principal==null || binding.get("source_config_hash")==null || adapter()==null)throw problem(503,"BUSINESS_NOT_CONFIGURED");
-        var read=read(name,arguments);
-        if(name.equals("get_device") && !principal.scope().deviceIds().contains(read.resourceId())
-                || name.equals("get_work_order") && principal.scope().projectIds().isEmpty())throw problem(404,"RESOURCE_NOT_FOUND");
-        var evidence=adapter().read(principal,read);
-        if(evidence==null || !principal.issuer().equals(evidence.issuer()) || !principal.tenant().type().equals(evidence.tenantType())
-                || !principal.tenant().id().equals(evidence.tenantId()) || !read.kind().equals(evidence.resourceType())
-                || evidence.sourceRecordId()==null || !evidence.sourceRecordId().matches("[A-Za-z0-9_.:-]{1,100}")
-                || read.resourceId()!=null && !read.resourceId().equals(evidence.sourceRecordId()) || evidence.observedAt()==null || evidence.data()==null)
-            throw problem(502,"BUSINESS_PROVENANCE_INVALID");
-        ObjectNode result=json.createObjectNode().put("data_is_untrusted",true).put("resource_type",evidence.resourceType())
-                .put("source_record_id",evidence.sourceRecordId()).put("observed_at",evidence.observedAt().toString());
-        result.set("data",sanitize(evidence.data(),0));return result;
+        return core().execute(name,arguments,executionContext(binding,principal));
     }
-    // Explicit data fields only; upstream credentials, headers, actor context and arbitrary properties never enter model context.
-    private static final Set<String> DATA_FIELDS=Set.of("record","references","data","source_record_id","observed_at","received_at","stale","project_ids",
-            "id","name","title","status","type","model","serial_number","location","temperature","temperature_unit","humidity","unit","value",
-            "alarm","alarms","severity","code","message","description","summary","content","text","created_at","updated_at","completed_at","device_id","work_order_id");
-    JsonNode sanitize(JsonNode node,int depth) {
-        if(depth>8)throw problem(502,"TOOL_RESULT_INVALID");
-        if(node.isObject()) {ObjectNode value=json.createObjectNode();node.fields().forEachRemaining(entry->{if(DATA_FIELDS.contains(entry.getKey()))value.set(entry.getKey(),sanitize(entry.getValue(),depth+1));});return value;}
-        if(node.isArray()) {if(node.size()>100)throw problem(502,"TOOL_RESULT_SIZE_LIMIT");var value=json.createArrayNode();node.forEach(item->value.add(sanitize(item,depth+1)));return value;}
-        if(node.isTextual() && node.asText().length()>8000)throw problem(502,"TOOL_RESULT_SIZE_LIMIT");return node.deepCopy();
-    }
+    JsonNode sanitize(JsonNode node,int depth){return core().sanitize(node,depth);}
     public HistoryPage history(Long actor,String conversationId,long before,int limit) {
         if(actor==null)throw problem(401,"AUTHENTICATION_REQUIRED");
         if(before<0 || limit<1 || limit>100)throw problem(400,"INVALID_CURSOR_OR_LIMIT");
@@ -258,12 +251,7 @@ public class AgentToolService {
         } catch(ConversationProblem failure) {if(allowMissing && "BUSINESS_NOT_CONFIGURED".equals(failure.getMessage()))return null;throw failure;}
     }
     private ExternalBusinessAdapter adapter() {var adapter=adapters==null?null:adapters.getIfAvailable();return adapter instanceof ExternalBusinessHttpAdapter?adapter:null;}
-    private boolean registered(String name) {
-        requireName(name);var rows=db.queryForList("SELECT * FROM agent_tool_definition WHERE name=? AND version=1 AND enabled=1",name);
-        if(rows.size()!=1)return false;var row=rows.getFirst();
-        return (local(name)?"technical_local":"external_business").equals(row.get("adapter")) && "read".equals(row.get("operation_class"))
-                && parameters(name).equals(decode((String)row.get("input_schema_json"))) && n(row,"timeout_ms")==5000 && n(row,"max_result_bytes")==MAX_OUTPUT_BYTES;
-    }
+    private boolean registered(String name){return core().registered(name);}
     private void validateProposal(Proposal proposal) {
         if(proposal==null || proposal.attempt()<1 || proposal.controlEpoch()<0 || proposal.round()<1 || proposal.round()>MAX_ROUNDS
                 || proposal.calls()==null || proposal.calls().isEmpty() || proposal.calls().size()>MAX_CALLS)throw problem(400,"TOOL_PROPOSAL_INVALID");
@@ -279,6 +267,7 @@ public class AgentToolService {
         db.update("INSERT INTO ai_conversation_event(id,conversation_id,seq,event_type,data_json) VALUES(?,?,?,?,?)",id(),conversation,seq,"ai.tool."+state,encode(payload));
         db.update("UPDATE ai_conversation SET last_event_seq=? WHERE id=?",seq,conversation);
         db.update("INSERT INTO agent_tool_audit(call_id,conversation_id,event_sequence,state,error_code,elapsed_ms,result_hash) VALUES(?,?,?,?,?,?,?)",call.get("id"),conversation,seq,state,error,elapsed,resultHash);
+        if(publicResults!=null)publicResults.publishRun(run,call,seq,state);
     }
     private long elapsed(String runId) {return db.queryForObject("SELECT COALESCE(TIMESTAMPDIFF(MICROSECOND,MIN(created_at),CURRENT_TIMESTAMP(3))/1000,0) FROM agent_tool_call WHERE run_id=?",Long.class,runId);}
     private ToolResult result(Map<String,Object> row) {

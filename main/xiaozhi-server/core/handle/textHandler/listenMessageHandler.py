@@ -58,6 +58,11 @@ class ListenTextMessageHandler(TextMessageHandler):
             if "text" in msg_json:
                 conn.last_activity_time = time.time() * 1000
                 original_text = msg_json["text"]  # 保留原始文本
+                if getattr(conn, 'esp32_gateway', None):
+                    from esp32_gateway.voice_controls import classify
+                    if classify(original_text):
+                        await startToChat(conn, original_text)
+                        return
                 filtered_len, filtered_text = remove_punctuation_and_length(
                     original_text
                 )

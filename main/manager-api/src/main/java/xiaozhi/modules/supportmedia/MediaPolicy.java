@@ -42,11 +42,11 @@ public class MediaPolicy implements RoomOwnership {
     }
     public void account(long actor) {if(store.rows("SELECT id FROM sys_user WHERE id=? AND status=1 FOR UPDATE",actor).isEmpty())throw problem(404,"MEDIA_NOT_FOUND");}
     public Map<String,Object> profile(long actor,boolean accepting) {
-        var rows=store.rows("SELECT p.* FROM support_agent_profile p JOIN sys_user u ON u.id=p.user_id AND u.status=1 WHERE p.user_id=? AND p.enabled=1 AND p.role IN ('support_agent','expert')"+(accepting?" AND p.accepting=1 AND p.presence_expires_at>CURRENT_TIMESTAMP(3)":"")+" FOR UPDATE",actor);
+        var rows=store.rows("SELECT p.* FROM support_agent_profile p JOIN sys_user u ON u.id=p.user_id AND u.status=1 WHERE p.user_id=? AND p.enabled=1 AND p.role IN ('support_agent','expert')"+(accepting?" AND IF(p.role='expert',p.expert_accepting,p.accepting)=1 AND IF(p.role='expert',p.expert_presence_expires_at,p.presence_expires_at)>CURRENT_TIMESTAMP(3)":"")+" FOR UPDATE",actor);
         if(rows.isEmpty())throw problem(409,"MEDIA_AGENT_UNAVAILABLE");return rows.getFirst();
     }
     public boolean current(Map<String,Object> s) {
-        return !store.rows("SELECT a.id FROM support_assignment a JOIN support_request r ON r.id=a.request_id WHERE a.id=? AND a.request_id=? AND a.agent_user_id=? AND a.released_at IS NULL AND r.status='active' AND r.assigned_agent_user_id=a.agent_user_id FOR UPDATE",s.get("assignment_id"),s.get("request_id"),s.get("agent_user_id")).isEmpty();
+        return !store.rows("SELECT a.id FROM support_assignment a JOIN support_request r ON r.id=a.request_id WHERE a.id=? AND a.request_id=? AND a.agent_user_id=? AND a.released_at IS NULL AND r.status='active' AND r.assigned_agent_user_id=a.agent_user_id AND EXISTS(SELECT 1 FROM support_agent_profile p WHERE p.user_id=a.agent_user_id AND p.enabled=1 AND JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(r.service_type))) FOR UPDATE",s.get("assignment_id"),s.get("request_id"),s.get("agent_user_id")).isEmpty();
     }
     public void currentRequired(Map<String,Object> s){sourceRequired(s);account(number(s,"customer_user_id"));profile(number(s,"agent_user_id"),false);if(!current(s))throw problem(409,"MEDIA_ASSIGNMENT_CHANGED");}
     public void actor(Map<String,Object> s,long actor,boolean targetAllowed) {
@@ -57,8 +57,12 @@ public class MediaPolicy implements RoomOwnership {
         if(transfer!=null && actor==number(transfer,"target_agent_user_id")){account(actor);profile(actor,false);return;}
         throw problem(404,"MEDIA_NOT_FOUND");
     }
-    public void textCapacity(long user) {
-        Map<String,Object> profile=profile(user,true);
+    public void textCapacity(long user, String serviceType) {
+        Map<String,Object> profile=profile(user,false);
+        if(!Set.of("support_agent","expert").contains(serviceType))throw problem(400,"INVALID_SERVICE_TYPE");
+        String prefix="expert".equals(serviceType)?"expert_":"";
+        if(store.rows("SELECT user_id FROM support_agent_profile WHERE user_id=? AND JSON_CONTAINS(COALESCE(roles_json,JSON_ARRAY(role)),JSON_QUOTE(?)) AND "
+                +prefix+"accepting=1 AND "+prefix+"presence_expires_at>CURRENT_TIMESTAMP(3) FOR UPDATE",user,serviceType).isEmpty())throw problem(409,"MEDIA_AGENT_UNAVAILABLE");
         int assignments=store.rows("SELECT id FROM support_assignment WHERE agent_user_id=? AND released_at IS NULL FOR UPDATE",user).size();
         int reserved=store.rows("SELECT id FROM support_media_transfer WHERE target_agent_user_id=? AND active_slot=1 FOR UPDATE",user).size();
         if(assignments+reserved>=number(profile,"capacity_text"))throw problem(409,"AGENT_AT_CAPACITY");
@@ -89,7 +93,7 @@ public class MediaPolicy implements RoomOwnership {
             if(members.size()!=2 || members.stream().anyMatch(m->m.get("consented_at")==null || string(m,"status").equals("revoked")))return false;
             account(number(member,"user_id"));account(number(s,"customer_user_id"));profile(number(s,"agent_user_id"),false);
             // Read-only ownership checks do not acquire locks around network I/O.
-            boolean assignment=!store.rows("SELECT a.id FROM support_assignment a JOIN support_request q ON q.id=a.request_id WHERE a.id=? AND a.released_at IS NULL AND q.status='active' AND q.assigned_agent_user_id=a.agent_user_id AND a.agent_user_id=?"+currentRead,s.get("assignment_id"),s.get("agent_user_id")).isEmpty();
+            boolean assignment=!store.rows("SELECT a.id FROM support_assignment a JOIN support_request q ON q.id=a.request_id WHERE a.id=? AND a.released_at IS NULL AND q.status='active' AND q.assigned_agent_user_id=a.agent_user_id AND a.agent_user_id=? AND EXISTS(SELECT 1 FROM support_agent_profile p WHERE p.user_id=a.agent_user_id AND p.enabled=1 AND JSON_CONTAINS(COALESCE(p.roles_json,JSON_ARRAY(p.role)),JSON_QUOTE(q.service_type)))"+currentRead,s.get("assignment_id"),s.get("agent_user_id")).isEmpty();
             if(!assignment)return false;
             if(preparation)profile(number(pending,"target_agent_user_id"),false);
             return true;

@@ -68,7 +68,7 @@ export default {
 
 .beian-text {
   color: #000;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   vertical-align: middle;
 }
 </style>

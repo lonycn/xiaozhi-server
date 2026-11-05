@@ -45,7 +45,7 @@ class AgentToolPersistenceTest {
                 migration.update(new Contexts());migration.update(new Contexts());
             }
         }
-        assertEquals(4,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
+        assertEquals(6,db.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
     }
     @BeforeEach void fixture() {
         owner=users.incrementAndGet();db.update("INSERT INTO sys_user(id,status,username) VALUES(?,1,?)",owner,"agent-test-"+owner);

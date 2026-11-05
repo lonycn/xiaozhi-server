@@ -1137,13 +1137,14 @@ TTS:
   AliBLTTS:
     # 阿里百炼CosyVoice大模型流式文本语音合成
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
-    # cosyvoice-v3和部分音色需要申请开通
+    # 请先在当前业务空间开通模型，并验证模型与音色组合可用
     type: alibl_stream
     api_key: 你的api_key
     # 默认兼容旧地址；业务空间请替换为 wss://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference
     ws_url: wss://dashscope.aliyuncs.com/api-ws/v1/inference/
-    model: "cosyvoice-v2"
-    voice: "longcheng_v2"
+    model: "cosyvoice-v3.5-flash"
+    # 龙安台：嗲甜台湾女，20~25岁，普通话/英文；支持 SSML、时间戳，不支持 Instruct
+    voice: "longantai_v3"
     output_dir: tmp/
     # 以下可不用设置，使用默认设置
     # format: pcm  # 音频格式：pcm、wav、mp3、opus

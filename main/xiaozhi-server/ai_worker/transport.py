@@ -50,6 +50,16 @@ class Manager:
         return await self.post('runs/' + task['run_id'] + '/' + action,
                                {'lease_token': task['lease_token'], **body}, retry=action != 'heartbeat')
 
+    async def usage(self, task, records):
+        run_id, attempt, lease = task.get('run_id'), task.get('attempt'), task.get('lease_token')
+        if (not isinstance(run_id, str) or not re.fullmatch(r'[a-f0-9]{32}', run_id)
+                or type(attempt) is not int or not 1 <= attempt <= 3
+                or not isinstance(lease, str) or not re.fullmatch(r'[a-f0-9]{64}', lease)
+                or not isinstance(records, list) or not 1 <= len(records) <= 4):
+            raise ControlError()
+        return await self.post('runs/' + run_id + '/usage', dict(lease_token=lease, attempt=attempt,
+                                                               provider_requests=records))
+
     async def tools(self, task, round_number, calls, maximum):
         # Only this fixed authenticated endpoint. No provider URL/function can reach transport.
         # Manager serializes Java long identifiers/epochs as decimal strings. Proposals use

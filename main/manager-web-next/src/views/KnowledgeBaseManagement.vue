@@ -723,7 +723,7 @@ export default {
 
 .page-title {
   font-weight: 500;
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   margin: 0;
 }
 
@@ -772,7 +772,7 @@ export default {
 }
 
 .kb-section-title {
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   font-weight: 500;
   color: #1f2a44;
 }
@@ -811,7 +811,7 @@ export default {
   cursor: pointer;
   transition: all 0.2s;
   color: #2f5bff;
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
 
   &:hover {
     border-color: #2f5bff;
@@ -867,7 +867,7 @@ export default {
 
 .kb-card-warning {
   color: #e6a23c;
-  font-size: 16px;
+  font-size: var(--admin-font-md);
   cursor: pointer;
   vertical-align: middle;
   margin-left: 6px;
@@ -898,7 +898,7 @@ export default {
   justify-content: center;
   cursor: pointer;
   color: #6b7280;
-  font-size: 13px;
+  font-size: var(--admin-font-base);
   transition: all 0.2s;
   padding: 0;
 
@@ -918,7 +918,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: var(--admin-font-xl);
   flex-shrink: 0;
 
   &.blue {
@@ -956,7 +956,7 @@ export default {
 }
 
 .kb-card-name {
-  font-size: 18px;
+  font-size: var(--admin-font-lg);
   font-weight: 500;
   color: #1f2a44;
   margin-bottom: 6px;
@@ -967,7 +967,7 @@ export default {
 }
 
 .kb-card-desc {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   text-align: left;
   color: #7888a8;
   line-height: 1.5;
@@ -985,7 +985,7 @@ export default {
 }
 
 .kb-card-meta {
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: #a0aec0;
 }
 
@@ -997,10 +997,10 @@ export default {
   min-height: 120px;
   width: 100%;
   color: #b0bbc9;
-  font-size: 14px;
+  font-size: var(--admin-font-base);
 
   i {
-    font-size: 36px;
+    font-size: var(--admin-font-illustration);
     margin-bottom: 8px;
   }
 }
@@ -1045,7 +1045,7 @@ export default {
   margin-bottom: 10px;
   p {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     strong {
       color: #374151;
     }
@@ -1076,7 +1076,7 @@ export default {
 }
 
 .content-text {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   line-height: 1.6;
   color: #333;
   white-space: pre-wrap;
@@ -1108,7 +1108,7 @@ export default {
 
   h4 {
     margin: 0 0 12px 0;
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     font-weight: 600;
     color: #606266;
   }
@@ -1141,11 +1141,11 @@ export default {
     .el-icon-document {
       color: #409eff;
       margin-right: 8px;
-      font-size: 16px;
+      font-size: var(--admin-font-md);
     }
 
     .file-name {
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       color: #303133;
       margin-right: 12px;
       overflow: hidden;
@@ -1155,7 +1155,7 @@ export default {
     }
 
     .file-size {
-      font-size: 12px;
+      font-size: var(--admin-font-xs);
       color: #909399;
     }
   }
@@ -1206,12 +1206,12 @@ export default {
       align-items: center;
 
       .chunk-similarity {
-        // font-size: 12px;
+        // font-size: var(--admin-font-xs);
         color: #409eff;
         white-space: nowrap;
 
         .similarity-label {
-          // font-size: 12px;
+          // font-size: var(--admin-font-xs);
           color: #333;
           margin-bottom: 4px;
         }
@@ -1219,7 +1219,7 @@ export default {
         .similarity-value {
           text-align: left;
           margin-top: 4px;
-          font-size: 16px;
+          font-size: var(--admin-font-md);
           font-weight: 600;
           margin-bottom: 12px;
         }
@@ -1250,7 +1250,7 @@ export default {
         margin-bottom: 8px;
 
         .chunk-source {
-          font-size: 14px;
+          font-size: var(--admin-font-base);
           font-weight: 600;
         }
 
@@ -1270,7 +1270,7 @@ export default {
         border-radius: 4px;
         // max-height: 150px;
         // overflow-y: auto;
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         line-height: 1.6;
         // white-space: pre-wrap;
         // word-break: break-word;
@@ -1287,7 +1287,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

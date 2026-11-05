@@ -4,6 +4,7 @@ import uuid
 import random
 import asyncio
 from typing import TYPE_CHECKING
+from core.esp32_protocol import ProtocolError, validate_hello
 from config.logger import setup_logging
 
 if TYPE_CHECKING:
@@ -47,6 +48,12 @@ _wakeup_response_lock = asyncio.Lock()
 
 async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
     """处理hello消息"""
+    try:
+        validate_hello(msg_json, mqtt_gateway=getattr(conn, "conn_from_mqtt_gateway", False))
+    except ProtocolError as exc:
+        await conn.websocket.close(code=1008, reason=str(exc))
+        return
+    conn.esp32_hello_complete = True
     audio_params = msg_json.get("audio_params")
     if audio_params:
         format = audio_params.get("format")
@@ -71,6 +78,19 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
         asyncio.create_task(send_mcp_initialize_message(conn))
         # 并发预发 tools/list，让帧排在 audio 流之前到达 client
         asyncio.create_task(send_mcp_tools_list_request(conn))
+
+    # Optional trusted integration never takes an endpoint from device messages.
+    gateway_config = getattr(conn, "config", {}).get("server", {}).get("esp32", {})
+    if gateway_config.get("enabled", False) is True:
+        if getattr(conn, "esp32_gateway", None):
+            await conn.websocket.close(code=1008, reason="duplicate hello")
+            return
+        from esp32_gateway.runtime import GatewayRuntime
+        try:
+            conn.esp32_gateway = GatewayRuntime(conn, gateway_config)
+            conn.esp32_gateway.spawn(conn.esp32_gateway.start())
+        except (TypeError, ValueError):
+            await conn.websocket.close(code=1011, reason="ESP32 gateway configuration invalid")
 
 
 async def checkWakeupWords(conn: "ConnectionHandler", text):

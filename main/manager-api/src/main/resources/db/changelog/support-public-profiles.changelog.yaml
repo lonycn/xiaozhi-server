@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611041400-support-public-profiles
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: 202611041400-support-public-profiles.sql
+            relativeToChangelogFile: true

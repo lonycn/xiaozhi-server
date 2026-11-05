@@ -1,0 +1,30 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611052000-model-test-runs
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE ai_model_test_run (
+                id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+                model_id VARCHAR(32) NOT NULL,
+                actor_id BIGINT NOT NULL,
+                request_id VARCHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                model_type VARCHAR(20) NOT NULL,
+                provider VARCHAR(80) NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                scope VARCHAR(30) NOT NULL,
+                summary TEXT NOT NULL,
+                error_code VARCHAR(100) NULL,
+                duration_ms BIGINT NULL,
+                result_json JSON NULL,
+                logs_json JSON NOT NULL,
+                audio_available TINYINT NOT NULL DEFAULT 0,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                started_at DATETIME(3) NULL,
+                updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                UNIQUE KEY uk_model_test_request(actor_id, request_id),
+                KEY ix_model_test_history(model_id, actor_id, created_at),
+                CHECK(status IN ('queued','running','succeeded','failed','checked','unsupported'))
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -1,0 +1,180 @@
+openapi: 3.0.3
+info:
+  title: Xiaozhi AI interaction A0
+  version: '1.0'
+  description: >-
+    Additive App capability and public result DTO implemented in this change.
+    The feature is disabled by default and deployment must be verified separately.
+    Realtime supplemental material routes are described separately in AI_REALTIME_MATERIALS_OPENAPI_20261102.yaml.
+paths:
+  /api/v1/app/capabilities:
+    get:
+      summary: Read authenticated capability configuration
+      x-implementation-status: implemented-in-this-change
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Configuration snapshot, not provider health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityEnvelope'
+        '401':
+          description: Authentication required
+  /api/v1/ai/conversations/{id}/context:
+    get:
+      summary: Read the latest authorized extractive conversation context
+      x-implementation-status: implemented-in-this-change
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[a-f0-9]{32}$'}
+      responses:
+        '200': {description: Authorized extractive context, or available false if no snapshot exists}
+        '401': {description: Authentication required}
+        '404': {description: Feature disabled or resource unavailable}
+        '503': {description: Evidence store unavailable}
+  /api/v1/ai/conversations/{id}/tool-results:
+    get:
+      summary: Read authorized public tool results
+      x-implementation-status: implemented-in-this-change
+      description: >-
+        Availability requires enabling the feature and deployment. Results are
+        immutable, descending by sequence, and retain server owner, staff cutoff, source and token authorization.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[a-f0-9]{32}$'}
+        - name: before
+          in: query
+          schema: {$ref: '#/components/schemas/DecimalSequence'}
+          description: Exact next_cursor of previous page; initial value 0.
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Authorized public results
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResultPageEnvelope'}
+        '401': {description: Authentication required or expired}
+        '403': {description: Permission or source authorization denied}
+        '404': {description: Resource absent, hidden, or feature unavailable}
+        '409': {description: Current authorization or state changed}
+        '503': {description: Dependency unavailable; do not fabricate results}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+  schemas:
+    DecimalSequence:
+      type: string
+      pattern: '^[0-9]+$'
+      description: Decimal text; preserve without conversion to floating point.
+    CapabilityState:
+      type: object
+      required: [status, implementation]
+      properties:
+        status: {type: string, enum: [disabled, unconfigured, configured, verification_required]}
+        implementation: {type: string, enum: [implemented, planned]}
+    CapabilityEnvelope:
+      type: object
+      required: [code, msg, data]
+      properties:
+        code: {type: integer, example: 0}
+        msg: {type: string}
+        data:
+          type: object
+          required: [contract_version, features, limits, errors, notes, interaction]
+          properties:
+            contract_version: {type: string, example: '1.0'}
+            features: {type: object, additionalProperties: {type: boolean}}
+            limits: {type: object, additionalProperties: true}
+            errors: {type: object, additionalProperties: true}
+            notes: {type: array, items: {type: string}}
+            interaction:
+              type: object
+              required: [protocol_version, capabilities, attachment_inputs, realtime, availability_basis]
+              properties:
+                protocol_version: {type: string, example: '1.0'}
+                availability_basis: {type: string, enum: [configuration_only]}
+                capabilities: {type: object, additionalProperties: {$ref: '#/components/schemas/CapabilityState'}}
+                attachment_inputs: {type: object, additionalProperties: true}
+                realtime: {type: object, additionalProperties: true}
+    Citation:
+      type: object
+      required: [id, kind, title, source_ref]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [message, attachment, business, technical]}
+        title: {type: string}
+        source_ref:
+          type: object
+          additionalProperties: false
+          properties:
+            conversation_id: {type: string}
+            message_id: {type: string}
+            attachment_id: {type: string}
+            resource_type: {type: string}
+            record_id: {type: string}
+        locator:
+          type: object
+          additionalProperties: false
+          properties:
+            page: {type: integer, minimum: 1}
+            time_ms: {type: integer, minimum: 0}
+    PublicResult:
+      type: object
+      required: [kind, data, citations]
+      properties:
+        kind: {type: string, enum: [technical, business, conversation_evidence]}
+        data:
+          type: object
+          description: Tool-specific allowlisted data only; no arbitrary provider output.
+          additionalProperties: true
+        data_is_untrusted: {type: boolean, description: Source data is not an instruction or verified fact.}
+        citations: {type: array, items: {$ref: '#/components/schemas/Citation'}}
+        observed_at: {type: string, format: date-time, nullable: true}
+        stale: {type: boolean}
+        truncated: {type: boolean}
+    ToolResult:
+      type: object
+      required: [sequence, event_sequence, tool_call_id, execution_type, name, version, status, result_access, result, retryable, created_at]
+      properties:
+        sequence: {$ref: '#/components/schemas/DecimalSequence'}
+        event_sequence: {$ref: '#/components/schemas/DecimalSequence'}
+        tool_call_id: {type: string}
+        execution_type: {type: string, enum: [run, realtime]}
+        run_id: {type: string, nullable: true}
+        session_id: {type: string, nullable: true}
+        response_id: {type: string, nullable: true}
+        name: {type: string}
+        version: {type: integer, minimum: 1}
+        status: {type: string, enum: [succeeded, failed]}
+        result_access: {type: string, enum: [available, restricted]}
+        result:
+          allOf: [{$ref: '#/components/schemas/PublicResult'}]
+          nullable: true
+        error_code: {type: string, nullable: true}
+        retryable: {type: boolean}
+        created_at: {type: string, format: date-time, description: ISO-8601 UTC timestamp.}
+    ResultPageEnvelope:
+      type: object
+      required: [code, msg, data]
+      properties:
+        code: {type: integer, example: 0}
+        msg: {type: string}
+        data:
+          type: object
+          required: [items, next_cursor, has_more]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/ToolResult'}}
+            next_cursor: {$ref: '#/components/schemas/DecimalSequence'}
+            has_more: {type: boolean}

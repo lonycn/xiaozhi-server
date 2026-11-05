@@ -643,7 +643,7 @@ export default {
   overflow-y: auto;
   scrollbar-width: thin;
   .agent-name {
-    font-size: 14px;
+    font-size: var(--admin-font-base);
     font-weight: 500;
     color: #686f85;
     text-align: left;
@@ -695,7 +695,7 @@ export default {
         flex: 1;
         min-width: 0;
         .device-name {
-          font-size: 14px;
+          font-size: var(--admin-font-base);
           color: #686f85;
           text-align: left;
           line-height: 16px;
@@ -710,13 +710,13 @@ export default {
         align-items: center;
 
         .device-id {
-          font-size: 12px;
+          font-size: var(--admin-font-xs);
           line-height: 16px;
           color: #909399;
         }
 
         .device-status {
-          font-size: 12px;
+          font-size: var(--admin-font-xs);
           line-height: 16px;
           padding: 2px 8px;
           border-radius: 4px;
@@ -802,14 +802,14 @@ export default {
 
     .device-name-text {
       line-height: 34px;
-      font-size: 24px;
+      font-size: var(--admin-font-xl);
       color: #3d4566;
       cursor: pointer;
     }
 
     .alias-input {
       height: 28px;
-      font-size: 24px;
+      font-size: var(--admin-font-xl);
       font-weight: 600;
       color: #3d4566;
       border: 1px solid #6b8cff;
@@ -822,7 +822,7 @@ export default {
     i {
       cursor: pointer;
       color: #6b8cff;
-      font-size: 18px;
+      font-size: var(--admin-font-lg);
 
       &:hover {
         color: #a966ff;
@@ -831,7 +831,7 @@ export default {
   }
 
   .device-mac {
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
     color: #686f85;
     margin-bottom: 4px;
     text-align: left;
@@ -840,7 +840,7 @@ export default {
   .device-status {
     display: flex;
     margin-top: 4px;
-    font-size: 12px;
+    font-size: var(--admin-font-xs);
     color: #686f85;
     text-align: left;
     gap: 4px;
@@ -894,7 +894,7 @@ export default {
     border: 1px solid #eaedf4;
 
     i {
-      font-size: 28px;
+      font-size: var(--admin-font-illustration);
       color: #6b8cff;
       flex-shrink: 0;
     }
@@ -903,13 +903,13 @@ export default {
       text-align: left;
 
       .stat-label {
-        font-size: 12px;
+        font-size: var(--admin-font-xs);
         color: #909399;
         margin-bottom: 10px;
       }
 
       .stat-value {
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         color: #3d4566;
         font-weight: 500;
       }
@@ -924,7 +924,7 @@ export default {
         }
 
         .stat-edit-icon {
-          font-size: 14px;
+          font-size: var(--admin-font-base);
           color: #909399;
           cursor: pointer;
           &:hover {
@@ -934,7 +934,7 @@ export default {
       }
 
       .stat-edit-input {
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         color: #3d4566;
         font-weight: 500;
         border: 1px solid #6b8cff;
@@ -966,14 +966,14 @@ export default {
       text-align: left;
 
       h3 {
-        font-size: 24px;
+        font-size: var(--admin-font-xl);
         font-weight: 500;
         color: #3d4566;
         margin: 0 0 10px 0;
       }
 
       .section-desc {
-        font-size: 12px;
+        font-size: var(--admin-font-xs);
         color: #909399;
         margin: 0;
       }
@@ -1065,7 +1065,7 @@ export default {
     text-align: left;
 
     .permission-name {
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       color: #3d4566;
       white-space: nowrap;
       overflow: hidden;
@@ -1086,7 +1086,7 @@ export default {
 
       .permission-edit-btn {
         margin-right: 24px;
-        font-size: 14px;
+        font-size: var(--admin-font-base);
         color: #909399;
         cursor: pointer;
         flex-shrink: 0;
@@ -1097,7 +1097,7 @@ export default {
     }
 
     .permission-id {
-      font-size: 12px;
+      font-size: var(--admin-font-xs);
       color: #909399;
       white-space: nowrap;
       overflow: hidden;
@@ -1106,7 +1106,7 @@ export default {
     }
 
     .permission-status {
-      font-size: 12px;
+      font-size: var(--admin-font-xs);
 
       &.online {
         color: #67c23a;
@@ -1120,7 +1120,7 @@ export default {
 }
 
 .permission-edit-input {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   color: #3d4566;
   border: 1px solid #6b8cff;
   border-radius: 4px;
@@ -1136,14 +1136,14 @@ export default {
 }
 
 .main-title {
-  font-size: 24px;
+  font-size:var(--admin-font-title);
   font-weight: 500;
   color: #3d4566;
   margin: 0 0 8px 0;
 }
 
 .sub-title {
-  font-size: 14px;
+  font-size: var(--admin-font-base);
   color: #a6aebe;
   margin: 0;
 }
@@ -1196,7 +1196,7 @@ export default {
     transition: transform 0.3s ease;
 
     i {
-      font-size: 14px;
+      font-size: var(--admin-font-base);
     }
   }
 
@@ -1208,7 +1208,7 @@ export default {
     flex: 1;
 
     .agent-name {
-      font-size: 14px;
+      font-size: var(--admin-font-base);
       font-weight: 600;
       color: #3d4566;
       text-align: left;
@@ -1256,12 +1256,12 @@ export default {
   color: #909399;
 
   .empty-icon {
-    font-size: 60px;
+    font-size: var(--admin-font-illustration-xl);
     margin-bottom: 20px;
   }
 
   p {
-    font-size: 16px;
+    font-size: var(--admin-font-md);
   }
 }
 
@@ -1294,7 +1294,7 @@ export default {
 .admin-page { min-width: 0; min-height: 0; width: 100%; height: 100%; background: transparent; }
 .admin-page .operation-header, .admin-page .operation-bar { flex-wrap: wrap; gap: 12px; }
 .admin-page .right-operations { flex-wrap: wrap; }
-.admin-page .page-title { font-size: 20px; font-weight: 600; color: #263445; }
+.admin-page .page-title { font-size:var(--admin-font-title); font-weight: 600; color: #263445; }
 .admin-page .main-wrapper { min-height: 0; min-width: 0; flex: 1; }
 .admin-page .content-panel, .admin-page .content-area { min-width: 0; min-height: 0; }
 .admin-page .content-panel { border-radius: 6px; border: 1px solid #e5e9ef; background: #fff; }

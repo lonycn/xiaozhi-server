@@ -99,20 +99,20 @@ export default {
 .device-item:last-child { border-bottom: 0; }
 .device-item:hover { background: #fafbfd; }
 .agent-identity { display: flex; gap: 12px; align-items: center; min-width: 0; }
-.agent-avatar { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 8px; background: #edf4ff; color: #3b76dc; display: grid; place-items: center; font-size: 24px; }
+.agent-avatar { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 8px; background: #edf4ff; color: #3b76dc; display: grid; place-items: center; font-size: var(--admin-font-xl); }
 .agent-identity-copy { min-width: 0; }
-.device-item-title { margin: 0 0 6px; color: #263445; font-size: 15px; line-height: 1.4; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-item-title { margin: 0 0 6px; color: #263445; font-size: var(--admin-font-base); line-height: 1.4; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
-.agent-device-count { font-size: 12px; color: #8b95a5; }
+.agent-device-count { font-size: var(--admin-font-xs); color: #8b95a5; }
 .agent-models { min-width: 0; }
-.device-name { display: flex; align-items: baseline; gap: 10px; margin: 5px 0; font-size: 12px; }
+.device-name { display: flex; align-items: baseline; gap: 10px; margin: 5px 0; font-size: var(--admin-font-xs); }
 .device-name span { color: #8b95a5; flex-shrink: 0; }
 .device-name strong { font-weight: 400; color: #566477; overflow-wrap: anywhere; }
-.version-info { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: #65758a; }
+.version-info { display: flex; flex-direction: column; gap: 8px; font-size: var(--admin-font-xs); color: #65758a; }
 .version-info > :first-child { color: #8b95a5; }
 .agent-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 14px; }
-.agent-actions .el-button { margin: 0; font-size: 12px; }
-.agent-delete { padding: 4px; font-size: 15px !important; }
+.agent-actions .el-button { margin: 0; font-size: var(--admin-font-xs); }
+.agent-delete { padding: 4px; font-size: var(--admin-font-base) !important; }
 @media (max-width: 1200px) { .device-item { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1.1fr) minmax(210px, 1fr); } .version-info { grid-column: 2; grid-row: 2; flex-direction: row; } .agent-actions { grid-column: 3; grid-row: 1 / span 2; } }
 @media (max-width: 760px) { .device-item { grid-template-columns: 1fr; gap: 14px; padding: 20px 16px; } .version-info, .agent-actions { grid-column: auto; grid-row: auto; } .agent-actions { justify-content: flex-start; } }
 </style>

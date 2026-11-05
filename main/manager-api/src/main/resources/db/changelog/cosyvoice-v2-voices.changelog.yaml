@@ -1,0 +1,8 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611021200-cosyvoice-v2-voices
+      author: codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202611021200-cosyvoice-v2-voices.sql

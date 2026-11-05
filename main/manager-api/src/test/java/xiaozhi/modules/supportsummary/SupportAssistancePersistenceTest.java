@@ -66,9 +66,9 @@ class SupportAssistancePersistenceTest extends SupportSummaryPersistenceTest {
     }
     @Test void transferAndReassignmentFenceOldTaskEvenForSameAgent() {
         String id=assigned();var job=start(id);var task=assistance.claim("summary-test-worker");String request=jdbc.queryForObject("SELECT id FROM support_request WHERE conversation_id=?",String.class,id);
-        support.requeue(3L,request,new EndRequest("transfer"),false);claim(4,request);
+        support.transfer(3L,request,new Transfer(UUID.randomUUID().toString(),"expert",4L,"transfer"));claim(4,request);
         assertEquals(409,error(()->assistance.complete(task.id(),result(task))));assertEquals(404,error(()->assistance.get(3L,id,job.id())));
-        support.requeue(4L,request,new EndRequest("return"),false);claim(3,request);
+        support.transfer(4L,request,new Transfer(UUID.randomUUID().toString(),"support_agent",3L,"return"));claim(3,request);
         assertNull(assistance.latest(3L,id).latestJob());assertEquals(404,error(()->assistance.get(3L,id,job.id())));assertEquals(1,latest(3,id).version());
     }
     @Test void revokedProfileBlocksHeartbeatAndLateWrites() {

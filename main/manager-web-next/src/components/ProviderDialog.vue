@@ -366,7 +366,7 @@ export default {
     justify-content: space-between;
     margin-bottom: 15px;
     .field-config-title {
-      font-size: 16px;
+      font-size: var(--admin-font-md);
       font-weight: 600;
       color: #3d4566;
     }

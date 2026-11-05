@@ -6,6 +6,7 @@ from aiohttp import web, WSMsgType
 from .control import Manager, AuthorityLost, Fault
 from .provider import Provider
 from .session import Session
+from .capture import PROTOCOL
 
 
 class Server:
@@ -36,7 +37,8 @@ class Server:
                 frame = await asyncio.wait_for(browser.receive(), self.config.auth_timeout_seconds)
                 if frame.type != WSMsgType.TEXT or len(frame.data) > 1024: raise ValueError()
                 event = json.loads(frame.data)
-                if (not isinstance(event, dict) or set(event) != {'type','ticket'} or event.get('type') != 'connect'
+                if (not isinstance(event, dict) or set(event) not in ({'type','ticket'},{'type','ticket','capture_protocol'})
+                        or 'capture_protocol' in event and event['capture_protocol']!=PROTOCOL or event.get('type') != 'connect'
                         or not isinstance(event.get('ticket'), str)
                         or not re.fullmatch(r'[A-Za-z0-9_-]{32,256}', event['ticket'])): raise ValueError()
             except (asyncio.TimeoutError, ValueError, TypeError):
@@ -44,7 +46,7 @@ class Server:
                 return browser
             try:
                 task = await self.manager.consume(event['ticket'])
-                session = Session(self.config, self.manager, self.provider, browser, task)
+                session = Session(self.config, self.manager, self.provider, browser, task,event.get('capture_protocol'))
             except (AuthorityLost, Fault):
                 await browser.send_json({'type':'error','code':'AUTHENTICATION_REQUIRED'})
                 return browser

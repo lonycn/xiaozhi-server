@@ -9,7 +9,7 @@ import websockets
 
 from typing import Callable, Any
 from config.logger import setup_logging
-from core.utils.tts import MarkdownCleaner
+from core.utils.tts import MarkdownCleaner, convert_percentage_to_range
 from core.utils.alibl_endpoint import build_ws_connect_options, resolve_ws_url
 from core.providers.tts.base import TTSProviderBase
 from core.providers.tts.dto.dto import SentenceType, ContentType, InterfaceType
@@ -43,8 +43,9 @@ class TTSProvider(TTSProviderBase):
         self.last_active_time = None
 
         # 模型和音色配置
-        self.model = config.get("model", "cosyvoice-v2")
-        self.voice = config.get("voice", "longxiaochun_v2")  # 默认音色
+        self.model = config.get("model", "cosyvoice-v3.5-flash")
+        default_voice = "longxiaochun_v2" if self.model == "cosyvoice-v2" else "longantai_v3"
+        self.voice = config.get("voice", default_voice)  # 默认龙安台；保留显式 v2 配置
         if config.get("private_voice"):
             self.voice = config.get("private_voice")
 
@@ -88,7 +89,7 @@ class TTSProvider(TTSProviderBase):
                 additional_headers=self.header,
                 ping_interval=30,
                 ping_timeout=10,
-                close_timeout=10,
+                close_timeout=1,
                 **self.ws_connect_options,
             )
 
@@ -128,6 +129,7 @@ class TTSProvider(TTSProviderBase):
                 )
 
                 if message.sentence_type == SentenceType.FIRST:
+                    self.current_sentence_id = message.sentence_id
                     # 重置流式处理状态
                     self.reset_stream_state()
                     # 初始化会话
@@ -138,7 +140,7 @@ class TTSProvider(TTSProviderBase):
 
                         logger.bind(tag=TAG).debug("开始启动TTS会话...")
                         future = asyncio.run_coroutine_threadsafe(
-                            self.start_session(self.conn.sentence_id),
+                            self.start_session(message.sentence_id, message.voice_profile),
                             loop=self.conn.loop,
                         )
                         future.result(timeout=self.tts_timeout)
@@ -229,13 +231,19 @@ class TTSProvider(TTSProviderBase):
                 self.ws = None
             raise
 
-    async def start_session(self, session_id):
+    async def start_session(self, session_id, voice_profile=None):
         """启动TTS会话"""
         logger.bind(tag=TAG).debug(f"开始会话～～{session_id}")
+        started_at = time.monotonic()
         try:
-            # 上个会话处于激活状态时关闭上个连接新建链接
-            if self.activate_session:
+            # Binary TTS frames carry no task id. Use a fresh transport and codec
+            # state for every sentence, including after a normally finished task.
+            if self.ws is not None or self._monitor_task is not None:
                 await self.close()
+            previous_closed_at = time.monotonic()
+            self.current_sentence_id = session_id
+            if getattr(self, "opus_encoder", None) is not None:
+                self.opus_encoder.reset_state()
 
             # 设置会话激活标志
             self.activate_session = True
@@ -246,7 +254,15 @@ class TTSProvider(TTSProviderBase):
             # 启动监听任务
             if self._monitor_task is None or self._monitor_task.done():
                 logger.bind(tag=TAG).debug("启动监听任务...")
-                self._monitor_task = asyncio.create_task(self._start_monitor_tts_response())
+                self._monitor_task = asyncio.create_task(self._start_monitor_tts_response(session_id, self.ws))
+
+            # A role belongs to this sentence. Keep connection defaults intact.
+            role = voice_profile or {}
+            adjustments = {}
+            for key, name, minimum, maximum, base, transform in self.TTS_PARAM_CONFIG:
+                if key in role:
+                    value = convert_percentage_to_range(role[key], minimum, maximum, base)
+                    adjustments[name] = transform(value) if transform else value
 
             # 发送run-task消息启动会话
             run_task_message = {
@@ -259,15 +275,15 @@ class TTSProvider(TTSProviderBase):
                     "task_group": "audio",
                     "task": "tts",
                     "function": "SpeechSynthesizer",
-                    "model": self.model,
+                    "model": role.get("model", self.model),
                     "parameters": {
                         "text_type": "PlainText",
-                        "voice": self.voice,
+                        "voice": role.get("voice", self.voice),
                         "format": self.format,
                         "sample_rate": self.conn.sample_rate,
-                        "volume": self.volume,
-                        "rate": self.rate,
-                        "pitch": self.pitch,
+                        "volume": adjustments.get("volume", self.volume),
+                        "rate": adjustments.get("rate", self.rate),
+                        "pitch": adjustments.get("pitch", self.pitch),
                     },
                     "input": {}
                 },
@@ -276,6 +292,12 @@ class TTSProvider(TTSProviderBase):
             await self.ws.send(json.dumps(run_task_message))
             self.last_active_time = time.time()
             logger.bind(tag=TAG).debug("会话启动请求已发送")
+            if voice_profile:
+                logger.bind(tag=TAG).info(
+                    f"ESP32 CosyVoice task sent: sentence={session_id} voice={role['voice']} "
+                    f"previous_close_ms={int((previous_closed_at - started_at) * 1000)} "
+                    f"ready_ms={int((time.monotonic() - started_at) * 1000)}"
+                )
         except Exception as e:
             logger.bind(tag=TAG).error(f"启动会话失败: {str(e)}")
             await self.close()
@@ -333,12 +355,18 @@ class TTSProvider(TTSProviderBase):
                 logger.bind(tag=TAG).warning(f"取消监听任务错误: {e}")
         self._monitor_task = None
 
-    async def _start_monitor_tts_response(self):
+    async def _start_monitor_tts_response(self, sentence_id=None, source_ws=None):
         """监听TTS响应 - 长期运行"""
+        bound_id = sentence_id if sentence_id is not None else self.conn.sentence_id
+        bound_ws = source_ws if source_ws is not None else self.ws
+        started_at = time.monotonic()
+        first_audio = True
         try:
             while not self.conn.stop_event.is_set():
                 try:
-                    msg = await self.ws.recv()
+                    msg = await bound_ws.recv()
+                    if bound_ws is not self.ws or bound_id != self.conn.sentence_id:
+                        continue
                     self.last_active_time = time.time()
 
                     if isinstance(msg, str):  # JSON控制消息
@@ -363,13 +391,13 @@ class TTSProvider(TTSProviderBase):
                                     original_text = output.get("original_text")
                                     self.tts_text = self._restore_original_text(original_text)
                                     logger.bind(tag=TAG).debug(f"句子语音生成开始: {self.tts_text}")
-                                    self.tts_audio_queue.put((SentenceType.FIRST, [], self.tts_text))
+                                    self.tts_audio_queue.put((SentenceType.FIRST, [], self.tts_text, bound_id))
                                 elif output.get("type") == "sentence-end":
                                     logger.bind(tag=TAG).info(f"句子语音生成成功： {self.tts_text}")
                             elif event == "task-finished":
                                 logger.bind(tag=TAG).debug("TTS任务完成~")
                                 self.activate_session = False
-                                self._process_before_stop_play_files()
+                                self._process_before_stop_play_files(bound_id)
                             elif event == "task-failed":
                                 error_code = header.get("error_code", "unknown")
                                 error_message = header.get("error_message", "未知错误")
@@ -380,8 +408,15 @@ class TTSProvider(TTSProviderBase):
                         except json.JSONDecodeError:
                             logger.bind(tag=TAG).warning("收到无效的JSON消息")
                     elif isinstance(msg, (bytes, bytearray)):
+                        if first_audio:
+                            first_audio = False
+                            if getattr(self.conn, "esp32_gateway", None):
+                                logger.bind(tag=TAG).info(
+                                    f"ESP32 CosyVoice first audio: sentence={bound_id} "
+                                    f"synthesis_ms={int((time.monotonic() - started_at) * 1000)}"
+                                )
                         self.opus_encoder.encode_pcm_to_opus_stream(
-                            msg, False, callback=self.handle_opus
+                            msg, False, callback=lambda packet: self.handle_opus(packet, bound_id)
                         )
                 except websockets.ConnectionClosed:
                     logger.bind(tag=TAG).warning("WebSocket连接已关闭")

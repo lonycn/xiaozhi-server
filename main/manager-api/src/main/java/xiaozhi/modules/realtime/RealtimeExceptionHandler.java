@@ -9,7 +9,8 @@ import xiaozhi.common.utils.Result;
 import xiaozhi.modules.conversation.ConversationProblem;
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes={RealtimeController.class,RealtimeWorkerController.class})
+@RestControllerAdvice(assignableTypes={RealtimeController.class,RealtimeWorkerController.class,xiaozhi.modules.realtimetool.RealtimeToolController.class,
+        xiaozhi.modules.realtimeinput.RealtimeInputController.class,xiaozhi.modules.realtimeinput.RealtimeInputWorkerController.class})
 public class RealtimeExceptionHandler {
     @ExceptionHandler(ConversationProblem.class) public ResponseEntity<Result<Void>> problem(ConversationProblem error){return ResponseEntity.status(error.status()).body(new Result<Void>().error(error.status(),error.getMessage()));}
     @ExceptionHandler({HttpMessageNotReadableException.class,org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class,org.springframework.web.bind.MissingServletRequestParameterException.class}) public ResponseEntity<Result<Void>> invalid(Exception error){return ResponseEntity.badRequest().body(new Result<Void>().error(400,"INVALID_REQUEST"));}

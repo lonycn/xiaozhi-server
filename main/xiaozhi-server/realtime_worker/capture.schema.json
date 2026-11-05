@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xiaozhi:material-capture-v1",
+  "$defs": {
+    "token": {"type": "string", "pattern": "^[A-Za-z0-9_-]{32}$"},
+    "connect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "ticket", "capture_protocol"],
+      "properties": {"type": {"const": "connect"}, "ticket": {"type": "string", "pattern": "^[A-Za-z0-9_-]{32,256}$"}, "capture_protocol": {"const": "material_capture_v1"}}
+    },
+    "permission": {
+      "type": "object", "required": ["capture_protocol", "capture_token"],
+      "properties": {"capture_protocol": {"const": "material_capture_v1"}, "capture_token": {"$ref": "#/$defs/token"}}
+    },
+    "input": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type", "audio", "capture_token"], "properties": {"type": {"const": "audio.append"}, "audio": {"type": "string", "maxLength": 87384}, "capture_token": {"$ref": "#/$defs/token"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "image", "mime_type", "capture_token"], "properties": {"type": {"const": "frame.append"}, "image": {"type": "string", "maxLength": 253336}, "mime_type": {"const": "image/jpeg"}, "capture_token": {"$ref": "#/$defs/token"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "capture_token"], "properties": {"type": {"enum": ["audio.commit", "listening.start", "listening.stop"]}, "capture_token": {"$ref": "#/$defs/token"}}}
+      ]
+    }
+  }
+}

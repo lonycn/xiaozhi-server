@@ -40,7 +40,7 @@ class SupportSummaryPersistenceTest {
                 migration.update(new Contexts()); migration.update(new Contexts());
             }
         }
-        assertEquals(4,jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
+        assertEquals(6,jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG",Long.class));
         var json=JsonMapper.builder().addModule(new JavaTimeModule()).build();var tx=new DataSourceTransactionManager(source);var dao=new ConversationDao(jdbc);
         conversations=new ConversationService(dao,json,tx);summaries=new SupportSummaryService(jdbc,json,new ConversationAccessService(dao),tx);support=new SupportService(jdbc,json,tx,conversations);support.setSummaries(summaries);
         support.upsertAgent(1L,3L,new AgentUpdate("support_agent",true,20));support.upsertAgent(1L,4L,new AgentUpdate("expert",true,20));
@@ -103,7 +103,7 @@ class SupportSummaryPersistenceTest {
     }
     @Test void releasedAssignmentsCannotSeeLaterVersionsEvenWithoutNewMessagesAndTargetSeesHistory() {
         String id=conversation();user(id,"原始咨询");String req=handoff(id);claim(3,req);var first=latest(3,id);
-        support.requeue(3L,req,new EndRequest("转专家"),false);claim(4,req);
+        support.transfer(3L,req,new Transfer(UUID.randomUUID().toString(),"expert",4L,"转专家"));claim(4,req);
         assertEquals(first,latest(4,id));
         var changed=fields(first);changed.put("missing_information",List.of(new Item("专家后续内部追问","unknown",List.of(),null)));
         var second=summaries.edit(4L,id,new Edit(1,changed));assertEquals(first.sourceThroughSeq(),second.sourceThroughSeq());
@@ -160,7 +160,7 @@ class SupportSummaryPersistenceTest {
     @Test void oldRrSnapshotCannotMissCommittedReleaseWhenSavingSameSeqRevision()throws Exception {
         String id=conversation();user(id,"同seq转派前原文");String req=handoff(id);claim(3,req);var first=latest(3,id);var edited=fields(first);
         edited.put("missing_information",List.of(new Item("新专家内部补充","unknown",List.of(),null)));
-        var second=afterOldSnapshot(()->{support.requeue(3L,req,new EndRequest("旧RR回归转派"),false);claim(4,req);},()->summaries.edit(4L,id,new Edit(1,edited)));
+        var second=afterOldSnapshot(()->{support.transfer(3L,req,new Transfer(UUID.randomUUID().toString(),"expert",4L,"旧RR回归转派"));claim(4,req);},()->summaries.edit(4L,id,new Edit(1,edited)));
         assertEquals(first.sourceThroughSeq(),second.sourceThroughSeq());assertEquals(2,second.version());
         assertEquals(List.of(first),summaries.history(3L,id,0,20));assertEquals(second,latest(4,id));
         support.resolve(4L,req,new EndRequest("旧RR释放回归结束"));
@@ -172,7 +172,7 @@ class SupportSummaryPersistenceTest {
     }
     @Test void oldRrHistoryUsesCommittedAssignmentAndRevisionRatherThanStaleGrant()throws Exception {
         String id=conversation();user(id,"历史授权原文");String req=handoff(id);claim(3,req);var first=latest(3,id);var edited=fields(first);
-        var targetHistory=afterOldSnapshot(()->{support.requeue(3L,req,new EndRequest("RR历史转派"),false);claim(4,req);summaries.edit(4L,id,new Edit(1,edited));},()->summaries.history(4L,id,0,20));
+        var targetHistory=afterOldSnapshot(()->{support.transfer(3L,req,new Transfer(UUID.randomUUID().toString(),"expert",4L,"RR历史转派"));claim(4,req);summaries.edit(4L,id,new Edit(1,edited));},()->summaries.history(4L,id,0,20));
         assertEquals(List.of(2L,1L),targetHistory.stream().map(Revision::version).toList());
         var retiredHistory=afterOldSnapshot(()->summaries.edit(4L,id,new Edit(2,edited)),()->summaries.history(3L,id,0,20));
         assertEquals(List.of(first),retiredHistory);support.resolve(4L,req,new EndRequest("旧RR历史回归结束"));

@@ -6,6 +6,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import lombok.Getter;
+import xiaozhi.modules.agent.Esp32ReplyLength;
 import xiaozhi.modules.agent.dto.AgentSnapshotDataDTO;
 import xiaozhi.modules.agent.dto.AgentUpdateDTO;
 import xiaozhi.modules.agent.entity.AgentEntity;
@@ -46,6 +47,10 @@ public enum AgentSnapshotField {
             (agent, data) -> agent.setChatHistoryConf(data.getChatHistoryConf())),
     SYSTEM_PROMPT("systemPrompt", AgentSnapshotDataDTO::getSystemPrompt, AgentUpdateDTO::getSystemPrompt,
             (agent, data) -> agent.setSystemPrompt(data.getSystemPrompt())),
+    ESP32_REPLY_LENGTH("esp32ReplyLength", AgentSnapshotDataDTO::getEsp32ReplyLength,
+            AgentUpdateDTO::getEsp32ReplyLength,
+            (agent, data) -> agent.setEsp32ReplyLength(
+                    data.getEsp32ReplyLength() == null ? Esp32ReplyLength.STANDARD : data.getEsp32ReplyLength())),
     SUMMARY_MEMORY("summaryMemory", AgentSnapshotDataDTO::getSummaryMemory, AgentUpdateDTO::getSummaryMemory,
             (agent, data) -> agent.setSummaryMemory(data.getSummaryMemory())),
     LANG_CODE("langCode", AgentSnapshotDataDTO::getLangCode, AgentUpdateDTO::getLangCode,

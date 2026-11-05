@@ -1,0 +1,755 @@
+openapi: 3.0.3
+info:
+  title: Xiaozhi realtime supplemental materials public API
+  version: '1.0'
+  description: 'Additive public A5 API, disabled by default. See REALTIME_MATERIALS_CONTRACT_20261102.md and AI_INTERACTION_OPENAPI_20261102.yaml.
+    Bearer identity must pass existing realtime media authorization, session owner, bound source/token and revocation
+    checks; this API does not bypass them. All six routes reject any query string, including an empty query. POST
+    accepts application/json at most 32768 raw bytes; duplicate and unknown properties, trailing JSON, float or
+    string coercion to integer are rejected. expected_epoch and turn_generation are JSON integers; normal message
+    seq and attachment IDs are decimal strings. Stable client IDs are reused for retries; conflicting pause, resume
+    or material requests return 409. Cancel uses its own stable ID. No microphone or camera is started by this API.
+    Limits: at most 3 parts, 2 distinct attachments and 4000 total user text UTF-16 code units per material; at
+    most 6 materials, 12 images and 20000 known perception tokens per session. Image derivatives are JPEG at most
+    1 MiB each; document excerpts at most 8000 characters each and total context 12000 characters, with truncation
+    indicated. Context must be acknowledged before resume can trigger an answer; an empty resume does not create
+    a response.'
+security:
+- bearerAuth: []
+paths:
+  /api/v1/ai/realtime/sessions/{session_id}/input-state:
+    get:
+      summary: Read authoritative input state
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Authorized result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '503':
+          $ref: '#/components/responses/E503'
+  /api/v1/ai/realtime/sessions/{session_id}/input-pauses:
+    post:
+      summary: Request a pause and provider clear
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Authorized result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '413':
+          $ref: '#/components/responses/E413'
+        '415':
+          $ref: '#/components/responses/E415'
+        '503':
+          $ref: '#/components/responses/E503'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PauseRequest'
+  /api/v1/ai/realtime/sessions/{session_id}/input-pauses/{pause_id}/resume:
+    post:
+      summary: Resume after clear and context acknowledgement
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/PauseId'
+      responses:
+        '200':
+          description: Authorized result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '413':
+          $ref: '#/components/responses/E413'
+        '415':
+          $ref: '#/components/responses/E415'
+        '503':
+          $ref: '#/components/responses/E503'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeRequest'
+  /api/v1/ai/realtime/sessions/{session_id}/input-pauses/{pause_id}/cancel:
+    post:
+      summary: Cancel material or safely end uncertain context
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/PauseId'
+      responses:
+        '200':
+          description: Authorized result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '413':
+          $ref: '#/components/responses/E413'
+        '415':
+          $ref: '#/components/responses/E415'
+        '503':
+          $ref: '#/components/responses/E503'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRequest'
+  /api/v1/ai/realtime/sessions/{session_id}/materials:
+    post:
+      summary: Submit one user message as realtime material
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Authorized result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmittedEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '409':
+          $ref: '#/components/responses/E409'
+        '413':
+          $ref: '#/components/responses/E413'
+        '415':
+          $ref: '#/components/responses/E415'
+        '503':
+          $ref: '#/components/responses/E503'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaterialRequest'
+  /api/v1/ai/realtime/sessions/{session_id}/materials/{material_id}:
+    get:
+      summary: Read a material status
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/MaterialId'
+      responses:
+        '200':
+          description: Authorized result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaterialEnvelope'
+        '400':
+          $ref: '#/components/responses/E400'
+        '401':
+          $ref: '#/components/responses/E401'
+        '403':
+          $ref: '#/components/responses/E403'
+        '404':
+          $ref: '#/components/responses/E404'
+        '503':
+          $ref: '#/components/responses/E503'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    PauseId:
+      name: pause_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    MaterialId:
+      name: material_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+  responses:
+    E400:
+      description: Invalid query, JSON, duplicate or unknown property, integer type, client ID, or material parts
+        (e.g. INVALID_MATERIAL_REQUEST, INVALID_CLIENT_ID, INVALID_MATERIAL_PARTS).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    E401:
+      description: Authentication required or expired.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    E403:
+      description: Current identity, source, media permission or owner authorization denied.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    E404:
+      description: Feature disabled, session or resource missing or hidden.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    E409:
+      description: Epoch or current state conflict, idempotency key reuse, unready/unowned attachment, or session
+        budget exhausted. Inspect msg and refresh input-state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    E413:
+      description: MATERIAL_BODY_LIMIT (over 32768 bytes) or MATERIAL_LIMIT (text or attachment count).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    E415:
+      description: Content-Type must be application/json for POST.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    E503:
+      description: REALTIME_MATERIAL_UNAVAILABLE, REALTIME_MATERIALS_NOT_CONFIGURED, or MATERIAL_PERCEPTION_NOT_CONFIGURED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    Id:
+      type: string
+      pattern: ^[a-f0-9]{32}$
+    DecimalString:
+      type: string
+      pattern: ^[0-9]+$
+      description: Exact decimal text; never convert to a floating point number.
+    AttachmentId:
+      type: string
+      pattern: ^[1-9][0-9]{0,18}$
+    Epoch:
+      type: integer
+      format: int64
+      description: JSON integer, not a numeric string or float; clients must reject unsafe numbers.
+    ClientId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$
+      description: Stable idempotency key; reuse for the same request.
+    PauseView:
+      type: object
+      required:
+      - id
+      - session_id
+      - status
+      - turn_generation
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        session_id:
+          $ref: '#/components/schemas/Id'
+        status:
+          type: string
+          enum:
+          - requested
+          - paused
+          - processing
+          - prepared
+          - context_acknowledged
+          - resuming
+          - resumed
+          - failed
+          - ended
+        turn_generation:
+          $ref: '#/components/schemas/Epoch'
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    MaterialView:
+      type: object
+      required:
+      - id
+      - session_id
+      - pause_id
+      - message_id
+      - status
+      - turn_generation
+      - error_code
+      - context_truncated
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        session_id:
+          $ref: '#/components/schemas/Id'
+        pause_id:
+          $ref: '#/components/schemas/Id'
+        message_id:
+          type: string
+          nullable: true
+          pattern: ^[a-f0-9]{32}$
+        status:
+          type: string
+          enum:
+          - queued
+          - dispatched
+          - prepared
+          - acknowledged
+          - failed
+          - canceled
+        turn_generation:
+          $ref: '#/components/schemas/Epoch'
+        error_code:
+          type: string
+          nullable: true
+        context_truncated:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    State:
+      type: object
+      required:
+      - phase
+      - pause
+      - material
+      additionalProperties: false
+      properties:
+        phase:
+          type: string
+          enum:
+          - live
+          - requested
+          - paused
+          - processing
+          - prepared
+          - context_acknowledged
+          - resuming
+          - failed
+          - ended
+        pause:
+          type: object
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/PauseView'
+        material:
+          type: object
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/MaterialView'
+    TextPart:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - text
+      properties:
+        type:
+          type: string
+          enum:
+          - text
+        latitude:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        longitude:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        coordinate_system:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        accuracy_m:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        source:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        authorized_at:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: Must contain non-whitespace characters; 4000 is a total across text parts (UTF-16 code units).
+        attachment_id:
+          type: string
+          nullable: true
+          enum:
+          - null
+    ImagePart:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - attachment_id
+      properties:
+        type:
+          type: string
+          enum:
+          - image
+        latitude:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        longitude:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        coordinate_system:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        accuracy_m:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        source:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        authorized_at:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        text:
+          type: string
+          nullable: true
+          enum:
+          - null
+        attachment_id:
+          $ref: '#/components/schemas/AttachmentId'
+    FilePart:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - attachment_id
+      properties:
+        type:
+          type: string
+          enum:
+          - file
+        latitude:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        longitude:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        coordinate_system:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        accuracy_m:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        source:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        authorized_at:
+          type: string
+          nullable: true
+          enum:
+          - null
+          description: Only null or omitted for this material part.
+        text:
+          type: string
+          nullable: true
+          enum:
+          - null
+        attachment_id:
+          $ref: '#/components/schemas/AttachmentId'
+    MessagePart:
+      description: Ordinary MessagePart wire shape, restricted here to text, image or file. Other known part fields
+        may be null or omitted, and non-null extras are rejected.
+      oneOf:
+      - $ref: '#/components/schemas/TextPart'
+      - $ref: '#/components/schemas/ImagePart'
+      - $ref: '#/components/schemas/FilePart'
+    PauseRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - expected_epoch
+      - client_pause_id
+      properties:
+        expected_epoch:
+          $ref: '#/components/schemas/Epoch'
+        client_pause_id:
+          $ref: '#/components/schemas/ClientId'
+    ResumeRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - expected_epoch
+      - client_resume_id
+      properties:
+        expected_epoch:
+          $ref: '#/components/schemas/Epoch'
+        client_resume_id:
+          $ref: '#/components/schemas/ClientId'
+    CancelRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - expected_epoch
+      - client_cancel_id
+      properties:
+        expected_epoch:
+          $ref: '#/components/schemas/Epoch'
+        client_cancel_id:
+          $ref: '#/components/schemas/ClientId'
+    MaterialRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - expected_epoch
+      - pause_id
+      - client_material_id
+      - parts
+      properties:
+        expected_epoch:
+          $ref: '#/components/schemas/Epoch'
+        pause_id:
+          $ref: '#/components/schemas/Id'
+        client_material_id:
+          $ref: '#/components/schemas/ClientId'
+        parts:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/MessagePart'
+          description: At most 2 distinct attachments and 4000 total text UTF-16 code units; attachments must be
+            ready, owned by the session owner, unbound, in the same conversation, and of the matching kind.
+    Message:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - conversation_id
+      - seq
+      - client_message_id
+      - sender_type
+      - sender_id
+      - parts
+      - status
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        conversation_id:
+          $ref: '#/components/schemas/Id'
+        seq:
+          $ref: '#/components/schemas/DecimalString'
+        client_message_id:
+          type: string
+          nullable: true
+        sender_type:
+          type: string
+        sender_id:
+          type: string
+          nullable: true
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessagePart'
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Submitted:
+      type: object
+      additionalProperties: false
+      required:
+      - message
+      - material
+      properties:
+        message:
+          $ref: '#/components/schemas/Message'
+        material:
+          $ref: '#/components/schemas/MaterialView'
+    StateEnvelope:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      additionalProperties: false
+      properties:
+        code:
+          type: integer
+          enum:
+          - 0
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/State'
+    PauseEnvelope:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      additionalProperties: false
+      properties:
+        code:
+          type: integer
+          enum:
+          - 0
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/PauseView'
+    MaterialEnvelope:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      additionalProperties: false
+      properties:
+        code:
+          type: integer
+          enum:
+          - 0
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/MaterialView'
+    SubmittedEnvelope:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      additionalProperties: false
+      properties:
+        code:
+          type: integer
+          enum:
+          - 0
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/Submitted'
+    ErrorEnvelope:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          nullable: true
+      required:
+      - code
+      - msg
+      additionalProperties: false

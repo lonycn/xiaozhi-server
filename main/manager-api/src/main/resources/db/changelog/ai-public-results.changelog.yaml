@@ -1,0 +1,31 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611020102-ai-public-results
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE ai_tool_public_result (
+                sequence BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                conversation_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                execution_type VARCHAR(16) NOT NULL,
+                tool_call_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                run_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+                session_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+                response_id VARCHAR(200) NULL,
+                tool_name VARCHAR(64) NOT NULL,
+                status VARCHAR(16) NOT NULL,
+                error_code VARCHAR(64) NULL,
+                event_sequence BIGINT NOT NULL,
+                message_cutoff BIGINT NOT NULL,
+                owner_user_id BIGINT NOT NULL,
+                principal_json LONGTEXT NULL,
+                source_config_hash CHAR(64) NULL,
+                result_json LONGTEXT NULL,
+                created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+                UNIQUE KEY uk_ai_tool_public_call(execution_type,tool_call_id),
+                INDEX idx_ai_tool_public_page(conversation_id,sequence),
+                CONSTRAINT fk_ai_tool_public_conversation FOREIGN KEY(conversation_id) REFERENCES ai_conversation(id),
+                CHECK(execution_type IN ('run','realtime')),CHECK(status IN ('succeeded','failed')),
+                CHECK(result_json IS NULL OR JSON_VALID(result_json))
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

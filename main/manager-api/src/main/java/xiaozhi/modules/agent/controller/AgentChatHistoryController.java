@@ -5,6 +5,8 @@ import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -77,7 +80,8 @@ public class AgentChatHistoryController {
     @RequiresPermissions("sys:role:normal")
     @PostMapping("/getDownloadUrl/{agentId}/{sessionId}")
     public Result<String> getDownloadUrl(@PathVariable("agentId") String agentId,
-            @PathVariable("sessionId") String sessionId) {
+            @PathVariable("sessionId") String sessionId,
+            @RequestParam(value = "macAddress", required = false) String macAddress) {
         // 获取当前用户
         UserDetail user = SecurityUser.getUser();
         // 检查权限
@@ -88,7 +92,11 @@ public class AgentChatHistoryController {
         // 生成UUID
         String uuid = UUID.randomUUID().toString();
         // 存储agentId和sessionId到Redis，格式为agentId:sessionId
-        redisUtils.set(RedisKeys.getChatHistoryKey(uuid), agentId + ":" + sessionId);
+        String scope = agentId + ":" + sessionId;
+        if (StringUtils.isNotBlank(macAddress)) {
+            scope += ":" + Base64.getUrlEncoder().withoutPadding().encodeToString(macAddress.getBytes(StandardCharsets.UTF_8));
+        }
+        redisUtils.set(RedisKeys.getChatHistoryKey(uuid), scope);
 
         return new Result<String>().ok(uuid);
     }
@@ -111,15 +119,13 @@ public class AgentChatHistoryController {
 
         try {
             // 解析agentId和sessionId
-            String[] parts = agentSessionInfo.split(":");
-            if (parts.length != 2) {
-                throw new RenException(ErrorCode.DOWNLOAD_LINK_INVALID);
-            }
+            String[] parts = parseDownloadScope(agentSessionInfo);
             String agentId = parts[0];
             String sessionId = parts[1];
+            String macAddress = parts[2];
 
             // 执行下载
-            downloadChatHistory(agentId, List.of(sessionId), response);
+            downloadChatHistory(agentId, List.of(sessionId), macAddress, response);
         } finally {
             // 下载完成后删除UUID，防止盗刷
             redisUtils.delete(RedisKeys.getChatHistoryKey(uuid));
@@ -144,19 +150,18 @@ public class AgentChatHistoryController {
 
         try {
             // 解析agentId和sessionId
-            String[] parts = agentSessionInfo.split(":");
-            if (parts.length != 2) {
-                throw new RenException(ErrorCode.DOWNLOAD_LINK_INVALID);
-            }
+            String[] parts = parseDownloadScope(agentSessionInfo);
             String agentId = parts[0];
             String sessionId = parts[1];
+            String macAddress = parts[2];
 
             // 获取所有会话列表
-            Map<String, Object> params = Map.of(
+            Map<String, Object> params = new HashMap<>(Map.of(
                     "agentId", agentId,
                     Constant.PAGE, 1,
                     Constant.LIMIT, 1000 // 获取足够多的会话
-            );
+            ));
+            if (StringUtils.isNotBlank(macAddress)) params.put("macAddress", macAddress);
             PageData<AgentChatSessionDTO> sessionPage = agentChatHistoryService.getSessionListByAgentId(params);
             List<AgentChatSessionDTO> allSessions = sessionPage.getList();
 
@@ -183,10 +188,24 @@ public class AgentChatHistoryController {
             if (sessionIdsToDownload.isEmpty()) {
                 sessionIdsToDownload.add(sessionId);
             }
-            downloadChatHistory(agentId, sessionIdsToDownload, response);
+            downloadChatHistory(agentId, sessionIdsToDownload, macAddress, response);
         } finally {
             // 下载完成后删除UUID，防止盗刷
             redisUtils.delete(RedisKeys.getChatHistoryKey(uuid));
+        }
+    }
+
+    // Preserve existing two-part download grants; bind new grants to their device scope.
+    private String[] parseDownloadScope(String raw) {
+        String[] parts = raw.split(":", -1);
+        if ((parts.length != 2 && parts.length != 3) || parts[0].isBlank() || parts[1].isBlank()) {
+            throw new RenException(ErrorCode.DOWNLOAD_LINK_INVALID);
+        }
+        try {
+            return new String[] { parts[0], parts[1], parts.length == 3
+                    ? new String(Base64.getUrlDecoder().decode(parts[2]), StandardCharsets.UTF_8) : null };
+        } catch (IllegalArgumentException ex) {
+            throw new RenException(ErrorCode.DOWNLOAD_LINK_INVALID);
         }
     }
 
@@ -197,7 +216,7 @@ public class AgentChatHistoryController {
      * @param sessionIds 会话ID列表
      * @param response   HTTP响应
      */
-    private void downloadChatHistory(String agentId, List<String> sessionIds, HttpServletResponse response) {
+    private void downloadChatHistory(String agentId, List<String> sessionIds, String macAddress, HttpServletResponse response) {
         try {
             // 设置响应头
             response.setContentType("text/plain;charset=UTF-8");
@@ -210,7 +229,7 @@ public class AgentChatHistoryController {
                 for (String sessionId : sessionIds) {
                     // 获取该会话的所有聊天记录
                     List<AgentChatHistoryDTO> chatHistoryList = agentChatHistoryService
-                            .getChatHistoryBySessionId(agentId, sessionId);
+                            .getChatHistoryBySessionId(agentId, sessionId, macAddress);
 
                     // 从聊天记录中获取第一条消息的创建时间作为会话时间
                     if (!chatHistoryList.isEmpty()) {

@@ -95,6 +95,15 @@ becomes fabricated business data. Added failures are `UNSUPPORTED_TOOL`,
 `TOOL_PROTOCOL_ERROR`, `TOOL_ARGUMENTS_INVALID`, `TOOL_LIMIT_EXCEEDED`, `TOOL_TIMEOUT`.
 Offline tests do not establish real provider or business integration acceptance.
 
+Multimodal tools additionally require `tool_policy.input_modalities`, explicitly
+listing the authorized combination of `text`, `image`, and/or `audio`. Omission
+permits text only. The worker checks both attachment capabilities and prepared
+provider content against this policy and its native-model matrix. Qwen3 VL
+Plus/Flash and the configured, technically probed `qwen3.8-flash` permit images;
+`qwen3.8-omni-flash` permits images and original audio. Other combinations fail
+without model switching or replacing raw sound with transcripts. Video retains
+its frame timestamps and, when requested, its separately verified original track.
+
 ## Offline verification
 
 ```sh
@@ -110,8 +119,13 @@ cloud model. A real configured-provider request is a separate acceptance step.
 
 Java may add `attachments` to the current user context message. These references
 contain only `attachment_id`, `variant`, `mime_type`, `kind`, and optional `time_ms`.
-Historical turns carry source descriptions and existing text, without replaying
-older media. The worker strips internal reference fields before calling a model.
+Historical turns ordinarily carry source descriptions and existing text. Only an
+explicit manager task `media_policy: {"allow_history": true}` permits verified
+historical user-message references from this same run. It retains the total
+reference, byte, MIME, model, audio and text limits; assistant references are
+rejected. The manager still verifies current run/lease/source and the exact
+attachment/variant snapshot on every private download. The worker strips internal
+reference fields before calling a model.
 Images use private `display` derivatives; video uses at most six sampled JPEG
 frames with their time points. Documents use extracted UTF-8 text, and audio or
 videos with speech use separately completed transcripts. Empty extracted text is
@@ -165,3 +179,19 @@ no ASR fallback is made for sound analysis. Inline audio is capped at 7,499,982
 bytes, including a conservative allowance for the Data URI prefix below the
 provider's 10 MB Base64 limit. Over-limit runs fail `OMNI_AUDIO_LIMIT` and retain
 the uploaded evidence. See `docs/ai-customer-service/OMNI_AUDIO_CONTRACT.md`.
+# Finalized provider usage audit
+
+New managers may explicitly send `usage_audit: true` in a claimed task. Missing
+that field preserves the legacy callback wire. With opt-in, each provider stream
+is closed before its finalized actual usage/request ID/finish reason is posted
+to the fixed `/internal/ai-worker/runs/{id}/usage` endpoint. Reports extend an
+immutable round prefix, authenticated with the original attempt and dispatch
+lease; they contain no prompt, output, model override or business state.
+
+Unknown usage stays null. A pending request is never reported as an unknown
+placeholder and then overwritten. Exact finalized reports can be retried after
+lost ACKs. Generation cancellation does not cancel independent audit IO, and
+worker shutdown awaits outstanding bounded audit jobs. Historical accounting may
+survive cancellation, source revocation or lease expiry; it cannot publish an
+answer, resume a run or replace a newer attempt. If an audit fails on an otherwise
+successful stream, the worker stops before incurring another provider request.

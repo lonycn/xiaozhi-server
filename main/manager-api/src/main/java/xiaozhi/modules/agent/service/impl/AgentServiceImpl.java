@@ -429,6 +429,9 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         if (dto.getSystemPrompt() != null) {
             existingEntity.setSystemPrompt(dto.getSystemPrompt());
         }
+        if (dto.getEsp32ReplyLength() != null) {
+            existingEntity.setEsp32ReplyLength(dto.getEsp32ReplyLength());
+        }
         if (dto.getSummaryMemory() != null) {
             existingEntity.setSummaryMemory(dto.getSummaryMemory());
         }

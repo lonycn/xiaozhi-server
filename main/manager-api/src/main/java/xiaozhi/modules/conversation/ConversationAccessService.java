@@ -24,6 +24,7 @@ public class ConversationAccessService {
         } catch (ConversationProblem problem) {
             if (problem.status() != 404) throw problem;
         }
+        internalStaff();
         Conversation conversation = dao.byId(id, lock);
         var grant = dao.staffGrant(id, actor);
         if (grant == null) throw missing();
@@ -40,15 +41,30 @@ public class ConversationAccessService {
     }
 
     public String lockSenderRole(long actor) {
+        internalStaff();
         String role = dao.lockStaffRole(actor);
         if (role == null) throw missing();
         return role;
     }
 
+    public String currentSenderRole(long actor,String id) {
+        String role=dao.currentServiceType(id,actor);
+        if(role==null)throw missing();
+        return role;
+    }
+
     public Conversation requireCurrentStaff(long actor, String id) {
+        internalStaff();
         Conversation conversation = dao.byId(id, true);
         if (!dao.currentAssignment(id, actor)) throw missing();
         return conversation;
+    }
+
+    private static void internalStaff() {
+        var attributes=org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if(attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet
+                && servlet.getRequest().getAttribute(xiaozhi.modules.externalidentity.ExternalIdentityService.ATTRIBUTE)
+                instanceof xiaozhi.modules.externalidentity.ExternalModels.Principal)throw missing();
     }
 
     private static ConversationProblem missing() {

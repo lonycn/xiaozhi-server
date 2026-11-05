@@ -57,7 +57,7 @@ class ConversationPersistenceTest {
             migration.update(new Contexts());
             migration.update(new Contexts());
         }
-        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG", Long.class));
+        assertEquals(4, jdbc.queryForObject("SELECT COUNT(*) FROM DATABASECHANGELOG", Long.class));
         service = service(new ConversationDao(jdbc));
     }
 

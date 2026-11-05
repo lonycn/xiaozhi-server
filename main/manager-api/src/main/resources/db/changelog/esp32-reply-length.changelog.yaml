@@ -1,0 +1,14 @@
+databaseChangeLog:
+  - changeSet:
+      id: 202611041000-esp32-reply-length
+      author: codex
+      changes:
+        - addColumn:
+            tableName: ai_agent
+            columns:
+              - column:
+                  name: esp32_reply_length
+                  type: varchar(8)
+                  defaultValue: standard
+                  constraints:
+                    nullable: false

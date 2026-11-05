@@ -59,6 +59,21 @@ class SupportControllerTest {
     }
 
     @Test
+    void presenceAcceptsBusinessTypeAndCannotSpoofTheAccount() throws Exception {
+        var service=mock(SupportService.class);
+        var mvc=MockMvcBuilders.standaloneSetup(new SupportController(service,parser())).setControllerAdvice(new SupportExceptionHandler()).build();
+        try(var security=mockStatic(SecurityUser.class)) {
+            security.when(SecurityUser::getUserId).thenReturn(7L);
+            mvc.perform(post("/api/v1/support/presence").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"accepting\":true,\"service_type\":\"expert\"}")).andExpect(status().isOk());
+            verify(service).presence(7L,new xiaozhi.modules.support.SupportModels.PresenceUpdate(true,"expert"));
+            mvc.perform(post("/api/v1/support/presence").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"accepting\":false,\"service_type\":\"support_agent\",\"user_id\":9}")).andExpect(status().isBadRequest());
+            verifyNoMoreInteractions(service);
+        }
+    }
+
+    @Test
     void readRoutesUseAuthenticatedActorAndExplicitPermissions() throws Exception {
         var service = mock(SupportService.class);
         var mvc = MockMvcBuilders.standaloneSetup(new SupportController(service, parser()))
@@ -81,6 +96,24 @@ class SupportControllerTest {
                 .getAnnotation(org.apache.shiro.authz.annotation.RequiresPermissions.class).value());
         assertArrayEquals(new String[]{"support:agents:manage"}, SupportController.class.getMethod("agents",long.class,int.class)
                 .getAnnotation(org.apache.shiro.authz.annotation.RequiresPermissions.class).value());
+    }
+
+    @Test void serviceFiltersAndTransferUseAuthenticatedIdentityAndStrictBody() throws Exception {
+        var service=mock(SupportService.class);
+        var mvc=MockMvcBuilders.standaloneSetup(new SupportController(service,parser())).setControllerAdvice(new SupportExceptionHandler()).build();
+        try(var security=mockStatic(SecurityUser.class)) {
+            security.when(SecurityUser::getUserId).thenReturn(7L);
+            mvc.perform(get("/api/v1/support/queue?service_type=expert")).andExpect(status().isOk());
+            verify(service).queue(7L,0,50,"expert");
+            mvc.perform(get("/api/v1/support/assigned?service_type=support_agent")).andExpect(status().isOk());
+            verify(service).assigned(7L,0,50,"support_agent");
+            mvc.perform(post("/api/v1/support/requests/id/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"client_request_id\":\"key\",\"service_type\":\"expert\",\"target_agent_user_id\":4,\"reason\":\"handover\"}")).andExpect(status().isOk());
+            verify(service).transfer(7L,"id",new xiaozhi.modules.support.SupportModels.Transfer("key","expert",4L,"handover"));
+            mvc.perform(post("/api/v1/support/requests/id/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"client_request_id\":\"bad\",\"service_type\":\"expert\",\"actor_user_id\":9}")).andExpect(status().isBadRequest());
+        }
+        assertArrayEquals(new String[]{"support:request:resolve"},SupportController.class.getMethod("transfer",String.class,com.fasterxml.jackson.databind.JsonNode.class).getAnnotation(org.apache.shiro.authz.annotation.RequiresPermissions.class).value());
     }
 
     @Test

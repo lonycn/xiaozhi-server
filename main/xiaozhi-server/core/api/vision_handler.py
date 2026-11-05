@@ -15,6 +15,19 @@ TAG = __name__
 
 # 设置最大文件大小为5MB
 MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_QUESTION_SIZE = 8192
+MAX_BODY_SIZE = MAX_FILE_SIZE + MAX_QUESTION_SIZE + 65536
+
+
+async def _read_limited(part, limit):
+    data = bytearray()
+    while True:
+        chunk = await part.read_chunk(size=8192)
+        if not chunk:
+            return bytes(data)
+        if len(data) + len(chunk) > limit:
+            raise web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=len(data) + len(chunk))
+        data.extend(chunk)
 
 
 class VisionHandler(BaseHandler):
@@ -29,14 +42,7 @@ class VisionHandler(BaseHandler):
 
     def _verify_auth_token(self, request) -> Tuple[bool, Optional[str]]:
         """验证认证token"""
-        # 测试模式：允许特定测试令牌或跳过验证
         auth_header = request.headers.get("Authorization", "")
-        client_id = request.headers.get("Client-Id", "")
-
-        # 允许测试客户端跳过认证
-        if client_id == "web_test_client":
-            device_id = request.headers.get("Device-Id", "test_device")
-            return True, device_id
 
         if not auth_header.startswith("Bearer "):
             return False, None
@@ -63,8 +69,10 @@ class VisionHandler(BaseHandler):
             # 获取请求头信息
             device_id = request.headers.get("Device-Id", "")
             client_id = request.headers.get("Client-Id", "")
-            if device_id != token_device_id:
-                raise ValueError("设备ID与token不匹配")
+            if not device_id or device_id != token_device_id:
+                raise web.HTTPForbidden(reason="设备ID与token不匹配")
+            if request.content_length is not None and request.content_length > MAX_BODY_SIZE:
+                raise web.HTTPRequestEntityTooLarge(max_size=MAX_BODY_SIZE, actual_size=request.content_length)
             # 解析multipart/form-data请求
             reader = await request.multipart()
 
@@ -72,8 +80,9 @@ class VisionHandler(BaseHandler):
             question_field = await reader.next()
             if question_field is None:
                 raise ValueError("缺少问题字段")
-            question = await question_field.text()
-            self.logger.bind(tag=TAG).debug(f"Question: {question}")
+            if question_field.name != "question":
+                raise ValueError("缺少问题字段")
+            question = (await _read_limited(question_field, MAX_QUESTION_SIZE)).decode("utf-8")
 
             # 读取图片文件
             image_field = await reader.next()
@@ -81,7 +90,11 @@ class VisionHandler(BaseHandler):
                 raise ValueError("缺少图片文件")
 
             # 读取图片数据
-            image_data = await image_field.read()
+            if image_field.name != "file":
+                raise ValueError("缺少图片文件")
+            image_data = await _read_limited(image_field, MAX_FILE_SIZE)
+            if await reader.next() is not None:
+                raise ValueError("不支持额外字段")
             if not image_data:
                 raise ValueError("图片数据为空")
 
@@ -139,19 +152,21 @@ class VisionHandler(BaseHandler):
                 text=json.dumps(return_json, separators=(",", ":")),
                 content_type="application/json",
             )
-        except ValueError as e:
+        except web.HTTPException as e:
+            response = web.json_response(self._create_error_response(e.reason), status=e.status)
+        except (ValueError, UnicodeError) as e:
             self.logger.bind(tag=TAG).error(f"MCP Vision POST请求异常: {e}")
             return_json = self._create_error_response(str(e))
             response = web.Response(
                 text=json.dumps(return_json, separators=(",", ":")),
-                content_type="application/json",
+                content_type="application/json", status=400,
             )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"MCP Vision POST请求异常: {e}")
             return_json = self._create_error_response("处理请求时发生错误")
             response = web.Response(
                 text=json.dumps(return_json, separators=(",", ":")),
-                content_type="application/json",
+                content_type="application/json", status=500,
             )
         finally:
             if response:

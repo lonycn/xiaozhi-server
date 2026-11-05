@@ -5,6 +5,7 @@ import en from './en';
 import de from './de';
 import vi from './vi';
 import ptBR from './pt_BR';
+import modelTestMessages from './modelTestMessages';
 
 import enLocale from 'element-plus/es/locale/lang/en.mjs'
 import zhLocale from 'element-plus/es/locale/lang/zh-cn.mjs'
@@ -47,12 +48,12 @@ const i18n = createI18n({
   locale: getDefaultLanguage(),
   fallbackLocale: 'zh_CN',
   messages: {
-    'zh_CN': { ...zhLocale, ...zhCN },
-    'zh_TW': { ...twLocale, ...zhTW },
-    'en': { ...en, ...enLocale },
-    'de': { ...de, ...deLocale },
-    'vi': { ...vi, ...viLocale },
-    'pt_BR': { ...ptBR, ...ptBRLocale }
+    'zh_CN': { ...zhLocale, ...zhCN, ...modelTestMessages.zh_CN },
+    'zh_TW': { ...twLocale, ...zhTW, ...modelTestMessages.zh_TW },
+    'en': { ...en, ...enLocale, ...modelTestMessages.en },
+    'de': { ...de, ...deLocale, ...modelTestMessages.de },
+    'vi': { ...vi, ...viLocale, ...modelTestMessages.vi },
+    'pt_BR': { ...ptBR, ...ptBRLocale, ...modelTestMessages.pt_BR }
   }
 });
 

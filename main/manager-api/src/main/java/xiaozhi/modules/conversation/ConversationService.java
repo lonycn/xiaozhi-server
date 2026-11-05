@@ -19,11 +19,16 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import xiaozhi.modules.chatarchive.ChatArchiveOutbox;
 import xiaozhi.modules.conversation.ConversationDao.StoredMessage;
 import xiaozhi.modules.conversation.ConversationModels.*;
 
 @Service
 public class ConversationService {
+    private org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32integration.Esp32Policies> esp32Policies;
+    @org.springframework.beans.factory.annotation.Autowired public void setEsp32Policies(org.springframework.beans.factory.ObjectProvider<xiaozhi.modules.esp32integration.Esp32Policies> value){esp32Policies=value;}
+    private xiaozhi.modules.esp32integration.Esp32Policies devicePolicy(){return esp32Policies==null?null:esp32Policies.getIfAvailable();}
+
     private final ConversationDao dao;
     private final ConversationAccessService access;
     private final ObjectMapper json;
@@ -31,6 +36,10 @@ public class ConversationService {
     private xiaozhi.modules.ai.AiExecutionService aiExecution;
     private xiaozhi.modules.attachment.AttachmentService attachments;
     private xiaozhi.modules.realtime.RealtimeHooks realtime;
+    private ChatArchiveOutbox chatArchive;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setChatArchive(ChatArchiveOutbox service) { chatArchive = service; }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setRealtime(xiaozhi.modules.realtime.RealtimeHooks service) { realtime = service; }
@@ -71,30 +80,46 @@ public class ConversationService {
         if (request.agentId() != null && !request.agentId().matches("[a-zA-Z0-9_-]{1,32}")) {
             throw badRequest("INVALID_AGENT_ID");
         }
+        String clientSource = creationSource();
         return transactions.execute(tx -> {
             if (request.agentId() != null && !dao.ownsAgent(request.agentId(), owner)) {
                 throw new ConversationProblem(403, "AGENT_ACCESS_DENIED");
             }
             String id = id();
             dao.insertConversation(id, owner, request.agentId(), request.title().strip());
-            dao.insertEvent(id(), id, 1, "conversation.created", encode(Map.of("conversation_id", id)));
+            dao.insertEvent(id(), id, 1, "conversation.created", encode(Map.of("conversation_id", id, "source", clientSource)));
             dao.advance(id, 0, 1);
             return dao.owned(id, owner, false);
         });
+    }
+
+    /** Display metadata only; it never selects identity, permissions or a hardware channel. */
+    private String creationSource() {
+        var attributes = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if (!(attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet)) return "web";
+        var request = servlet.getRequest();
+        String explicit = request.getHeader("X-Conversation-Source");
+        if (explicit != null) {
+            if (!java.util.Set.of("app", "web").contains(explicit)) throw badRequest("INVALID_CONVERSATION_SOURCE");
+            return explicit;
+        }
+        return request.getAttribute(xiaozhi.modules.externalidentity.ExternalIdentityService.ATTRIBUTE)
+                instanceof xiaozhi.modules.externalidentity.ExternalModels.Principal ? "app" : "web";
     }
 
     public CursorPage<Conversation> list(Long userId, long before, int limit) {
         long owner = authenticated(userId);
         page(before, limit);
         var rows = dao.list(owner, before == 0 ? Long.MAX_VALUE : before, limit + 1);
-        var items = rows.stream().limit(limit).toList();
-        return new CursorPage<>(items, items.isEmpty() ? before : items.getLast().listSequence(), rows.size() > limit);
+        var scanned = rows.stream().limit(limit).toList();
+        var items=scanned.stream().filter(c->devicePolicy()==null||devicePolicy().mayRead(c.id(),owner)).toList();
+        return new CursorPage<>(items, scanned.isEmpty() ? before : scanned.getLast().listSequence(), rows.size() > limit);
     }
 
     public Conversation get(Long userId, String id) {
         long actor = authenticated(userId);
         String validId = conversationId(id);
-        return transactions.execute(tx -> access.detail(actor, validId, true));
+        return transactions.execute(tx -> {if(devicePolicy()!=null)devicePolicy().requireRead(validId,actor);return access.detail(actor, validId, true);});
     }
 
     public Message send(Long userId, String conversationId, SendMessage request) {
@@ -110,6 +135,7 @@ public class ConversationService {
         String hash = hash(parts);
         return transactions.execute(tx -> {
             Conversation conversation = dao.owned(id, owner, true);
+            if(devicePolicy()!=null)devicePolicy().requireOrdinaryInput(id);
             StoredMessage previous = dao.duplicate(id, request.clientMessageId());
             if (previous != null) {
                 if (!previous.requestHash().equals(hash) || !Long.toString(owner).equals(previous.senderId())
@@ -125,8 +151,10 @@ public class ConversationService {
             bindAttachments(owner, id, messageId, seq, request.parts());
             dao.insertEvent(id(), id, eventSeq, "message.accepted", encode(Map.of("message_id", messageId, "seq", seq)));
             dao.advance(id, seq, eventSeq);
+            StoredMessage accepted = dao.duplicate(id, request.clientMessageId());
+            if (chatArchive != null) chatArchive.accepted(owner, conversation.title(), accepted, eventSeq);
             if ((realtime == null || !realtime.onUserMessage(id, messageId)) && aiExecution != null) aiExecution.onUserMessage(id, messageId);
-            return view(dao.duplicate(id, request.clientMessageId()));
+            return view(accepted);
         });
     }
 
@@ -142,9 +170,10 @@ public class ConversationService {
         String parts = encode(request.parts());
         String hash = hash(parts);
         return transactions.execute(tx -> {
-            String role = access.lockSenderRole(actor);
-            if (!role.equals(senderType)) throw new ConversationProblem(403, "SUPPORT_SENDER_ROLE_MISMATCH");
+            access.lockSenderRole(actor);
             Conversation conversation = access.requireCurrentStaff(actor, id);
+            String role = access.currentSenderRole(actor,id);
+            if (!role.equals(senderType)) throw new ConversationProblem(403, "SUPPORT_SENDER_ROLE_MISMATCH");
             StoredMessage previous = dao.duplicate(id, request.clientMessageId());
             if (previous != null) {
                 if (!hash.equals(previous.requestHash()) || !Long.toString(actor).equals(previous.senderId())
@@ -170,6 +199,7 @@ public class ConversationService {
         String validId = conversationId(id);
         page(after, limit);
         return transactions.execute(tx -> {
+            if(devicePolicy()!=null)devicePolicy().requireRead(validId,actor);
             var grant = access.read(actor, validId, true);
             var rows = dao.messages(validId, after, limit + 1, grant.messageCutoff());
             var items = rows.stream().limit(limit).map(this::view).toList();
@@ -182,6 +212,7 @@ public class ConversationService {
         String validId = conversationId(id);
         page(after, limit);
         return transactions.execute(tx -> {
+            if(devicePolicy()!=null)devicePolicy().requireRead(validId,actor);
             var grant = access.read(actor, validId, true);
             var rows = dao.events(validId, after, limit + 1, grant.eventCutoff());
             var items = rows.stream().limit(limit).map(row -> new Event(row.id(), row.conversationId(),

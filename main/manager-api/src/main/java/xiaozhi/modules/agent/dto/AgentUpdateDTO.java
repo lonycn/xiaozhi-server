@@ -8,8 +8,10 @@ import java.util.Map;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 import xiaozhi.common.utils.JsonUtils;
+import xiaozhi.modules.agent.Esp32ReplyLength;
 
 /**
  * 智能体更新DTO
@@ -71,6 +73,10 @@ public class AgentUpdateDTO implements Serializable {
 
     @Schema(description = "角色设定参数", example = "你是一个专业的客服助手，负责回答用户问题并提供帮助", nullable = true)
     private String systemPrompt;
+
+    @Schema(description = "ESP32 语音回复长度", allowableValues = {"short", "standard", "detailed"})
+    @Pattern(regexp = Esp32ReplyLength.VALID_VALUES)
+    private String esp32ReplyLength;
 
     @Schema(description = "总结记忆", example = "构建可生长的动态记忆网络，在有限空间内保留关键信息的同时，智能维护信息演变轨迹\n"
             + "根据对话记录，总结user的重要信息，以便在未来的对话中提供更个性化的服务", nullable = true)

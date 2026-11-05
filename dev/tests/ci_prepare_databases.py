@@ -19,6 +19,19 @@ SCHEMAS = {
     'SUMMARY': ('xiaozhi_summary_test_', True),
     'SUMMARY_ASSISTANCE': ('xiaozhi_summary_test_', True),
     'AGENT_TOOL': ('xiaozhi_agent_tool_test_', True),
+    'AI_CONTEXT': ('xiaozhi_ai_context_test_', True),
+    'REALTIME_TOOL': ('xiaozhi_realtime_tool_test_', True),
+    'REALTIME_INPUT': ('xiaozhi_realtime_input_test_', True),
+    'ANSWER_SPEECH': ('xiaozhi_answer_speech_test_', True),
+    'AI_SKILL': ('xiaozhi_ai_skill_test_', True),
+    'AI_RUNTIME': ('xiaozhi_ai_runtime_test_', True),
+    'AI_PROVIDER_AUDIT': ('xiaozhi_ai_provider_audit_test_', True),
+    'AI_OPERATIONS': ('xiaozhi_ai_operations_test_', True),
+    'ESP32_AI': ('xiaozhi_esp32_ai_test_', True),
+    'ESP32_SESSION': ('xiaozhi_esp32session_test_', True),
+    'ESP32_GATEWAY': ('xiaozhi_esp32_gateway_test_', True),
+    'ESP32_GATEWAY_UPGRADE': ('xiaozhi_esp32_gateway_upgrade_test_', True),
+    'ESP32_FIRMWARE': ('xiaozhi_esp32_firmware_test_', True),
     'EXTERNAL': ('xiaozhi_external_test_', False),
     'EXTERNAL_APP': ('xiaozhi_external_test_', False),
     'RENEWAL': ('xiaozhi_renewal_test_', False),
@@ -29,7 +42,10 @@ SCHEMAS = {
 def plan(tag):
     if not re.fullmatch(r'[a-z0-9_]{1,24}', tag):
         raise ValueError('Invalid CI schema suffix')
-    names = {key: prefix + key.lower() + '_' + tag for key, (prefix, _) in SCHEMAS.items()}
+    # Some schema prefixes already carry a long module name. Keep the unique run
+    # suffix intact and bound only the redundant module label to MySQL's 64 bytes.
+    names = {key: prefix + ('gwu' if key == 'ESP32_GATEWAY_UPGRADE' else key.lower())[:64-len(prefix)-len(tag)-1] + '_' + tag
+             for key, (prefix, _) in SCHEMAS.items()}
     if len(set(names.values())) != len(names) or any(len(name) > 64 for name in names.values()):
         raise ValueError('Invalid or duplicate CI schema names')
     return names

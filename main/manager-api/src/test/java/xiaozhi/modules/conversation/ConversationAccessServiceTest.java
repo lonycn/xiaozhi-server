@@ -73,8 +73,9 @@ class ConversationAccessServiceTest {
 
     @Test
     void supportReplyLocksProfileBeforeConversationAndPersistsRealRole() {
-        when(dao.lockStaffRole(71)).thenReturn("expert");
+        when(dao.lockStaffRole(71)).thenReturn("support_agent");
         when(dao.currentAssignment(ID, 71)).thenReturn(true);
+        when(dao.currentServiceType(ID,71)).thenReturn("expert");
         when(dao.duplicate(ID, "reply")).thenReturn(null, new StoredMessage("m", ID, 5, "reply", "71",
                 "[{\"type\":\"text\",\"text\":\"answer\"}]", "hash", Instant.EPOCH, "expert", "completed"));
         Message message = service.sendSupport(71L, ID, new SendMessage("reply", List.of(text("answer"))), "expert");
@@ -101,15 +102,18 @@ class ConversationAccessServiceTest {
     @Test
     void senderRoleCannotBeSelectedByCaller() {
         when(dao.lockStaffRole(71)).thenReturn("support_agent");
+        when(dao.currentAssignment(ID,71)).thenReturn(true);
+        when(dao.currentServiceType(ID,71)).thenReturn("support_agent");
         assertEquals(403, assertThrows(ConversationProblem.class, () -> service.sendSupport(71L, ID,
                 new SendMessage("reply", List.of(text("answer"))), "expert")).status());
-        verify(dao, never()).byId(anyString(), anyBoolean());
+        verify(dao, never()).duplicate(anyString(), anyString());
     }
 
     @Test
     void crossActorIdempotencyCollisionDoesNotReturnAnotherSendersMessage() {
         when(dao.lockStaffRole(71)).thenReturn("expert");
         when(dao.currentAssignment(ID, 71)).thenReturn(true);
+        when(dao.currentServiceType(ID,71)).thenReturn("expert");
         // Hash matches the same parts, but the original sender is the owner.
         String parts = "[{\"type\":\"text\",\"text\":\"answer\"}]";
         String hash;

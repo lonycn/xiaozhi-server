@@ -28,4 +28,7 @@ public class AgentChatSessionDTO {
      * 会话标题
      */
     private String title;
+
+    /** 会话设备；按设备筛选时与筛选条件一致。 */
+    private String macAddress;
 }

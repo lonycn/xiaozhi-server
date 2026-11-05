@@ -2,17 +2,19 @@ const item = (path, titleKey, icon, extra = {}) => ({ path, titleKey, icon, ...e
 export const menuGroups = [
   { id: 'workspace', label: '工作空间', labelKey: 'adminLayout.workspace', icon: 'Monitor', items: [
     item('/home', 'header.smartManagement', 'Monitor'),
-    item('/conversations', 'adminLayout.conversations', 'ChatDotRound', { conversationOnly: true }),
-    item('/support', 'support.workspace', 'Service', { conversationOnly: true, supportOnly: true }),
+    item('/device-conversations', 'conversationManagement.devices', 'ChatDotRound', { conversationOnly: true, internalOnly: true }),
+    item('/support', 'conversationManagement.support', 'Service', { conversationOnly: true, staffRole: 'support_agent', internalOnly: true }),
+    item('/expert-conversations', 'conversationManagement.experts', 'Service', { conversationOnly: true, staffRole: 'expert', internalOnly: true }),
+    item('/ai-operations', 'aiOperations.title', 'Monitor', { adminOnly: true, internalOnly: true }),
     item('/address-book-management', 'header.addressBook', 'User', { feature: 'addressBook' }),
   ] },
-  { id: 'models', label: '模型与知识', labelKey: 'adminLayout.models', icon: 'Collection', items: [
+  { id: 'settings', label: '系统设置', labelKey: 'adminLayout.settings', icon: 'Setting', items: [
+    item('/esp32-intents', 'esp32Intent.title', 'Edit', { intentOnly: true, internalOnly: true }),
     item('/model-config', 'header.modelConfig', 'Setting', { adminOnly: true }),
     item('/knowledge-base-management', 'header.knowledgeBase', 'Collection', { feature: 'knowledgeBase' }),
     item('/voice-clone-management', 'header.voiceCloneManagement', 'Microphone', { feature: 'voiceClone' }),
     item('/voice-resource-management', 'header.voiceResourceManagement', 'Headset', { adminOnly: true, feature: 'voiceClone' }),
-  ] },
-  { id: 'system', label: '系统管理', labelKey: 'adminLayout.system', icon: 'Setting', items: [
+    item('/support-settings', 'support.settings', 'Service', { adminOnly: true, internalOnly: true, conversationOnly: true }),
     item('/params-management', 'header.paramManagement', 'Setting', { adminOnly: true }),
     item('/user-management', 'header.userManagement', 'User', { adminOnly: true }),
     item('/ota-management', 'header.otaManagement', 'Upload', { adminOnly: true }),
@@ -24,13 +26,16 @@ export const menuGroups = [
     item('/feature-management', 'header.featureManagement', 'Setting', { adminOnly: true }),
   ] },
 ]
-export function getMenuGroups({ superAdmin = false, features = {}, conversationEnabled = false, supportAvailable = false, supportAdmin = false } = {}) {
+export function getMenuGroups({ superAdmin = false, features = {}, conversationEnabled = false, esp32IntentsEnabled = false, supportRoles = [], supportAdmin = false, externalSession = false } = {}) {
   return menuGroups.map(group => ({ ...group, items: group.items.filter(entry =>
-    (!entry.adminOnly || superAdmin) && (!entry.feature || features[entry.feature] === true || features[entry.feature]?.enabled === true) &&
-    (!entry.conversationOnly || conversationEnabled) && (!entry.supportOnly || supportAvailable || supportAdmin)
+    (!entry.adminOnly || superAdmin) && (!entry.internalOnly || !externalSession) && (!entry.feature || features[entry.feature] === true || features[entry.feature]?.enabled === true) &&
+    (!entry.intentOnly || esp32IntentsEnabled) &&
+    (!entry.conversationOnly || conversationEnabled) && (!entry.staffRole || supportRoles.includes(entry.staffRole) || supportAdmin)
   ).map(entry => ({ ...entry })) })).filter(group => group.items.length)
 }
 const contextual = {
+  '/conversations': ['conversationManagement.aiTest', '/home'],
+  '/agent-chat-history': ['home.chatHistory', '/home'],
   '/role-config': ['roleConfig.title', '/home'],
   '/device-management': ['device.management', '/home'],
   '/voice-print': ['voicePrint.pageTitle', '/home'],

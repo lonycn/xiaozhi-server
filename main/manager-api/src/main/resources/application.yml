@@ -116,7 +116,7 @@ support-media:
     room-prefix: ${SUPPORT_LIVEKIT_ROOM_PREFIX:xz-support-b5-}
     request-timeout-millis: 5000
     token-ttl-seconds: 60
-  invitation-seconds: 45
+  invitation-seconds: ${SUPPORT_MEDIA_INVITATION_SECONDS:30}
   transfer-seconds: 60
   ready-seconds: 15
   reconnect-seconds: 60
@@ -133,3 +133,13 @@ realtime:
     key: ${REALTIME_WORKER_KEY:}
     public-url: ${REALTIME_WORKER_PUBLIC_URL:}
   maintenance-delay-ms: 2000
+
+xiaozhi:
+  archive:
+    enabled: ${XIAOZHI_ARCHIVE_ENABLED:false}
+    url: ${XIAOZHI_ARCHIVE_URL:}
+    allow-insecure-lan: ${XIAOZHI_ARCHIVE_ALLOW_INSECURE_LAN:false}
+    source-issuer: ${XIAOZHI_ARCHIVE_SOURCE_ISSUER:}
+    issuer: ${XIAOZHI_ARCHIVE_ISSUER:}
+    key-id: ${XIAOZHI_ARCHIVE_KEY_ID:}
+    key-b64: ${XIAOZHI_ARCHIVE_KEY_B64:}

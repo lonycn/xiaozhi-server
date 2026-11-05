@@ -203,12 +203,21 @@ public class AgentController {
         return new Result<PageData<AgentChatSessionDTO>>().ok(page);
     }
 
+    @GetMapping("/{id}/history-devices")
+    @Operation(summary = "获取智能体历史对话设备（含已解绑设备）")
+    @RequiresPermissions("sys:role:normal")
+    public Result<List<String>> getHistoryDevices(@PathVariable("id") String id) {
+        requireAgentPermission(id);
+        return new Result<List<String>>().ok(agentChatHistoryService.getHistoryDevicesByAgentId(id));
+    }
+
     @GetMapping("/{id}/chat-history/{sessionId}")
     @Operation(summary = "获取智能体聊天记录")
     @RequiresPermissions("sys:role:normal")
     public Result<List<AgentChatHistoryDTO>> getAgentChatHistory(
             @PathVariable("id") String id,
-            @PathVariable("sessionId") String sessionId) {
+            @PathVariable("sessionId") String sessionId,
+            @RequestParam(value = "macAddress", required = false) String macAddress) {
         // 获取当前用户
         UserDetail user = SecurityUser.getUser();
 
@@ -218,7 +227,7 @@ public class AgentController {
         }
 
         // 查询聊天记录
-        List<AgentChatHistoryDTO> result = agentChatHistoryService.getChatHistoryBySessionId(id, sessionId);
+        List<AgentChatHistoryDTO> result = agentChatHistoryService.getChatHistoryBySessionId(id, sessionId, macAddress);
         return new Result<List<AgentChatHistoryDTO>>().ok(result);
     }
 

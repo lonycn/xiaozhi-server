@@ -1,0 +1,32 @@
+# Local integration against the cloud test schema through a Session Manager tunnel.
+server:
+  address: 127.0.0.1
+  port: 18993
+
+spring:
+  liquibase:
+    enabled: false
+  datasource:
+    druid:
+      # Match the cloud API's interpretation of stored timestamps.
+      url: jdbc:mysql://127.0.0.1:13306/dbesp32server?sslMode=DISABLED&serverTimezone=UTC&nullCatalogMeansCurrent=true&connectTimeout=5000&socketTimeout=15000
+      username: ${XIAOZHI_SHARED_DB_USER}
+      password: ${XIAOZHI_SHARED_DB_PASSWORD}
+      initial-size: 1
+      min-idle: 1
+      max-active: 4
+      max-wait: 3000
+      validation-query: SELECT 1
+      test-on-borrow: true
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 18979
+
+features:
+  conversation-enabled: true
+  support-handoff-enabled: true
+
+xiaozhi:
+  archive:
+    enabled: false

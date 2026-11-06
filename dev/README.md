@@ -28,6 +28,62 @@ python3 dev/manage.py stop
 
 首次开发环境已经通过只读快照复制本机智控台数据，登录账号/密码沿用原智控台。Dev 的登录 Token 单独签发。后续测试写入只落在独立的 Dev 数据库，不同步回原服务。
 
+### 与云端测试环境共用 MySQL
+
+`shared-test` 配置让本机 Java API 通过 ECS 私网隧道连接云端测试库 `dbesp32server`。角色、设备、会话等持久化记录共用，写入直接落到同一个库。普通 `dev/manage.py up` 仍使用本机独立库。需要 JDK 21、Maven、Node/npm、Redis 和 Docker。
+
+1. 让团队管理员为每位开发者提供该 ECS 的会话管理权限和测试库账号，通过团队的私密渠道交付凭据。Docker 启动后，在仓库根目录运行：
+
+   ```bash
+   bash dev/shared-test-tunnel.sh configure
+   bash dev/shared-test-tunnel.sh start
+   docker logs --tail 10 xiaozhi-shared-test-tunnel
+   ```
+
+   按提示输入个人 RAM 凭据，地域填 `cn-shanghai`。出现 `Waiting for connections` 后，MySQL 隧道可从本机 `127.0.0.1:13306` 使用。端口仅映射到本机回环地址。[阿里云会话管理端口转发](https://help.aliyun.com/zh/ecs/user-guide/perform-port-forwarding-by-using-ali-instance-cli)
+
+2. 将数据库凭据填入私有配置。下面的占位值换成实际测试库账号和密码，等号后直接填值。
+
+   ```bash
+   umask 077
+   mkdir -p dev/.runtime/shared-test
+   ```
+
+   文件 `dev/.runtime/shared-test/database.properties`
+
+   ```properties
+   XIAOZHI_SHARED_DB_USER=填测试库账号
+   XIAOZHI_SHARED_DB_PASSWORD=填测试库密码
+   ```
+
+   执行 `chmod 600 dev/.runtime/shared-test/database.properties`。数据库与云账号凭据都位于 Git 忽略的 `dev/.runtime/`，分别配置，勿转发整个目录。
+
+3. 在仓库根目录分别打开终端，先启动独立 Redis，再启动本地后端和前端。
+
+   ```bash
+   redis-server --bind 127.0.0.1 --port 18979 --save "" --appendonly no
+   ```
+
+   ```bash
+   mvn -B -DskipTests -f main/manager-api/pom.xml package
+   (
+     cd dev/.runtime/shared-test
+     java -Duser.timezone=Asia/Shanghai -jar ../../../main/manager-api/target/xiaozhi-esp32-api.jar \
+       --spring.profiles.active=dev,shared-test \
+       --spring.config.additional-location=file:./database.properties
+   )
+   ```
+
+   ```bash
+   npm ci --prefix main/manager-web
+   API_PROXY_TARGET=http://127.0.0.1:18993 VITE_API_BASE_URL=/xiaozhi VITE_ENV_LABEL=云端测试联调 \
+     npm run dev --prefix main/manager-web -- --host 127.0.0.1 --port 18994 --strictPort
+   ```
+
+4. 打开 <http://127.0.0.1:18994/>，用自己的云端测试账号登录。同一个应用账号在两端注销或刷新令牌时会互相影响。结束联调时在各终端按 Ctrl+C，运行 `bash dev/shared-test-tunnel.sh stop` 停止隧道。
+
+重编 Java 前先停止当前联调后端，再重新执行构建和启动命令。此配置关闭 Liquibase、启动初始化和后台定时任务。新分支依赖的表结构应先在独立 Dev 库验证，再统一迁移云端测试库。Redis、实时任务、附件文件和设备连接仍由各环境分别管理。跨端查询以数据库记录为准，云端 Redis 缓存和已有实时连接可能要等到刷新。
+
 若在另一台已有本机智控台的电脑首次创建 Dev 环境，可执行一次：
 
 ```sh

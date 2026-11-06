@@ -1,6 +1,7 @@
 package xiaozhi.modules.knowledge.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -8,6 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * 启用 Spring Schedule 能力
  */
 @Configuration
+@Profile("!shared-test")
 @EnableScheduling
 public class RAGTaskConfig {
 }

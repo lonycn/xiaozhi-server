@@ -3,6 +3,7 @@ package xiaozhi.modules.agent.service.impl;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.SmartInitializingSingleton;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -12,6 +13,7 @@ import xiaozhi.modules.agent.service.AgentSnapshotService;
 
 @Slf4j
 @Component
+@Profile("!shared-test")
 @RequiredArgsConstructor
 public class AgentSnapshotRedactionRunner implements SmartInitializingSingleton {
     static final long ROLLING_DEPLOYMENT_INITIAL_DELAY_MILLIS = 5_000;
